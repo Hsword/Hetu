@@ -3,4 +3,4 @@
 	url = https://github.com/nox-410/GraphMix.git
 [submodule "third_party/HetuML"]
 	path = third_party/HetuML
-	url = https://github.com/ccchengff/HetuML
+	url = https://github.com/ccchengff/HetuML.git
