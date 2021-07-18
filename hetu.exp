@@ -1,0 +1,5 @@
+#!/bin/bash
+path="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+echo "Hetu root is" $path
+export PATH="$path/bin:$PATH"
+export PYTHONPATH="$path/python:$path/build/lib:$path/third_party/GraphMix/python:$PYTHONPATH:$path/third_party/HetuML/hetuml/python"

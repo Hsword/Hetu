@@ -1,0 +1,6 @@
+[submodule "third_party/GraphMix"]
+	path = third_party/GraphMix
+	url = https://github.com/nox-410/GraphMix.git
+[submodule "third_party/HetuML"]
+	path = third_party/HetuML
+	url = https://github.com/ccchengff/HetuML

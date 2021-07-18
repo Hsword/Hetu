@@ -1,0 +1,295 @@
+from hetu.gpu_ops import Variable
+from hetu import cpu_links as cpu_op
+from hetu import gpu_links as gpu_op
+from hetu import ndarray
+import numpy as np
+import ctypes
+
+
+class BaseInit(object):
+    def __init__(self, shape):
+        self.shape = tuple(shape)
+
+    def __call__(self, node, seed, np_rand=None, stream=None):
+        self.node = node
+        self.seed = seed + node.id
+        node.tensor_value = ndarray.empty(self.shape, ctx=node.ctx)
+        if ndarray.is_gpu_ctx(node.ctx):
+            self.init_on_gpu(stream)
+        else:
+            self.init_on_cpu(np_rand)
+
+    def init_on_gpu(self, stream):
+        raise NotImplementedError
+
+    def init_on_cpu(self, np_rand):
+        raise NotImplementedError
+
+    def init_on_ps(self, comm, nid, param_type, init_type, arg1, arg2, seed, opt):
+        # param types: Dense 0, Sparse 1, CacheSparse 2
+        if param_type == 0:
+            length = np.prod(self.shape)
+            width = 1
+        else:
+            assert len(self.shape) == 2
+            length = self.shape[0]
+            width = self.shape[1]
+        comm.InitTensor(nid, ctypes.c_int(param_type), ctypes.c_int(length), ctypes.c_int(width),
+                        ctypes.c_int(init_type), ctypes.c_double(arg1), ctypes.c_double(arg2), ctypes.c_ulonglong(seed), opt[0], opt[1], opt[2])
+
+
+class ConstantInit(BaseInit):
+    def __init__(self, constant, shape):
+        super().__init__(shape)
+        self.constant = constant
+
+    def init_on_gpu(self, stream):
+        gpu_op.array_set(self.node.tensor_value, self.constant, stream)
+
+    def init_on_cpu(self, np_rand):
+        from ._base import DNNL_LIB
+        if DNNL_LIB['cpu_ArraySet']:
+            cpu_op.array_set(self.node.tensor_value, self.constant)
+        else:
+            self.node.tensor_value[:] = np.full(
+                self.shape, self.constant).astype(np.float32)
+
+    def init_on_ps(self, comm, nid, param_type, seed, opt):
+        super().init_on_ps(comm, nid, param_type, 0, self.constant, 1.0, seed, opt)
+
+
+class ZerosInit(ConstantInit):
+    def __init__(self, shape):
+        super().__init__(0.0, shape)
+
+
+class OnesInit(ConstantInit):
+    def __init__(self, shape):
+        super().__init__(1.0, shape)
+
+
+class UniformInit(BaseInit):
+    def __init__(self, low, high, shape):
+        super().__init__(shape)
+        self.low = low
+        self.high = high
+
+    def init_on_gpu(self, stream):
+        gpu_op.uniform_init(self.node.tensor_value, self.low,
+                            self.high, self.seed, stream)
+
+    def init_on_cpu(self, np_rand):
+        from ._base import DNNL_LIB
+        if DNNL_LIB['cpu_UniformInit']:
+            cpu_op.uniform_init(self.node.tensor_value,
+                                self.low, self.high, self.seed)
+        else:
+            self.node.tensor_value[:] = np_rand.uniform(
+                low=self.low, high=self.high, size=self.shape).astype(np.float32)
+
+    def init_on_ps(self, comm, nid, param_type, seed, opt):
+        super().init_on_ps(comm, nid, param_type, 1, self.low, self.high, seed, opt)
+
+
+class GeneralizedXavierUniformInit(UniformInit):
+    def __init__(self, gain, mode, shape):
+        assert mode in ('fan_in', 'fan_out',
+                        'avg'), 'Mode %s not valid.' % mode
+        assert gain > 0, 'Gain value %s not valid.' % str(gain)
+        assert len(
+            shape) >= 2, 'Generalized xavier requires shape to be at least 2D.'
+        hw_scale = 1 if len(shape) == 2 else np.prod(shape[2:])
+        fan_in = hw_scale * shape[1]
+        fan_out = hw_scale * shape[0]
+        if mode == 'fan_in':
+            factor = fan_in
+        elif mode == 'fan_out':
+            factor = fan_out
+        else:
+            factor = (fan_in + fan_out) / 2.0
+        limit = np.sqrt(gain / factor)
+        super().__init__(-limit, limit, shape)
+
+
+class XavierUniformInit(GeneralizedXavierUniformInit):
+    def __init__(self, shape):
+        super().__init__(3.0, 'avg', shape)
+
+
+class HeUniformInit(GeneralizedXavierUniformInit):
+    def __init__(self, shape):
+        super().__init__(6.0, 'fan_in', shape)
+
+
+class LecunUniformInit(GeneralizedXavierUniformInit):
+    def __init__(self, shape):
+        super().__init__(3.0, 'fan_in', shape)
+
+
+class NormalInit(BaseInit):
+    def __init__(self, mean, stddev, shape):
+        super().__init__(shape)
+        self.mean = mean
+        self.stddev = stddev
+
+    def init_on_gpu(self, stream):
+        gpu_op.normal_init(self.node.tensor_value, self.mean,
+                           self.stddev, self.seed, stream)
+
+    def init_on_cpu(self, np_rand):
+        from ._base import DNNL_LIB
+        if DNNL_LIB['cpu_NormalInit']:
+            cpu_op.normal_init(self.node.tensor_value,
+                               self.mean, self.stddev, self.seed)
+        else:
+            self.node.tensor_value[:] = np_rand.normal(
+                loc=self.mean, scale=self.stddev, size=self.shape).astype(np.float32)
+
+    def init_on_ps(self, comm, nid, param_type, seed, opt):
+        super().init_on_ps(comm, nid, param_type, 2, self.mean, self.stddev, seed, opt)
+
+
+class GeneralizedXavierNormalInit(NormalInit):
+    def __init__(self, gain, mode, shape):
+        assert mode in ('fan_in', 'fan_out', 'avg'), 'Mode not allowed.'
+        assert gain > 0, 'Gain value not allowed.'
+        assert len(
+            shape) >= 2, 'Generalized xavier requires shape to be at least 2D.'
+        hw_scale = 1 if len(shape) == 2 else np.prod(shape[2:])
+        fan_in = hw_scale * shape[1]
+        fan_out = hw_scale * shape[0]
+        if mode == 'fan_in':
+            factor = fan_in
+        elif mode == 'fan_out':
+            factor = fan_out
+        else:
+            factor = (fan_in + fan_out) / 2.0
+        scale = np.sqrt(gain / factor)
+        super().__init__(0, scale, shape)
+
+
+class XavierNormalInit(GeneralizedXavierNormalInit):
+    def __init__(self, shape):
+        super().__init__(1.0, 'avg', shape)
+
+
+class HeNormalInit(GeneralizedXavierNormalInit):
+    def __init__(self, shape):
+        super().__init__(2.0, 'fan_in', shape)
+
+
+class LecunNormalInit(GeneralizedXavierNormalInit):
+    def __init__(self, shape):
+        super().__init__(1.0, 'fan_in', shape)
+
+
+class TruncatedNormalInit(BaseInit):
+    def __init__(self, mean, stddev, shape):
+        super().__init__(shape)
+        self.mean = mean
+        self.stddev = stddev
+
+    def init_on_gpu(self, stream):
+        gpu_op.truncated_normal_init(
+            self.node.tensor_value, self.mean, self.stddev, self.seed, stream)
+
+    def init_on_cpu(self, np_rand):
+        from ._base import DNNL_LIB
+        if DNNL_LIB['cpu_TruncatedNormalInit']:
+            cpu_op.truncated_normal_init(
+                self.node.tensor_value, self.mean, self.stddev, self.seed)
+        else:
+            # this function cannot use np_rand
+            from scipy.stats import truncnorm
+            self.node.tensor_value[:] = truncnorm(
+                -2.0, 2.0, loc=self.mean, scale=self.stddev).rvs(self.shape).astype(np.float32)
+
+    def init_on_ps(self, comm, nid, param_type, seed, opt):
+        super().init_on_ps(comm, nid, param_type, 3, self.mean, self.stddev, seed, opt)
+
+
+# here we provide easy APIs
+
+
+def zeros(shape, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'zeros_initializer'
+    init = ZerosInit(shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
+
+def ones(shape, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'ones_initializer'
+    init = OnesInit(shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
+
+def constant(shape, fill_value=0.0, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'constant_initializer'
+    init = ConstantInit(fill_value, shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
+
+def truncated_normal(shape, mean=0.0, stddev=1.0, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'truncated_normal_initializer'
+    init = TruncatedNormalInit(mean, stddev, shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
+
+def random_normal(shape, mean=0.0, stddev=1.0, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'random_normal_initializer'
+    init = NormalInit(mean, stddev, shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
+
+def random_uniform(shape, minval=-1.0, maxval=1.0, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'random_uniform_initializer'
+    init = UniformInit(minval, maxval, shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
+
+def xavier_normal(shape, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'xavier_normal_initializer'
+    init = XavierNormalInit(shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
+
+def xavier_uniform(shape, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'xavier_uniform_initializer'
+    init = XavierUniformInit(shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
+
+def he_normal(shape, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'he_normal_initializer'
+    init = HeNormalInit(shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
+
+def he_uniform(shape, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'he_uniform_initializer'
+    init = HeUniformInit(shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
+
+def lecun_normal(shape, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'lecun_normal_initializer'
+    init = LecunNormalInit(shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
+
+def lecun_uniform(shape, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'lecun_uniform_initializer'
+    init = LecunUniformInit(shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)

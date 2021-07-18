@@ -1,0 +1,27 @@
+shared: &shared
+  DMLC_PS_ROOT_URI : 127.0.0.1
+  DMLC_PS_ROOT_PORT : 13200
+  DMLC_NUM_WORKER : 1
+  DMLC_NUM_SERVER : 2
+  DMLC_PS_VAN_TYPE : p3
+sched:
+  <<: *shared
+  DMLC_ROLE : scheduler
+s0:
+  <<: *shared
+  DMLC_ROLE : server
+  SERVER_ID : 0
+  DMLC_PS_SERVER_URI : 127.0.0.1
+  DMLC_PS_SERVER_PORT : 13201
+s1:
+  <<: *shared
+  DMLC_ROLE : server
+  SERVER_ID : 1
+  DMLC_PS_SERVER_URI : 127.0.0.1
+  DMLC_PS_SERVER_PORT : 13203
+w0:
+  <<: *shared
+  DMLC_ROLE : worker
+  WORKER_ID : 0
+  DMLC_PS_WORKER_URI : 127.0.0.1
+  DMLC_PS_WORKER_PORT : 13210

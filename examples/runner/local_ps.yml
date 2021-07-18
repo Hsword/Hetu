@@ -1,0 +1,5 @@
+nodes:
+  - host: localhost
+    servers: 1
+    workers: 4
+    chief: true
