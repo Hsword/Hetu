@@ -1,6 +1,10 @@
+<div align=center>
+<img src="./img/hetu.png" width="300" />
+</div>
+
 # HETU
 
-[![license](https://img.shields.io/github/license/apache/zookeeper?color=282661)](LICENSE)
+<!--- [![license](https://img.shields.io/github/license/apache/zookeeper?color=282661)](LICENSE) --->
 
 [Documentation](https://hetu-doc.readthedocs.io) |
 [Examples](https://hetu-doc.readthedocs.io/en/latest/Overview/performance.html)
@@ -98,17 +102,24 @@ Please refer to examples directory, which contains CNN, NLP, CTR, GNN training s
 
 ## Enterprise Users
 
-<img src="https://github.com/Hsword/Athena/raw/master/img/tencent.png" width = "200"/>
-<img src="https://github.com/Hsword/Athena/raw/master/img/alibabacloud.png" width = "200"/>
+If you are enterprise users and find Hetu is useful in your work, please let us know, and we are glad to add your company logo here.
+
+<img src="./img/tencent.png" width = "200"/>
+<img src="./img/alibabacloud.png" width = "200"/>
+<img src="./img/kuaishou.png" width = "200"/>
 
 ## License
 
-The entire codebase is under [Apache-2.0 license](LICENSE)
+The entire codebase is under [license](LICENSE)
 
 ## Papers
   1. Xupeng Miao, Linxiao Ma, Zhi Yang, Yingxia Shao, Bin Cui, Lele Yu, Jiawei Jiang. [CuWide: Towards Efficient Flow-based Training for Sparse Wide Models on GPUs.](https://ieeexplore.ieee.org/document/9261124). TKDE 2021, ICDE 2021
   2. Xupeng Miao, Xiaonan Nie, Yingxia Shao, Zhi Yang, Jiawei Jiang, Lingxiao Ma, Bin Cui. [Heterogeneity-Aware Distributed Machine Learning Training via Partial Reduce](https://doi.org/10.1145/3448016.3452773) SIGMOD 2021
   3. coming soon
+
+## Acknowledgements
+
+We learned and borrowed insights from a few open source projects including [TinyFlow](https://github.com/tqchen/tinyflow), [autodist](https://github.com/petuum/autodist), [tf.distribute](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/python/distribute) and [Angel](https://github.com/Angel-ML/angel).
 
 ## Appendix
 The prerequisites for different modules in Hetu is listed as follows:

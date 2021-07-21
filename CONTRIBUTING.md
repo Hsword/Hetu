@@ -46,8 +46,8 @@ Before submitting a pull request, please make sure the followings are done:
 6. Now, you can submit your pull request on  `specific version` branch.
 
 ## Code Style Guide
-Use [Code Style](https://google.github.io/styleguide) for Python and C++.
+Use [Code Style](./.clang-format) for Python and C++.
 
 ## License
 By contributing to Hetu, you agree that your contributions will be licensed
-under its [ Apache License, Version 2.0](LICENSE)
+under [License](LICENSE)
