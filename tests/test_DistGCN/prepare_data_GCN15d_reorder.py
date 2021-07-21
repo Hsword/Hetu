@@ -13,7 +13,7 @@ import pickle as pkl
 import time
 
 '''
-Usage example: (in Dir Athena-main/)
+Usage example: (in Dir Hetu/)
     python ./tests/test_DistGCN/prepare_data_GCN15d_reorder.py --size 8 --replication 2 --dataset Reddit  --reorder_alg metis
 '''
 

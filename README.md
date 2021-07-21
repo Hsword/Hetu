@@ -21,7 +21,7 @@ Hetu is a high-performance distributed deep learning system targeting trillions 
 
 - Agility. Automatically ML pipeline: feature engineering, model selection, hyperparameter search.
 
-We welcome everyone interested in machine learning or graph computing to contribute codes, create issues or pull requests. Please refer to [Contribution Guide](CONTRIBUTING) for more details.
+We welcome everyone interested in machine learning or graph computing to contribute codes, create issues or pull requests. Please refer to [Contribution Guide](CONTRIBUTING.md) for more details.
 
 ## Installation
 1. Clone the repository.

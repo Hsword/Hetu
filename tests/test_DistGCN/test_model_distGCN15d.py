@@ -7,7 +7,7 @@ import time
 import argparse
 
 '''
-Usage example: (in Dir Athena-main/)
+Usage example: (in Dir Hetu/)
     Original graph data:
         Single GPU:
             mpirun -quiet --allow-run-as-root -np 1 python tests/test_DistGCN/test_model_distGCN15d.py --replication 1 --dataset Reddit
