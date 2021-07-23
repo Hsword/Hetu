@@ -85,8 +85,7 @@ class DeviceGroup(object):
 
     def __hash__(self):
         if not hasattr(self, 'hash'):
-            self.hash = hash(
-                tuple(sorted(self._contexts, key=lambda x: x.device_id)))
+            self.hash = hash(tuple(self._contexts))
         return self.hash
 
     def __eq__(self, other):
@@ -180,6 +179,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
     from .gpu_ops.Concat import concat_op
     from .gpu_ops.Split import split_op
     from .gpu_ops.AddElewise import add_op
+    from .gpu_ops.executor import new_group_comm
 
     def receive_model_parallel(prev_input, node):
         # assert dp_index_map[prev_input] < 0 and dp_index_map[node] >= 0
@@ -290,15 +290,21 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
             original_params = node.optimizer.params
             for ind, param in enumerate(original_params):
                 ori_grad = node.inputs[ind]
-                if param in trainable_params:
-                    new_grad = receive_model_parallel(ori_grad.inputs[0], param) if isinstance(
-                        ori_grad, (DispatchOp, DispatchGradientOp)) else ori_grad
-                    grads.append(new_grad)
-                elif isinstance(ori_grad, (DispatchOp, DispatchGradientOp)):
-                    real_input = ori_grad.inputs[0]
-                    my_pos = dp_index_map[real_input]
-                    if my_pos >= 0:
-                        send_model_parallel(ori_grad.inputs[0], param)
+                if mp_index_map.get(param, -1) >= 0:
+                    # consider the situation that parameter is on model parallel devices
+                    real_grad = ori_grad.inputs[0]
+                    assert real_grad.raw_ctx == param.raw_ctx
+                    grads.append(real_grad)
+                else:
+                    if param in trainable_params:
+                        new_grad = receive_model_parallel(ori_grad.inputs[0], param) if isinstance(
+                            ori_grad, (DispatchOp, DispatchGradientOp)) else ori_grad
+                        grads.append(new_grad)
+                    elif isinstance(ori_grad, (DispatchOp, DispatchGradientOp)):
+                        real_input = ori_grad.inputs[0]
+                        my_pos = dp_index_map[real_input]
+                        if my_pos >= 0:
+                            send_model_parallel(ori_grad.inputs[0], param)
             if trainable_params:
                 # indices = [original_params.index(param) for param in trainable_params]
                 node.optimizer.params = trainable_params
@@ -306,15 +312,41 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 node.inputs = grads
                 node.ctx = ctx
                 my_eval_nodes.append(node)
+                for param in trainable_params:
+                    # here handle the nodes that need allreduce
+                    if param.raw_ctx.server_num == 0:
+                        allreduce_devices = None
+                        if mp_index_map[param] < 0 and param.raw_ctx.worker_num > 1:
+                            allreduce_devices = param.raw_ctx
+                        elif mp_index_map[param] >= 0:
+                            allreduce_devices = []
+                            num_device_per_worker = len(
+                                param.raw_ctx[dp_index_map[param]])
+                            interval = num_device_per_worker // node_tar_duplicate_map[param]
+                            for rc in range(param.raw_ctx.worker_num):
+                                for ind in range(mp_index_map[param] % interval, num_device_per_worker, interval):
+                                    allreduce_devices.append(
+                                        param.raw_ctx[rc][ind])
+                            allreduce_devices = None if len(
+                                allreduce_devices) <= 1 else DeviceGroup(allreduce_devices)
+                        if allreduce_devices is not None:
+                            if allreduce_devices not in comm_groups:
+                                comm_groups[allreduce_devices] = new_group_comm(
+                                    allreduce_devices)
+                            param_allreduce_group[param] = comm_groups[allreduce_devices]
         elif isinstance(node, DispatchOp):
             real_node = node.inputs[0]
             assign_ctx(real_node)
+            if isinstance(real_node, PlaceholderOp) and mp_index_map[real_node] >= 0:
+                real_node.reshape_in_mp(mp_index_map[real_node], node.parts)
             node_tar_states_map[real_node] = node.parts
             node_tar_duplicate_map[real_node] = node.duplicate
         elif isinstance(node, DispatchGradientOp):
             real_node = node.inputs[0]
             assign_ctx(real_node)
             assign_ctx(node.inputs[1])
+            if isinstance(real_node, PlaceholderOp) and mp_index_map[real_node] >= 0:
+                real_node.reshape_in_mp(mp_index_map[real_node], node.parts)
             node_tar_states_map[real_node] = node_cur_states_map.get(
                 node.inputs[1], None)
             node_tar_duplicate_map[real_node] = node_cur_duplicate_map.get(
@@ -364,6 +396,11 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                             real_input, node)
                     elif dp_index < 0 and dp_index_map[real_input] >= 0:
                         send_model_parallel(real_input, node)
+                    elif dp_index >= 0 and dp_index_map[real_input] >= 0:
+                        # now only allow initialized variables
+                        assert real_input.raw_ctx == node.raw_ctx
+                        assert isinstance(real_input, PlaceholderOp)
+                        node.inputs[i] = real_input
                 else:
                     assert mp_index < 0 and mp_index_map[n] < 0
                     # handle receiving
@@ -409,6 +446,8 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
 
     opt = None
     trainable_params = []
+    comm_groups = {}
+    param_allreduce_group = {}
     send_dst = {}
     recv_src = {}
     mp_index_map = {}  # model parallel index
@@ -421,5 +460,4 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
     for node in node_list:
         assign_ctx(node)
 
-    has_send_recv = send_dst != {} or recv_src != {}
-    return my_eval_nodes, trainable_params, has_send_recv
+    return my_eval_nodes, param_allreduce_group

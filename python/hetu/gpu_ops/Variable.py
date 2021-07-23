@@ -78,6 +78,29 @@ class PlaceholderOp(Op):
         self.on_gpu = ndarray.is_gpu_ctx(self.ctx)
         self.on_cpu = not self.on_gpu
 
+    def reshape_in_mp(self, mp_index, parts):
+        # this function only used in context launch to enable variable initialized in model parallel
+        ori_shape = list(self.shape)
+        for i, pts in enumerate(parts):
+            assert ori_shape[i] % pts == 0
+            ori_shape[i] //= pts
+        self.shape = tuple(ori_shape)
+        if self.initializer is not None:
+            self.initializer.shape = self.shape
+        elif self.tensor_value is not None:
+            slcs = []
+            for psize, pts in zip(ori_shape[::-1], parts[::-1]):
+                st = (mp_index % pts) * psize
+                en = st + psize
+                slcs.insert(0, slice(st, en))
+                mp_index //= pts
+            ori_value = self.tensor_value
+            if not isinstance(ori_value, np.ndarray):
+                ori_value = ori_value.asnumpy()
+            ori_value = ori_value[tuple(slcs)]
+            assert ori_value.shape == self.shape
+            self.tensor_value = ori_value
+
 
 def placeholder_op(name, value=None, initializer=None, trainable=True, dtype=np.float32, ctx=None):
     """Node of variable placeholder.
