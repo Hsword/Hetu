@@ -52,6 +52,16 @@ class ReluGradientOp(Op):
         assert len(input_shapes) == 2
         return input_shapes[0]
 
+    def deduce_states(self, input_states, input_duplicates):
+        assert input_duplicates[0] in (
+            1, None) and input_duplicates[1] in (1, None)
+        if input_states[0] is None:
+            input_states[0] = input_states[1]
+        elif input_states[1] is None:
+            input_states[1] = input_states[0]
+        assert input_states[0] == input_states[1]
+        return input_states[0], input_duplicates[0]
+
 
 def relu_op(node, ctx=None):
     """Rectified Linear Unit.

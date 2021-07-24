@@ -356,15 +356,17 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
             # and 1 context can only appear once
             mp_index = -1
             dp_index = -1
+            need_states_deduction = False
             for i, c in enumerate(node.raw_ctx.workers):
-                if isinstance(c, tuple) and ctx in c:
-                    mp_index = c.index(ctx)
-                    dp_index = i
+                if isinstance(c, tuple):
+                    need_states_deduction = True
+                    if ctx in c:
+                        mp_index = c.index(ctx)
+                        dp_index = i
                 elif ctx == c:
                     dp_index = i
             mp_index_map[node] = mp_index
             dp_index_map[node] = dp_index
-            need_states_deduction = False
             for i, n in enumerate(node.inputs):
                 if isinstance(n, DataloaderOp):
                     if dp_index >= 0 and n in node_list and n not in my_eval_nodes:
@@ -402,26 +404,31 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                         assert isinstance(real_input, PlaceholderOp)
                         node.inputs[i] = real_input
                 else:
-                    assert mp_index < 0 and mp_index_map[n] < 0
-                    # handle receiving
-                    if dp_index >= 0 and dp_index != dp_index_map[n]:
-                        my_pos = dp_index
-                        hostname = n.raw_ctx.workers[my_pos].hostname
-                        target_id = n.raw_ctx.workers[my_pos].device_id
-                        if n not in recv_src:
-                            recv_src[n] = pipeline_receive_op(mpi_comm.getRankFromDevice(
-                                hostname, target_id), mpi_comm, stream=p2p_stream, ctx=ctx)
-                        node.inputs[i] = recv_src[n]
-                    # handle sending
-                    if dp_index_map[n] >= 0 and dp_index != dp_index_map[n]:
-                        my_pos = dp_index_map[n]
-                        hostname = node.raw_ctx.workers[my_pos].hostname
-                        target_id = node.raw_ctx.workers[my_pos].device_id
-                        key = (n, target_id)
-                        if key not in send_dst:
-                            send_dst[key] = pipeline_send_op(n, mpi_comm.getRankFromDevice(
-                                hostname, target_id), mpi_comm, stream=p2p_stream, ctx=ctx)
-                            my_eval_nodes.append(send_dst[key])
+                    assert mp_index == mp_index_map[n]
+                    if mp_index < 0:
+                        # handle receiving
+                        if dp_index >= 0 and dp_index != dp_index_map[n]:
+                            my_pos = dp_index
+                            hostname = n.raw_ctx.workers[my_pos].hostname
+                            target_id = n.raw_ctx.workers[my_pos].device_id
+                            if n not in recv_src:
+                                recv_src[n] = pipeline_receive_op(mpi_comm.getRankFromDevice(
+                                    hostname, target_id), mpi_comm, stream=p2p_stream, ctx=ctx)
+                            node.inputs[i] = recv_src[n]
+                        # handle sending
+                        if dp_index_map[n] >= 0 and dp_index != dp_index_map[n]:
+                            my_pos = dp_index_map[n]
+                            hostname = node.raw_ctx.workers[my_pos].hostname
+                            target_id = node.raw_ctx.workers[my_pos].device_id
+                            key = (n, target_id)
+                            if key not in send_dst:
+                                send_dst[key] = pipeline_send_op(n, mpi_comm.getRankFromDevice(
+                                    hostname, target_id), mpi_comm, stream=p2p_stream, ctx=ctx)
+                                my_eval_nodes.append(send_dst[key])
+                    else:
+                        # here in the same model parallel
+                        assert node.raw_ctx == n.raw_ctx
+                        assert need_states_deduction
 
             if dp_index >= 0:
                 node.ctx = ctx
