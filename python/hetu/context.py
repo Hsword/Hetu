@@ -1,6 +1,7 @@
 from .ndarray import cpu, gpu, rcpu, rgpu, DLContext, is_gpu_ctx
 import contextlib
 import re
+import numpy as np
 
 
 class DeviceGroup(object):
@@ -184,7 +185,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
     def receive_model_parallel(prev_input, node):
         # assert dp_index_map[prev_input] < 0 and dp_index_map[node] >= 0
         dev_pos = dp_index_map[node]
-        if isinstance(node.raw_ctx.workers[dev_pos], tuple):
+        if not isinstance(prev_input.raw_ctx.workers[dev_pos], tuple):
             # here we receive from a node on one device dispatching to many
             # in this case current node MUST have mp_index, and the split will be handled in sending
             assert mp_index_map[node] >= 0, 'Now only support 1 to N.'
@@ -194,7 +195,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 recv_src[prev_input] = pipeline_receive_op(mpi_comm.getRankFromDevice(
                     hostname, target_id), mpi_comm, stream=p2p_stream, ctx=ctx)
             return recv_src[prev_input]
-        else:
+        elif not isinstance(node.raw_ctx.workers[dev_pos], tuple):
             # here we receive from a node on multiple devices
             # in this case current node MUST NOT have mp_index, and handle the combination
             target = node_tar_states_map[prev_input]
@@ -223,6 +224,8 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                     1 == len(prev_input.raw_ctx.workers[dev_pos])
                 recv_src[prev_input] = res
             return recv_src[prev_input]
+        else:
+            pass
 
     def send_model_parallel(prev_input, node):
         # assert dp_index_map[prev_input] >= 0 and dp_index_map[node] < 0
@@ -236,30 +239,37 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
             def make_split(devices, target_states, cur_states, depth):
                 if len(target_states) == depth:
                     nonlocal device_index
+                    nonlocal loop_size
                     hostname = devices[device_index].hostname
                     target_id = devices[device_index].device_id
-                    device_index += 1
                     key = (prev_input, target_id)
                     if key not in send_dst:
                         cur_node = prev_input if all([x == 1 for x in target_states]) else split_op(
                             prev_input, list(range(len(target_states))), list(cur_states), list(target_states), ctx=ctx)
-                        target_rank = mpi_comm.getRankFromDevice(
-                            hostname, target_id)
-                        send_dst[key] = pipeline_send_op(
-                            cur_node, target_rank, mpi_comm, stream=p2p_stream, ctx=ctx)
-                        my_eval_nodes.append(send_dst[key])
+                        for cur_dev_id in range(device_index, len(devices), loop_size):
+                            hostname = devices[cur_dev_id].hostname
+                            target_id = devices[cur_dev_id].device_id
+                            target_rank = mpi_comm.getRankFromDevice(
+                                hostname, target_id)
+                            key = (prev_input, target_id)
+                            send_dst[key] = pipeline_send_op(
+                                cur_node, target_rank, mpi_comm, stream=p2p_stream, ctx=ctx)
+                            my_eval_nodes.append(send_dst[key])
+                    device_index += 1
                 else:
                     for ts in range(target_states[depth]):
                         cur_states[depth] = ts
                         make_split(devices, target_states,
                                    cur_states, depth + 1)
-            for _ in range(node_tar_duplicate_map.get(prev_input, 1)):
-                cur_states = [0 for _ in range(
-                    len(node_tar_states_map[prev_input]))]
-                make_split(
-                    node.raw_ctx.workers[dev_pos], node_tar_states_map[prev_input], cur_states, 0)
-            assert device_index == len(node.raw_ctx.workers[dev_pos])
-        else:
+            cur_states = [0 for _ in range(
+                len(node_tar_states_map[prev_input]))]
+            loop_size = np.prod(node_tar_states_map[prev_input])
+            make_split(
+                node.raw_ctx.workers[dev_pos], node_tar_states_map[prev_input], cur_states, 0)
+            assert device_index * \
+                node_tar_duplicate_map.get(prev_input, 1) == len(
+                    node.raw_ctx.workers[dev_pos])
+        elif not isinstance(node.raw_ctx.workers[dev_pos], tuple):
             # here we send from a node on multiple devices to one node
             # in this case current node MUST NOT have mp_index, and the combination will be handled in receiving
             target = node_tar_states_map[prev_input]
@@ -272,6 +282,8 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 send_dst[key] = pipeline_send_op(prev_input, mpi_comm.getRankFromDevice(
                     hostname, target_id), mpi_comm, stream=p2p_stream, ctx=ctx)
                 my_eval_nodes.append(send_dst[key])
+        else:
+            pass
 
     def assign_ctx(node):
         if node in dp_index_map:
