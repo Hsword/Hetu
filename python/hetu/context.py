@@ -188,7 +188,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
         if not isinstance(prev_input.raw_ctx.workers[dev_pos], tuple):
             # here we receive from a node on one device dispatching to many
             # in this case current node MUST have mp_index, and the split will be handled in sending
-            assert mp_index_map[node] >= 0, 'Now only support 1 to N.'
+            assert mp_index_map[node] >= 0, 'Here only support 1 to N.'
             hostname = prev_input.raw_ctx.workers[dev_pos].hostname
             target_id = prev_input.raw_ctx.workers[dev_pos].device_id
             if prev_input not in recv_src:
@@ -200,7 +200,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
             # in this case current node MUST NOT have mp_index, and handle the combination
             target = node_tar_states_map[prev_input]
             assert mp_index_map[node] < 0 and (target is None or all(
-                [ts == 1 for ts in target])), 'Now only support N to 1.'
+                [ts == 1 for ts in target])), 'Here only support N to 1.'
             if prev_input not in recv_src:
                 device_index = -1
 
@@ -225,7 +225,68 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 recv_src[prev_input] = res
             return recv_src[prev_input]
         else:
-            pass
+            # here the prev input and the node are both in model parallel, with different states
+            assert mp_index_map[node] >= 0, 'Here only support N to N.'
+            if prev_input not in recv_src:
+                prev_states = node_cur_states_map[prev_input]
+                prev_duplicate = node_cur_duplicate_map[prev_input]
+                target_states = node_tar_states_map[prev_input]
+                target_duplicate = node_tar_duplicate_map[prev_input]
+                loop_size = np.prod(target_states, dtype=int)
+                assert np.prod(prev_states, dtype=int) * \
+                    prev_duplicate == len(prev_input.raw_ctx[dev_pos])
+                assert loop_size * \
+                    target_duplicate == len(node.raw_ctx[dev_pos])
+                temp_index = mp_index_map[node] % loop_size
+                cur_states_index = [0 for _ in range(len(target_states))]
+                for i in range(len(cur_states_index))[::-1]:
+                    cur_states_index[i] = temp_index % target_states[i]
+                    temp_index //= target_states[i]
+                device_index = 0
+
+                def cross_receive(devices, depth):
+                    nonlocal device_index
+                    if depth == len(cur_states_index):
+                        res = pipeline_receive_op(mpi_comm.getRankFromDevice(
+                            devices[device_index].hostname, devices[device_index].device_id), mpi_comm, stream=p2p_stream, ctx=ctx)
+                        device_index += 1
+                        return res
+                    else:
+                        if prev_states[depth] % target_states[depth] == 0:
+                            # at `depth` dimension we need to concat some inputs
+                            multiple = prev_states[depth] // \
+                                target_states[depth]
+                            later_on = np.prod(
+                                prev_states[depth+1:], dtype=int)
+                            device_index += cur_states_index[depth] * \
+                                multiple * later_on
+                            res = cross_receive(devices, depth+1)
+                            for _ in range(1, multiple):
+                                res = concat_op(
+                                    res, cross_receive(devices, depth+1), axis=depth, ctx=ctx)
+                            device_index += (target_states[depth] - 1 -
+                                             cur_states_index[depth]) * multiple * later_on
+                            return res
+                        elif target_states[depth] % prev_states[depth] == 0:
+                            # at `depth` dimension we need to specify one input
+                            multiple = target_states[depth] // prev_states[depth]
+                            later_on = np.prod(
+                                prev_states[depth+1:], dtype=int)
+                            device_index += cur_states_index[depth] // multiple * later_on
+                            res = cross_receive(devices, depth+1)
+                            device_index += (target_states[depth] - 1 -
+                                             cur_states_index[depth]) // multiple * later_on
+                            return res
+                        else:
+                            assert False, 'The dispatch states (%d, %d) at dimension %d is invalid.' % (
+                                prev_states[depth], target_states[depth], depth)
+                res = cross_receive(
+                    prev_input.raw_ctx.workers[dev_pos], 0)
+                for _ in range(1, prev_duplicate):
+                    res = add_op(res, cross_receive(
+                        prev_input.raw_ctx.workers[dev_pos], 0))
+                recv_src[prev_input] = res
+            return recv_src[prev_input]
 
     def send_model_parallel(prev_input, node):
         # assert dp_index_map[prev_input] >= 0 and dp_index_map[node] < 0
@@ -233,7 +294,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
         if not isinstance(prev_input.raw_ctx.workers[dev_pos], tuple):
             # here we send from a node on one device dispatching to many nodes
             # in this case current node MUST have mp_index, and the split will be handled in sending
-            assert mp_index_map[prev_input] < 0, 'Now only support 1 to N.'
+            assert mp_index_map[prev_input] < 0, 'Here only support 1 to N.'
             device_index = 0
 
             def make_split(devices, target_states, cur_states, depth):
@@ -263,7 +324,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                                    cur_states, depth + 1)
             cur_states = [0 for _ in range(
                 len(node_tar_states_map[prev_input]))]
-            loop_size = np.prod(node_tar_states_map[prev_input])
+            loop_size = np.prod(node_tar_states_map[prev_input], dtype=int)
             make_split(
                 node.raw_ctx.workers[dev_pos], node_tar_states_map[prev_input], cur_states, 0)
             assert device_index * \
@@ -274,7 +335,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
             # in this case current node MUST NOT have mp_index, and the combination will be handled in receiving
             target = node_tar_states_map[prev_input]
             assert mp_index_map[prev_input] >= 0 and (target is None or all(
-                [ts == 1 for ts in target])), 'Now only support N to 1.'
+                [ts == 1 for ts in target])), 'Here only support N to 1.'
             hostname = node.raw_ctx.workers[dev_pos].hostname
             target_id = node.raw_ctx.workers[dev_pos].device_id
             key = (prev_input, target_id)
@@ -283,7 +344,83 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                     hostname, target_id), mpi_comm, stream=p2p_stream, ctx=ctx)
                 my_eval_nodes.append(send_dst[key])
         else:
-            pass
+            # here the prev input and the node are both in model parallel, with different states
+            assert mp_index_map[prev_input] >= 0, 'Here only support N to N.'
+            prev_states = node_cur_states_map[prev_input]
+            prev_duplicate = node_cur_duplicate_map[prev_input]
+            target_states = node_tar_states_map[prev_input]
+            target_duplicate = node_tar_duplicate_map[prev_input]
+            loop_size = 1 if prev_states is None else np.prod(
+                prev_states, dtype=int)
+            assert loop_size * \
+                prev_duplicate == len(prev_input.raw_ctx[dev_pos])
+            assert np.prod(target_states, dtype=int) * \
+                target_duplicate == len(node.raw_ctx[dev_pos])
+            temp_index = mp_index_map[prev_input] % loop_size
+            cur_states_index = [0 for _ in range(len(prev_states))]
+            for i in range(len(cur_states_index))[::-1]:
+                cur_states_index[i] = temp_index % prev_states[i]
+                temp_index //= prev_states[i]
+            device_index = 0
+
+            tar_loop_size = np.prod(node_tar_states_map[prev_input], dtype=int)
+
+            def cross_send(devices, split_cur_states, split_target_states, depth, need_split):
+                nonlocal device_index
+                if depth == len(cur_states_index):
+                    nonlocal tar_loop_size
+                    hostname = devices[device_index].hostname
+                    target_id = devices[device_index].device_id
+                    key = (prev_input, target_id)
+                    if key not in send_dst:
+                        cur_node = prev_input if not need_split else split_op(
+                            prev_input, list(range(len(split_target_states))), list(split_cur_states), list(split_target_states), ctx=ctx)
+                        for cur_dev_id in range(device_index, len(devices), tar_loop_size):
+                            hostname = devices[cur_dev_id].hostname
+                            target_id = devices[cur_dev_id].device_id
+                            target_rank = mpi_comm.getRankFromDevice(
+                                hostname, target_id)
+                            key = (prev_input, target_id)
+                            send_dst[key] = pipeline_send_op(
+                                cur_node, target_rank, mpi_comm, stream=p2p_stream, ctx=ctx)
+                            my_eval_nodes.append(send_dst[key])
+                    device_index += 1
+                else:
+                    if prev_states[depth] % target_states[depth] == 0:
+                        # at `depth` dimension we need to send one output
+                        multiple = prev_states[depth] // \
+                            target_states[depth]
+                        later_on = np.prod(target_states[depth+1:], dtype=int)
+                        device_index += cur_states_index[depth] // multiple * later_on
+                        split_cur_states[depth] = cur_states_index[depth] // multiple
+                        split_target_states[depth] = 1
+                        cross_send(devices, split_cur_states,
+                                   split_target_states, depth+1, need_split)
+                        device_index += (prev_states[depth] - 1 -
+                                         cur_states_index[depth]) // multiple * later_on
+                    elif target_states[depth] % prev_states[depth] == 0:
+                        # at `depth` dimension we need to split and send some outputs
+                        multiple = target_states[depth] // prev_states[depth]
+                        later_on = np.prod(target_states[depth+1:], dtype=int)
+                        start = cur_states_index[depth] * multiple
+                        device_index += start * later_on
+                        for index in range(start, start + multiple):
+                            split_cur_states[depth] = index
+                            split_target_states[depth] = multiple
+                            cross_send(devices, split_cur_states,
+                                       split_target_states, depth+1, True)
+                        device_index += (prev_states[depth] - 1 -
+                                         cur_states_index[depth]) * multiple * later_on
+                    else:
+                        assert False, 'The dispatch states (%d, %d) at dimension %d is invalid.' % (
+                            prev_states[depth], target_states[depth], depth)
+            split_cur_states = [0 for _ in range(len(prev_states))]
+            split_target_states = [0 for _ in range(len(prev_states))]
+            cross_send(
+                node.raw_ctx.workers[dev_pos], split_cur_states, split_target_states, 0, False)
+            assert device_index * \
+                target_duplicate == len(
+                    node.raw_ctx.workers[dev_pos])
 
     def assign_ctx(node):
         if node in dp_index_map:
@@ -379,6 +516,8 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                     dp_index = i
             mp_index_map[node] = mp_index
             dp_index_map[node] = dp_index
+            input_states = []
+            input_duplicates = []
             for i, n in enumerate(node.inputs):
                 if isinstance(n, DataloaderOp):
                     if dp_index >= 0 and n in node_list and n not in my_eval_nodes:
@@ -398,6 +537,9 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
 
                 if isinstance(n, (DispatchOp, DispatchGradientOp)):
                     need_states_deduction = True
+                    input_states.append(node_tar_states_map[n.inputs[0]])
+                    input_duplicates.append(
+                        node_tar_duplicate_map[n.inputs[0]])
                     # here we only allow pipeline + model parallel, which means the devices are all different
                     # TODO: release the constraint above
                     # here in every context each device appear only once
@@ -417,6 +559,9 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                         node.inputs[i] = real_input
                 else:
                     assert mp_index == mp_index_map[n]
+                    input_states.append(node_cur_states_map.get(n, None))
+                    input_duplicates.append(
+                        node_cur_duplicate_map.get(n, 1))
                     if mp_index < 0:
                         # handle receiving
                         if dp_index >= 0 and dp_index != dp_index_map[n]:
@@ -449,17 +594,6 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 if isinstance(node, PlaceholderOp) and node.trainable:
                     trainable_params.append(node)
             if need_states_deduction:
-                input_states = []
-                input_duplicates = []
-                for n in node.inputs:
-                    if isinstance(n, (DispatchOp, DispatchGradientOp)):
-                        input_states.append(node_tar_states_map[n.inputs[0]])
-                        input_duplicates.append(
-                            node_tar_duplicate_map[n.inputs[0]])
-                    else:
-                        input_states.append(node_cur_states_map.get(n, None))
-                        input_duplicates.append(
-                            node_cur_duplicate_map.get(n, 1))
                 node_cur_states_map[node], node_cur_duplicate_map[node] = node.deduce_states(
                     input_states, input_duplicates)
 

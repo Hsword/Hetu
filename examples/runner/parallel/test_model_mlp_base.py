@@ -32,6 +32,8 @@ if __name__ == "__main__":
     parser.add_argument('--learning-rate', type=float,
                         default=0.00001, help='learning rate')
     parser.add_argument('--save', action='store_true')
+    parser.add_argument('--trans', action='store_true')
+    parser.add_argument('--log', default=None)
     global args
     args = parser.parse_args()
     if args.save:
@@ -65,8 +67,15 @@ if __name__ == "__main__":
         weight_save = np.random.normal(0, 0.04, size=(1024, 2048))
         if args.save and args.rank == 1:
             np.save('std/' + 'special_weight.npy', weight_save)
-        weight = ht.Variable(value=weight_save, name='mlp_fc1_weight')
+        weight = ht.Variable(value=weight_save, name='special_mlp_fc1_weight')
         activation = ht.matmul_op(activation, weight)
+        if args.trans:
+            weight_save = np.random.normal(0, 0.04, size=(2048, 2048))
+            if args.save and args.rank == 1:
+                np.save('std/' + 'special_weight2.npy', weight_save)
+            weight = ht.Variable(
+                value=weight_save, name='special_mlp_fc2_weight')
+            activation = ht.matmul_op(activation, weight)
 
     with ht.context(ht.gpu(2)):
         activation = ht.relu_op(activation)
@@ -80,6 +89,7 @@ if __name__ == "__main__":
         executor = ht.Executor([loss, train_op])
 
     # training
+    results = []
     for step in range(args.steps):
         if step == args.warmup:
             start = time.time()
@@ -87,8 +97,11 @@ if __name__ == "__main__":
                                    x: value_x_list[step % batch_num], y_: value_y_list[step % batch_num]}, convert_to_numpy_ret_vals=True)
         if executor.rank == 2:
             print('step:', step, 'loss:', loss_val)
+            results.extend(loss_val)
 
     end = time.time()
     if executor.rank == 2:
         print("time elapsed for {} steps: {}s".format(
             args.steps-args.warmup, round(end-start, 3)))
+        if args.log:
+            np.save(args.log, results)

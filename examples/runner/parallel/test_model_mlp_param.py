@@ -27,8 +27,11 @@ if __name__ == "__main__":
     parser.add_argument('--learning-rate', type=float,
                         default=0.00001, help='learning rate')
     parser.add_argument('--split', type=str, default='left')
+    parser.add_argument('--split2', type=str, default=None)
+    parser.add_argument('--log', default=None)
     args = parser.parse_args()
     assert args.split in ('left', 'right', 'middle')
+    assert args.split2 in (None, 'left', 'right', 'middle')
 
     # dataset
     datasets = ht.data.mnist()
@@ -64,9 +67,25 @@ if __name__ == "__main__":
             activation = ht.dispatch(activation, (1, 2))
             weight = ht.dispatch(weight, (2, 1))
         activation = ht.matmul_op(activation, weight)
-        activation = ht.dispatch(activation, (1, 1))
+
+    if args.split2:
+        with ht.context((ht.gpu(4), ht.gpu(5))):
+            weight_save = np.load('std/' + 'special_weight2.npy')
+            weight = ht.Variable(
+                value=weight_save, name='special_mlp_fc2_weight')
+            if args.split2 == 'left':
+                activation = ht.dispatch(activation, (2, 1))
+                weight = ht.dispatch(weight, (1, 1), duplicate=2)
+            elif args.split2 == 'right':
+                activation = ht.dispatch(activation, (1, 1), duplicate=2)
+                weight = ht.dispatch(weight, (1, 2))
+            else:
+                activation = ht.dispatch(activation, (1, 2))
+                weight = ht.dispatch(weight, (2, 1))
+            activation = ht.matmul_op(activation, weight)
 
     with ht.context(ht.gpu(3)):
+        activation = ht.dispatch(activation, (1, 1))
         activation = ht.relu_op(activation)
         y_pred = fc(activation, (2048, 10), 'mlp_fc2', with_relu=False)
         y_ = ht.Variable(name="dataloader_y", trainable=False)
@@ -78,6 +97,7 @@ if __name__ == "__main__":
         executor = ht.Executor([loss, train_op])
 
     # training
+    results = []
     for step in range(args.steps):
         if step == args.warmup:
             start = time.time()
@@ -85,8 +105,11 @@ if __name__ == "__main__":
                                    x: value_x_list[step % batch_num], y_: value_y_list[step % batch_num]}, convert_to_numpy_ret_vals=True)
         if executor.rank == 3:
             print('step:', step, 'loss:', loss_val)
+            results.extend(loss_val)
 
     end = time.time()
     if executor.rank == 3:
         print("time elapsed for {} steps: {}s".format(
             args.steps-args.warmup, round(end-start, 3)))
+        if args.log:
+            np.save(args.log, results)
