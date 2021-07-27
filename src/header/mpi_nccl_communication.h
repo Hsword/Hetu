@@ -52,6 +52,8 @@ void getGroupNcclUniqueId(ncclUniqueId *Id, MPI_Comm mpi_comm, int rank,
                           int dests[], int group_size, int group_id);
 void initNcclCommRank(ncclComm_t *comm, int nranks, ncclUniqueId *commId,
                       int rank, int localRank);
+void GroupStart();
+void GroupEnd();
 void dlarrayAllReduce(DLArray *input_array, DLArray *output_array, int datatype,
                       int op, ncclComm_t comm, DLStreamHandle stream_handle);
 void dlarrayBroadcast(DLArray *input_array, DLArray *output_array, int datatype,

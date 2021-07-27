@@ -137,7 +137,8 @@ class HetuConfig(object):
         'my_eval_nodes',
         'param_allreduce_group',
         'placeholder_to_arr_map',
-        'gpipe'
+        'gpipe',
+        'pipedream',
     ]
 
     def __init__(
@@ -156,6 +157,7 @@ class HetuConfig(object):
         cache_bound=100,
         log_path=None,
         gpipe=False,
+        pipedream=False
     ):
         '''
         context: default device context
@@ -166,6 +168,7 @@ class HetuConfig(object):
             Hybrid     -> Parameter Server for Sparse Parameter and MPI AllReduce for Dense Parameter
         '''
         self.gpipe = gpipe
+        self.pipedream = pipedream
 
         self.eval_node_list = eval_node_list
         self.train_name = train_name
@@ -329,6 +332,8 @@ class Executor(object):
         
         if config.gpipe:
             self.subexecutor = {k: SubExecutor4Gpipe(k, v, config) for k, v in eval_node_dict.items()}
+        elif config.pipedream
+            self.subexecutor = {k: SubExecutor4Pipedream(k, v, config) for k, v in eval_node_dict.items()}
         else:
             self.subexecutor = {k: SubExecutor(k, v, config) for k, v in eval_node_dict.items()}
 
@@ -765,6 +770,494 @@ class SubExecutor4Gpipe(object):
                 results[idx] = new_res
 
         return results
+
+class SubExecutor4Pipedream(object):
+    def __init__(self, name, eval_node_list, config):
+        """
+        Parameters
+        ----------
+        eval_node_list: list of nodes whose values need to be computed.
+        topo_order: list of nodes in topological order
+        node_to_shape_map: dict from node to shape of the node
+        node_to_arr_maps: a list of [dict from node to ndarray.NDArray allocated for node]
+        feed_shapes: shapes of feed_dict from last run(...)
+        """
+        self.name = name
+        self.eval_node_list = eval_node_list
+        self.config = config
+        inference = not any([isinstance(node, OptimizerOp) for node in eval_node_list])
+        self.inference = inference
+      
+        if config.p2p_stream:
+            self.run_results_indices = [eval_node_list.index(node) if node in eval_node_list else -1 for node in config.my_eval_nodes]
+            self.eval_node_list = config.my_eval_nodes
+            self.global_eval_nodes = eval_node_list
+
+        if inference == False:
+            self.topo_order = find_topo_sort(self.eval_node_list)
+        else: # in inference phase
+            if self.config.use_sparse_pull == True or self.config.cstable_policy is not None:
+                # topo_sort_with_hook(self.eval_node_list, self.config)
+                # insert ps_sparse_pull_op
+                self.topo_order = find_topo_sort_inference(self.eval_node_list)
+                # fetch sparse parameter
+                fetch_sparse_parameter_value(self.topo_order, self.config)
+            else:
+                self.topo_order = find_topo_sort(self.eval_node_list)
+
+        # split the topo into two parts: forward and backward
+        # split critia for gpu0~gpu n-2: nodes before the first send op belong to forward
+        # split critia for gpu n-1: nodes after the first oneslike op belong to forward
+        pivot_idx = 0
+        for i in range(len(self.topo_order)):
+            if isinstance(self.topo_order[i], (OnesLikeOp, PipelineSendOp)):
+                pivot_idx = i
+                break
+
+
+        if config.local_rank == config.nrank - 1:
+            # node before oneslike belong to forward
+            self.forward_topo_order = self.topo_order[:pivot_idx]
+            self.backward_topo_order = self.topo_order[pivot_idx:]
+        else:
+            self.forward_topo_order = self.topo_order[:pivot_idx+1]
+            self.backward_topo_order = self.topo_order[pivot_idx+1:]
+
+        def move_send_op(tp):
+            # move send op to the tail
+            saved_send = None
+            for n in tp:
+                if isinstance(n, PipelineSendOp):
+                    saved_send = n
+                    break
+            tp.remove(saved_send)
+            tp.append(saved_send)
+
+        if config.local_rank != 0:
+            move_send_op(self.backward_topo_order)
+
+        """
+        print("gpu {}'s topo: ".format(config.local_rank), [x.desc for x in self.topo_order])
+        print("gpu {}'s forward topo: ".format(config.local_rank), [x.desc for x in self.forward_topo_order])
+        print("gpu {}'s backward topo: ".format(config.local_rank), [x.desc for x in self.backward_topo_order])
+        print("")
+        """
+
+        # TODO: should support delicate workload asjustments in the future
+        self.micro_batches_num = config.nrank
+
+        # main structures, nodes' shapes and arrays
+        self.node_to_shape_map = {}
+        """
+        for each micro batch, we need:
+        * a version of tensors to store intermediate values for gradients computation
+        * at most one version of weights
+        """
+        self.batch_to_tensor_maps = dict() # store intermediate tensors(all nodes except weights)
+        self.batch_to_weight_maps = dict() # store weights of different version
+
+        # inherit from configurations
+        self.comm_mode = self.config.comm_mode
+        self.ps_comm = self.config.ps_comm
+        self.nccl_comm = self.config.nccl_comm
+        self.comp_stream = self.config.comp_stream
+        self.h2d_stream = self.config.h2d_stream
+        self.d2h_stream = self.config.d2h_stream
+        self.nccl_stream = self.config.nccl_stream
+        self.param_psval_map = self.config.ps_map
+        self.use_sparse_pull = self.config.use_sparse_pull
+        self.cstable_policy = self.config.cstable_policy
+        self.use_p2p = self.config.p2p_stream is not None
+
+        # assisting structures, improve performance
+        self.need_feed_nodes = []
+        self.param_nodes = []
+        self.dataloader_nodes = []
+        self.computing_nodes = []
+        for node in self.topo_order:
+            if isinstance(node, DataloaderOp) or isinstance(node, GNNDataLoaderOp):
+                self.dataloader_nodes.append(node)
+            elif isinstance(node, PlaceholderOp):
+                if node.shape is None:
+                    self.need_feed_nodes.append(node)
+                elif node.trainable:
+                    self.param_nodes.append(node)
+            elif not ((self.use_sparse_pull or self.cstable_policy) and isinstance(node, EmbeddingLookUp) and self.config.prefetch):
+                self.computing_nodes.append(node)
+        self.batch_num = set([node.get_batch_num(self.name) for node in self.dataloader_nodes])
+        assert len(self.batch_num) <= 1, 'Batch num not conform.'
+        self.batch_num = None if len(self.batch_num) == 0 else self.batch_num.pop()
+        self.init_need_allocation = (self.need_feed_nodes == []) and (self.dataloader_nodes == [])
+        if self.use_p2p:
+            self.init_need_allocation = False
+
+    def infer_shape(self, feed_shapes):
+        """Given shapes of feed_dict nodes, infer shape for all nodes in graph.
+
+        Implementation note:
+        Iteratively calls node.infer_shape to infer shapes.
+        Node shapes stored in self.node_to_shape_map.
+
+        Parameters
+        ----------
+        feed_shapes: node->shapes mapping for feed_dict nodes.
+        """
+        self.node_to_shape_map = {}
+        for node in self.topo_order:
+            if node in feed_shapes:
+                self.node_to_shape_map[node] = tuple(feed_shapes[node])
+            else:
+                input_shapes = [self.node_to_shape_map[n] for n in node.inputs]
+                cur_shape = node.infer_shape(input_shapes)
+                self.node_to_shape_map[node] = cur_shape if cur_shape is None else tuple(cur_shape)
+            # print(node.name, self.node_to_shape_map[node])
+
+    def memory_plan(self, batch_id):
+        """Allocates ndarray.NDArray for every node except feed_dict nodes.
+        Parameters
+        ----------
+        batch_id: current batch
+        """
+
+        for node, shape in self.node_to_shape_map.items():
+            # for node to be feed, we ingore them
+            if isinstance(node, PlaceholderOp) and node.trainable:
+                cur_node_to_arr_map = self.batch_to_weight_maps[batch_id]
+            else:
+                cur_node_to_arr_map = self.batch_to_tensor_maps[batch_id]
+
+            if isinstance(node, PlaceholderOp):
+                if self.config.placeholder_to_arr_map[node] is not None:
+                    orig = self.config.placeholder_to_arr_map[node]
+                    copied = None
+                    if isinstance(orig, np.ndarray):
+                        copied = orig.copy()
+                    elif isinstance(orig, ndarray.NDArray):
+                        # enable async copy
+                        copied = ndarray.empty(orig.shape, orig.ctx)
+                        copied._async_copyfrom(orig, self.comp_stream)
+                    else:
+                        raise ValueError
+                    cur_node_to_arr_map[node] = copied
+                elif node not in cur_node_to_arr_map:
+                    cur_node_to_arr_map[node] = None
+            elif not isinstance(node, DataloaderOp) and not isinstance(node, GNNDataLoaderOp):
+                # add for OptimizerOp and ParameterServerOp
+                if shape is None:
+                    cur_node_to_arr_map[node] = None
+                    continue
+                if isinstance(node, (EmbeddingLookUp_Gradient, DataD2HSparseOp)):
+                    cur_node_to_arr_map[node] = ndarray.IndexedSlices(dense_shape=shape)
+                    continue
+                if isinstance(node, EmbeddingLookUp) and (self.use_sparse_pull or self.cstable_policy) and self.config.prefetch:
+                    cur_node_to_arr_map[node] = self.param_psval_map[node.inputs[0]]
+                    continue
+                if node.on_gpu:
+                    if node.inplace:
+                        cur_node_to_arr_map[node] = ndarray.NDArray(None)
+                    elif self.inference and isinstance(node, DropoutOp):
+                        if node.inputs[0] in self.batch_to_weight_maps[batch_id]:
+                            cur_node_to_arr_map[node] = self.batch_to_weight_maps[node.inputs[0]]
+                        else:
+                            cur_node_to_arr_map[node] = self.batch_to_tensor_maps[node.inputs[0]]
+                    else:
+                        cur_node_to_arr_map[node] = ndarray.empty(shape, ctx=node.ctx)
+                else:
+                    cur_node_to_arr_map[node] = ndarray.empty(shape, ctx=node.ctx)
+
+    
+
+    def run(self, eval_node_list={}, feed_generator={}, convert_to_numpy_ret_vals=False):
+        #from .my_log import get_logger
+        #log = get_logger(self.config.local_rank)
+
+        """
+        Parameters
+        ----------
+        feed_generator: a dictionary of node->np.ndarray supplied by user.
+        convert_to_numpy_ret_vals: whether to convert ret vals to np.array
+
+        Returns
+        -------
+        A list of values for nodes in eval_node_list. NDArray or np.ndarray.
+        """
+
+        from inspect import isgenerator
+        assert isinstance(feed_generator, dict) and all([isgenerator(x) for x in feed_generator.values()]), 'Feed generator invalid'
+        assert len(feed_generator) == len(self.need_feed_nodes) or self.use_p2p, 'Feed generator invalid.'
+
+        if eval_node_list != {} and eval_node_list != self.eval_node_list:
+            raise ValueError("wrong eval_node_list")
+
+        local_rank = self.config.local_rank
+        nrank = self.config.nrank
+
+        batch_id = 0
+        last_vacant_batch = -1
+        in_flight_batches = []
+        start_group_call_idx = nrank - local_rank
+        scheduler = get_scheduler(local_rank, nrank)
+
+        results_list = []
+
+        while True:
+            cur_schedule = next(scheduler)
+            # if cur_schedule == 0: forward
+            # if cur_schedule == 1: backward
+            
+            cur_topo = self.backward_topo_order
+            if cur_schedule == 0:
+                cur_topo = self.forward_topo_order
+
+            """
+            we do following things only at forward stage
+            0. initialization
+            1. get feed values
+            2. maybe memory plan
+            """
+            if cur_schedule == 0:
+
+                feed_dict = {}
+                try:
+                    for n, g in feed_generator.items():
+                        feed_dict[n] = next(g)
+                except StopIteration:
+                    #print("no enough data after {} batches, finish all training!".format(batch_id))
+                    """
+                    add necessary group call to finish the pipeline
+                    """
+                    from ..communicator.mpi_nccl_comm import GroupStart, GroupEnd
+                    if len(in_flight_batches) == 0:
+                        if self.config.local_rank != 0:# self.config.nrank - 1:
+                            GroupEnd()
+                        break
+                    else:
+                        if self.config.local_rank == 0:
+                            GroupStart()
+                        elif self.config.local_rank == self.config.nrank - 1:
+                            raise ValueError
+                        else:
+                            GroupEnd()
+                            GroupStart()
+                        continue
+                except Exception as e:
+                    sys.exit()
+
+                batch_id += 1
+                in_flight_batches.append(batch_id)
+                #print("rank: {}, schedule: {}, batch: {}".format(local_rank, cur_schedule, batch_id))
+
+                if last_vacant_batch == -1:
+                    # no old NDArray to reuse, allocate new
+                    if batch_id not in self.batch_to_tensor_maps:
+                        self.batch_to_tensor_maps[batch_id] = dict()
+                    if batch_id not in self.batch_to_weight_maps:
+                        self.batch_to_weight_maps[batch_id] = dict()
+                else:
+                    # change ownership of old array and reuse
+                    self.batch_to_weight_maps[batch_id] = self.batch_to_weight_maps.pop(last_vacant_batch)
+                    self.batch_to_tensor_maps[batch_id] = self.batch_to_tensor_maps.pop(last_vacant_batch)
+                    last_vacant_batch = -1
+
+                feed_shapes = {}
+                need_reallocation = self.init_need_allocation
+                if self.batch_to_tensor_maps[batch_id] == dict():
+                    need_reallocation = True
+                # get feed in values
+                for node, value in feed_dict.items():
+                    if self.use_p2p and node not in self.need_feed_nodes:
+                        continue
+                    assert node in self.need_feed_nodes, 'Only allow feed in PlaceholderOp with no values, here got %s:%s.' % (str(type(node)), node.name)
+                    
+                    if node.trainable:
+                        cur_node_to_arr_map = self.batch_to_weight_maps[batch_id]
+                    else:
+                        cur_node_to_arr_map = self.batch_to_tensor_maps[batch_id]
+
+                    local_shape = tuple(value.shape)
+                    local_realloc = local_shape != self.node_to_shape_map.get(node, None)
+                    local_realloc = local_realloc or (node not in cur_node_to_arr_map)
+                    need_reallocation = need_reallocation or local_realloc
+
+                    if node.on_cpu:
+                        raise AttributeError("node must be on gpu in pipedream mode")
+                    else:
+                        if isinstance(value, np.ndarray):
+
+                            if local_realloc:
+                                #cur_node_to_arr_map[node] = ndarray.array(value, ctx=node.ctx)
+                                cur_node_to_arr_map[node] = ndarray.empty(local_shape, ctx=node.ctx)
+                                cur_node_to_arr_map[node].async_h2d(value, self.comp_stream)
+                            else:
+                                # reinit, use async_copy
+                                #cur_node_to_arr_map[node][:] = ndarray.array(value, ctx=node.ctx)
+                                cur_node_to_arr_map[node].async_h2d(value, self.comp_stream)
+
+                        elif isinstance(value, spmatrix):
+                            value = coo_matrix(value)
+                            value = ndarray.sparse_array(value.data,
+                                    (value.row, value.col), shape = local_shape, ctx=node.ctx)
+                            cur_node_to_arr_map[node] = value
+                        elif isinstance(value, ndarray.NDArray):
+                            raise ValueError
+                            if value.ctx == node.ctx:
+                                cur_node_to_arr_map[node] = value
+                            else:
+                                if local_realloc:
+                                    cur_node_to_arr_map[node] = ndarray.empty(local_shape, ctx=node.ctx)
+                                else:
+                                    cur_node_to_arr_map[node][:] = value
+                        elif isinstance(value, ndarray.ND_Sparse_Array):
+                            cur_node_to_arr_map[node] = value
+                        else:
+                            assert False, "feed_dict value type not supported"
+
+                    if node not in feed_shapes:
+                        feed_shapes[node] = local_shape
+                    else:
+                        assert feed_shapes[node] == local_shape
+
+
+                # reallocation, infer shapes and allocate memory
+                if need_reallocation:
+                    self.init_need_allocation = False
+                    if self.node_to_shape_map == {}:
+                        self.infer_shape(feed_shapes)
+                    self.memory_plan(batch_id)
+
+                tmp_batch_id = batch_id
+
+            else:
+                """
+                doing backward, we choose the oldest in-flight batch to backward,
+                we use tmp_batch_id to access use the according maps
+                """
+                tmp_batch_id = in_flight_batches.pop(0)
+                #print("rank: {}, schedule: {}, batch: {}".format(local_rank, cur_schedule, tmp_batch_id))
+                
+            assert len(self.dataloader_nodes) == 0, "pipedream currently does not support dataloader"
+
+            #compute, same logic for backward and forward
+            for node in self.computing_nodes:
+                if node not in cur_topo:
+                    continue
+
+                if node.on_cpu:
+                    raise ValueError("node must be on gpu in pipedream mode")
+
+                for n in node.inputs:
+                    if n.event:
+                        n.event.sync()
+
+                node_val = None
+                if isinstance(node, PlaceholderOp) and node.trainable:
+                    node_val = self.batch_to_weight_maps[tmp_batch_id][node]
+                else:
+                    node_val = self.batch_to_tensor_maps[tmp_batch_id][node]
+
+                input_vals = []
+                for n in node.inputs:
+                    if isinstance(n, PlaceholderOp) and n.trainable:
+                        input_vals.append(self.batch_to_weight_maps[tmp_batch_id][n])
+                    else:
+                        input_vals.append(self.batch_to_tensor_maps[tmp_batch_id][n])
+
+
+                #print("start compute node: {}".format(node.desc))
+                if isinstance(node, (ParameterServerCommunicateOp, ParameterServerSparsePullOp)):
+                    # Here we use d2h stream in ps op, since the stream is used for d2h data transfer.
+                    # Please take care at this part.
+                    node.compute(input_vals, node_val, self.d2h_stream)
+
+                elif isinstance(node, AllReduceCommunicateOp):
+                    node.compute(input_vals, node_val, self.nccl_stream)
+
+                elif isinstance(node, DataH2DOp):
+                    node.compute(input_vals, node_val, self.h2d_stream)
+
+                elif isinstance(node, (DataD2HOp, DataD2HSparseOp)):
+                    node.compute(input_vals, node_val, self.d2h_stream)
+
+                elif isinstance(node, PipelineSendOp):
+                    group_call = False
+                    if local_rank == 0 and tmp_batch_id >= start_group_call_idx:
+                        group_call = True
+                    if local_rank == nrank - 1:
+                        group_call = True
+                    if local_rank not in (0, nrank - 1):
+                        if cur_schedule == 1 or tmp_batch_id >= start_group_call_idx:
+                            group_call = True
+                    node.compute(input_vals, node_val, group_call=group_call)
+                
+                elif isinstance(node, PipelineReceiveOp):
+                    group_call = False
+                    if local_rank == 0:
+                        group_call = True
+                    if local_rank == nrank - 1 and tmp_batch_id > start_group_call_idx:
+                        group_call = True
+                    if local_rank not in (0, nrank - 1):
+                        if cur_schedule == 1 or tmp_batch_id > start_group_call_idx:
+                            group_call = True
+                    node.compute(input_vals, node_val, group_call=group_call)
+
+                elif isinstance(node, (DropoutOp, Batch_NormalizationOp, Layer_NormalizationOp)):
+                    node.compute(input_vals, node_val, self.comp_stream, inference=self.inference)
+                    if isinstance(node.event, Event):
+                        # for d2h op / eval nodes / nodes before [allreduce or ps nodes or pipelinesend nodes]
+                        node.event.record(self.comp_stream)
+
+                elif isinstance(node, OptimizerOp):
+                    node.compute(input_vals, node_val, self.comp_stream, self.batch_to_weight_maps[tmp_batch_id])
+
+                else:
+                    node.compute(input_vals, node_val, self.comp_stream)
+                    if isinstance(node.event, Event):
+                        # for d2h op / eval nodes / nodes before [allreduce or ps nodes or pipelinesend nodes]
+                        node.event.record(self.comp_stream)
+
+
+            # we should do necessary syncing to avoid deadlock
+            for n in self.eval_node_list:
+                if n.event:
+                    n.event.sync()
+
+            #print("finish sync for batch{} at rank{}".format(tmp_batch_id, self.config.local_rank))
+
+            # save result as numpy(must), because the tensor will be reused later
+            if cur_schedule == 1:
+                tmp_results = []
+                for n in self.eval_node_list:
+                    if isinstance(n, PlaceholderOp) and n.trainable:
+                        r = self.batch_to_weight_maps[tmp_batch_id][n]
+                    else:
+                        r = self.batch_to_tensor_maps[tmp_batch_id][n]
+                    if r is not None:
+                        tmp_results.append(r.asnumpy())
+                    else:
+                        tmp_results.append(None)
+                results_list.append(tmp_results)
+
+            # after update, mark the vacant maps
+            if cur_schedule == 1:
+                #assert last_vacant_batch == -1, "last_vacant_batch error, check the logic of code"
+                last_vacant_batch = tmp_batch_id
+
+            # end of scheduling loop
+
+        # update the lastest param to global self.placeholder_to_arr_map
+        for n, v in self.batch_to_weight_maps[batch_id].items():
+            self.config.placeholder_to_arr_map[n] = v
+
+        # remap to original order in model parallel
+        if self.use_p2p:
+            for idx in range(len(results_list)):
+                tmp_results = results_list[idx]
+                new_results = [None for _ in self.global_eval_nodes]
+                for i, j in enumerate(self.run_results_indices):
+                    new_results[j] = tmp_results[i]
+                results_list[idx] = new_results
+
+        return results_list
 
 class SubExecutor(object):
     def __init__(self, name, eval_node_list, config):
@@ -1261,3 +1754,13 @@ def sum_node_list(node_list, ctx):
     for n in node_list[1:]:
         sum_node = add_op(sum_node, n, ctx=ctx)
     return sum_node
+
+def get_scheduler(rank, nrank):
+    # used in pipedream; 0: forward, 1: backward
+    assert 0 <= rank < nrank, "invalid args for get_scheduler"
+    prefix_forward = [0 for _ in range(nrank - rank)]
+    for p in prefix_forward:
+        yield p
+    while True:
+        yield 1
+        yield 0

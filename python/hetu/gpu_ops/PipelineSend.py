@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 from .Node import Op
 from .. import ndarray
-from ..communicator.mpi_nccl_comm import ncclDataType_t, ncclRedOp_t
+from ..communicator.mpi_nccl_comm import ncclDataType_t, ncclRedOp_t, GroupStart
 from ..stream import create_event_handle, create_stream_handle
 
 
@@ -16,9 +16,12 @@ class PipelineSendOp(Op):
         self.shape = None
         self.shape_is_sent = False
 
-    def compute(self, input_vals, output_val, stream_handle=None):
+    def compute(self, input_vals, output_val, stream_handle=None, group_call=False):
         assert not self.on_cpu, "PipelineSendOp only support P2P communication between gpus"
         # we dont need sync and event for send
+        if group_call:
+            GroupStart()
+
         self.comm.dlarraySend(input_vals[0],
                               ncclDataType_t.ncclFloat32,
                               self.const_attr,
