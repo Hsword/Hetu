@@ -61,6 +61,9 @@ class Optimizer(object):
                         for node in self.params]
         self.initiated = True
 
+    def update_tensors_version(self, tensor_map):
+        self.tensors = [tensor_map[node] for node in self.params]
+
     def minimize(self, loss, var_list=None):
         """Return an optimizer op to update parameters.
 
@@ -88,10 +91,12 @@ class OptimizerOp(Op):
         self.name = "Optimizer_%s" % (optimizer.name)
         self.optimizer = optimizer
 
-    def compute(self, input_vals, output_val, stream_handle=None):
+    def compute(self, input_vals, output_val, stream_handle=None, new_tensors_map=None):
         assert output_val is None
         # For PS op, this input_vals is None
         # PS mode doesn't need local update
+        if new_tensors_map is not None:
+            self.optimizer.update_tensors_version(new_tensors_map)
         if self.comm_mode != 'PS':
             self.optimizer.update(input_vals, stream_handle)
 

@@ -121,6 +121,14 @@ void initNcclCommRank(ncclComm_t *comm, int nranks, ncclUniqueId *commId,
     NCCLCHECK(ncclCommInitRank(comm, nranks, *commId, rank));
 }
 
+void GroupStart() {
+    NCCLCHECK(ncclGroupStart());
+}
+
+void GroupEnd() {
+    NCCLCHECK(ncclGroupEnd());
+}
+
 void _ncclAllReduce(const void *sendbuff, void *recvbuff, int size,
                     int datatype, int op, ncclComm_t comm,
                     cudaStream_t stream) {

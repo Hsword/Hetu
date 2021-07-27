@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 from .Node import Op
 from .. import ndarray
-from ..communicator.mpi_nccl_comm import ncclDataType_t, ncclRedOp_t
+from ..communicator.mpi_nccl_comm import ncclDataType_t, ncclRedOp_t, GroupEnd
 from ..stream import create_event_handle, create_stream_handle
 
 
@@ -17,10 +17,10 @@ class PipelineReceiveOp(Op):
         self.shape = None
         self.shape_is_received = False
 
-    def compute(self, input_vals, output_val, stream_handle=None):
+    def compute(self, input_vals, output_val, stream_handle=None, group_call=False):
         assert not self.on_cpu, "PipelineReceiveOp only support P2P communication between gpus"
-
         assert self.comm_stream, "communicate stream should not be None"
+
         if self.event == None:
             self.event = create_event_handle(self.ctx)
         self.comm.dlarrayRecv(output_val,
@@ -28,6 +28,9 @@ class PipelineReceiveOp(Op):
                               self.const_attr,
                               self.comm_stream)
         self.event.record(self.comm_stream)
+
+        if group_call:
+            GroupEnd()
 
     def gradient(self, output_grad):
         return []

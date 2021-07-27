@@ -16,10 +16,14 @@ def _load_nccl_lib():
     lib = CDLL(path_to_so_file, RTLD_LOCAL)
     return lib
 
-
 lib_mpi_nccl = _load_nccl_lib()
 # lib_mpi_nccl = CDLL("./lib_mpi_nccl_runtime_api.so", RTLD_LOCAL)
 
+def GroupStart():
+    lib_mpi_nccl.GroupStart()
+
+def GroupEnd():
+    lib_mpi_nccl.GroupEnd()
 
 class ncclDataType_t(Enum):
     ncclInt8 = 0
