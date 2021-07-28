@@ -37,7 +37,7 @@ def make_generator(bs, x, y):
 if __name__ == "__main__":
     # argument parser
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=2000, help='training epochs')
+    parser.add_argument('--epochs', type=int, default=5, help='training epochs')
     parser.add_argument('--warmup', type=int, default=2, help='warm up steps excluded from timing')
     parser.add_argument('--batch-size', type=int, default=2048, help='batch size')
     parser.add_argument('--learning-rate', type=float, default=0.0001, help='learning rate')
@@ -66,19 +66,30 @@ if __name__ == "__main__":
         train_op = opt.minimize(loss)
         executor = ht.Executor([loss, train_op], pipedream=True)
 
-    # training
+    """
+    notice: in pipedream mode, we have multiple version of weights, to achieve the best throughput
+    and train all the versions equally, we should combine the training data in advance and train them
+    in one pass
+    """
+    # combine the feed dataset
+    train_set_x_list = []
+    train_set_y_list = []
     for epoch in range(args.epochs):
         rand_ind = np.random.randint(train_set_y.shape[0], size=(train_set_y.shape[0],))
-        train_set_x = train_set_x[rand_ind]
-        train_set_y = train_set_y[rand_ind]
-        x_gen, y_gen = make_generator(args.batch_size, train_set_x, train_set_y)
+        train_set_x_list.append(train_set_x[rand_ind])
+        train_set_y_list.append(train_set_y[rand_ind])
+    train_set_x = np.concatenate(train_set_x_list, axis=0)
+    train_set_y = np.concatenate(train_set_y_list, axis=0)
 
-        res = executor.run(feed_dict={x: x_gen, y_: y_gen})
-        reduced_res = []
-        for elements in res:
-            for e in elements:
-                if e:
-                    reduced_res.append(e[0])
-        if reduced_res:
-            print("epoch {}, avg loss {}, max loss {}, min loss {}".format(epoch,
+    # training
+    x_gen, y_gen = make_generator(args.batch_size, train_set_x, train_set_y)
+    res = executor.run(feed_dict={x: x_gen, y_: y_gen})
+    reduced_res = []
+    for elements in res:
+        for e in elements:
+            if e:
+                reduced_res.append(e[0])
+    if reduced_res:
+        print("epoch {}, avg loss {}, max loss {}, min loss {}".format(epoch,
                 np.mean(reduced_res), np.max(reduced_res), np.min(reduced_res)))
+        #print(reduced_res)
