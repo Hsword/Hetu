@@ -54,9 +54,9 @@ if __name__ == "__main__":
         weight = ht.Variable(value=weight_save, name='mlp_fc1_weight')
         if args.split == 'left':
             activation = ht.dispatch(activation, (2, 1))
-            weight = ht.dispatch(weight, (1, 1), duplicate=2)
+            weight = ht.dispatch(weight, (1, 1))
         elif args.split == 'right':
-            activation = ht.dispatch(activation, (1, 1), duplicate=2)
+            activation = ht.dispatch(activation, (1, 1))
             weight = ht.dispatch(weight, (1, 2))
         else:
             activation = ht.dispatch(activation, (1, 2))

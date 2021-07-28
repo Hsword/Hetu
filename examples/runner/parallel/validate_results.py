@@ -12,5 +12,5 @@ if __name__ == '__main__':
     print('Ground truth:', base)
     for i in range(int(args.number)):
         res = np.load(osp.join(directory, 'res%d.npy' % i))
-        np.testing.assert_allclose(base, res)
+        np.testing.assert_allclose(base, res, rtol=1e-6)
         print('Result id %d passed test.' % i, res)

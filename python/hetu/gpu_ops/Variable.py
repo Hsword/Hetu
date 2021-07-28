@@ -36,6 +36,7 @@ class PlaceholderOp(Op):
         self.initializer = initializer
         self.trainable = trainable
         self.dtype = dtype
+        self.reshaped = False
 
     def compute(self, input_vals, output_val, stream_handle=None):
         assert self.shape, "placeholder %s values provided by feed_dict" % self.name
@@ -78,7 +79,10 @@ class PlaceholderOp(Op):
         self.on_gpu = ndarray.is_gpu_ctx(self.ctx)
         self.on_cpu = not self.on_gpu
 
-    def reshape_in_mp(self, mp_index, parts):
+    def reshape_in_mp(self, cur_part, parts):
+        if self.reshaped:
+            return
+        self.reshaped = True
         # this function only used in context launch to enable variable initialized in model parallel
         ori_shape = list(self.shape)
         for i, pts in enumerate(parts):
@@ -89,11 +93,10 @@ class PlaceholderOp(Op):
             self.initializer.shape = self.shape
         elif self.tensor_value is not None:
             slcs = []
-            for psize, pts in zip(ori_shape[::-1], parts[::-1]):
-                st = (mp_index % pts) * psize
-                en = st + psize
-                slcs.insert(0, slice(st, en))
-                mp_index //= pts
+            for i in range(len(ori_shape)):
+                st = ori_shape[i] * cur_part[i]
+                en = st + ori_shape[i]
+                slcs.append(slice(st, en))
             ori_value = self.tensor_value
             if not isinstance(ori_value, np.ndarray):
                 ori_value = ori_value.asnumpy()

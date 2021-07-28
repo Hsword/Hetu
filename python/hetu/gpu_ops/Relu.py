@@ -52,15 +52,22 @@ class ReluGradientOp(Op):
         assert len(input_shapes) == 2
         return input_shapes[0]
 
-    def deduce_states(self, input_states, input_duplicates):
-        assert input_duplicates[0] in (
-            1, None) and input_duplicates[1] in (1, None)
-        if input_states[0] is None:
-            input_states[0] = input_states[1]
-        elif input_states[1] is None:
-            input_states[1] = input_states[0]
-        assert input_states[0] == input_states[1]
-        return input_states[0], input_duplicates[0]
+    def deduce_states(self, states, duplicates, orders):
+        assert len(states) == 2 and len(duplicates) == 2 and len(orders) == 2
+        assert duplicates[0] in (
+            1, None) and duplicates[1] in (1, None)
+        cur_state, cur_order = None, None
+        for state in states:
+            if cur_state is None:
+                cur_state = state
+            else:
+                assert state in (None, cur_state)
+        for order in orders:
+            if cur_order is None:
+                cur_order = order
+            else:
+                assert order in (None, cur_order)
+        return cur_state, duplicates[0], cur_order
 
 
 def relu_op(node, ctx=None):

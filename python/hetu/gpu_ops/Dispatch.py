@@ -3,10 +3,9 @@ from .Node import Op
 
 
 class DispatchOp(Op):
-    def __init__(self, node, parts, duplicate=1):
+    def __init__(self, node, parts):
         super().__init__(DispatchOp, [node], None)
         self.parts = parts
-        self.duplicate = duplicate
 
     def compute(self, input_vals, output_val, stream_handle=None):
         assert False, "This Op should be replaced in preprocessing phase."
@@ -32,7 +31,7 @@ class DispatchGradientOp(Op):
         assert False, "This Op should be replaced in preprocessing phase."
 
 
-def dispatch(node, parts, duplicate=1):
+def dispatch(node, parts):
     """Dispatch a node into several parts, so the nodes following up can use model parallel.
 
     Parameters:
@@ -46,7 +45,7 @@ def dispatch(node, parts, duplicate=1):
     A new Node instance created by Op.
 
     """
-    return DispatchOp(node, parts, duplicate)
+    return DispatchOp(node, parts)
 
 
 def dispatch_gradient(node, forward_input):

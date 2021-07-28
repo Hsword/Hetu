@@ -55,9 +55,9 @@ if __name__ == "__main__":
         if args.split == 'left':
             activation = ht.dispatch(activation, (2, 1))
             weight = ht.dispatch(ht.init.random_normal(
-                shape=(1024, 2048), stddev=0.04, name='mlp_fc1_weight'), (1, 1), duplicate=2)
+                shape=(1024, 2048), stddev=0.04, name='mlp_fc1_weight'), (1, 1))
         elif args.split == 'right':
-            activation = ht.dispatch(activation, (1, 1), duplicate=2)
+            activation = ht.dispatch(activation, (1, 1))
             weight = ht.dispatch(ht.init.random_normal(
                 shape=(1024, 2048), stddev=0.04, name='mlp_fc1_weight'), (1, 2))
         else:

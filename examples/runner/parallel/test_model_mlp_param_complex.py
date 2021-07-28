@@ -26,11 +26,12 @@ if __name__ == "__main__":
     parser.add_argument('--batch-size', type=int, default=8, help='batch size')
     parser.add_argument('--learning-rate', type=float,
                         default=0.00001, help='learning rate')
-    parser.add_argument('--split', type=str, default='left')
+    parser.add_argument('--split', type=int, default=1)
     parser.add_argument('--split2', type=str, default=None)
+    parser.add_argument('--revert', action='store_true')
     parser.add_argument('--log', default=None)
     args = parser.parse_args()
-    assert args.split in ('left', 'right', 'middle')
+    assert args.split in tuple(range(5))
     assert args.split2 in (None, 'left', 'right', 'middle')
 
     # dataset
@@ -54,22 +55,48 @@ if __name__ == "__main__":
         x = ht.Variable(name="dataloader_x", trainable=False)
         activation = fc(x, (784, 1024), 'mlp_fc1', with_relu=True)
 
-    with ht.context((ht.gpu(1), ht.gpu(2))):
-        weight_save = np.load('std/' + 'special_weight.npy')
-        weight = ht.Variable(value=weight_save, name='mlp_fc1_weight')
-        if args.split == 'left':
-            activation = ht.dispatch(activation, (2, 1))
-            weight = ht.dispatch(weight, (1, 1))
-        elif args.split == 'right':
-            activation = ht.dispatch(activation, (1, 1))
-            weight = ht.dispatch(weight, (1, 2))
+    if args.revert and args.split2:
+        with ht.context((ht.gpu(6), ht.gpu(7))):
+            weight_save = np.load('std/' + 'special_weight.npy')
+            weight = ht.Variable(
+                value=weight_save, name='special_mlp_fc1_weight')
+            if args.split2 == 'left':
+                activation = ht.dispatch(activation, (2, 1))
+                weight = ht.dispatch(weight, (1, 1))
+            elif args.split2 == 'right':
+                activation = ht.dispatch(activation, (1, 1))
+                weight = ht.dispatch(weight, (1, 2))
+            else:
+                activation = ht.dispatch(activation, (1, 2))
+                weight = ht.dispatch(weight, (2, 1))
+            activation = ht.matmul_op(activation, weight)
+
+    with ht.context((ht.gpu(1), ht.gpu(2), ht.gpu(4), ht.gpu(5))):
+        if args.revert:
+            weight_save = np.load('std/' + 'special_weight2.npy')
+            weight = ht.Variable(value=weight_save, name='mlp_fc2_weight')
         else:
-            activation = ht.dispatch(activation, (1, 2))
+            weight_save = np.load('std/' + 'special_weight.npy')
+            weight = ht.Variable(value=weight_save, name='mlp_fc1_weight')
+        if args.split == 0:
+            activation = ht.dispatch(activation, (4, 1))
+            weight = ht.dispatch(weight, (1, 1))
+        elif args.split == 1:
+            activation = ht.dispatch(activation, (2, 2))
             weight = ht.dispatch(weight, (2, 1))
+        elif args.split == 2:
+            activation = ht.dispatch(activation, (2, 1))
+            weight = ht.dispatch(weight, (1, 2))
+        elif args.split == 3:
+            activation = ht.dispatch(activation, (1, 2))
+            weight = ht.dispatch(weight, (2, 2))
+        elif args.split == 4:
+            activation = ht.dispatch(activation, (1, 1))
+            weight = ht.dispatch(weight, (1, 4))
         activation = ht.matmul_op(activation, weight)
 
-    if args.split2:
-        with ht.context((ht.gpu(4), ht.gpu(5))):
+    if not args.revert and args.split2:
+        with ht.context((ht.gpu(6), ht.gpu(7))):
             weight_save = np.load('std/' + 'special_weight2.npy')
             weight = ht.Variable(
                 value=weight_save, name='special_mlp_fc2_weight')
