@@ -332,7 +332,7 @@ class Executor(object):
         
         if config.gpipe:
             self.subexecutor = {k: SubExecutor4Gpipe(k, v, config) for k, v in eval_node_dict.items()}
-        elif config.pipedream
+        elif config.pipedream:
             self.subexecutor = {k: SubExecutor4Pipedream(k, v, config) for k, v in eval_node_dict.items()}
         else:
             self.subexecutor = {k: SubExecutor(k, v, config) for k, v in eval_node_dict.items()}
@@ -779,8 +779,10 @@ class SubExecutor4Pipedream(object):
         eval_node_list: list of nodes whose values need to be computed.
         topo_order: list of nodes in topological order
         node_to_shape_map: dict from node to shape of the node
-        node_to_arr_maps: a list of [dict from node to ndarray.NDArray allocated for node]
+        batch_to_tensor_maps: a dict of maps storing intermediate tensors for each micro-batch 
+        batch_to_weight_maps: a dict of maps storing params tensors for each micro-batch 
         feed_shapes: shapes of feed_dict from last run(...)
+
         """
         self.name = name
         self.eval_node_list = eval_node_list
@@ -806,14 +808,13 @@ class SubExecutor4Pipedream(object):
                 self.topo_order = find_topo_sort(self.eval_node_list)
 
         # split the topo into two parts: forward and backward
-        # split critia for gpu0~gpu n-2: nodes before the first send op belong to forward
-        # split critia for gpu n-1: nodes after the first oneslike op belong to forward
+        # split critia for gpu0~gpu n-2: nodes before(including) the first send op belong to forward
+        # split critia for gpu n-1: nodes before(not including) the first oneslike op belong to forward
         pivot_idx = 0
         for i in range(len(self.topo_order)):
             if isinstance(self.topo_order[i], (OnesLikeOp, PipelineSendOp)):
                 pivot_idx = i
                 break
-
 
         if config.local_rank == config.nrank - 1:
             # node before oneslike belong to forward
@@ -824,7 +825,10 @@ class SubExecutor4Pipedream(object):
             self.backward_topo_order = self.topo_order[pivot_idx+1:]
 
         def move_send_op(tp):
-            # move send op to the tail
+            """
+            move send op to the tail so that we can wrap send/recv pairs
+            with nccl groupcall to avoid deadlock
+            """
             saved_send = None
             for n in tp:
                 if isinstance(n, PipelineSendOp):
@@ -1032,6 +1036,7 @@ class SubExecutor4Pipedream(object):
                             GroupEnd()
                         break
                     else:
+                        # still have unfinished micro-batches to do backward
                         if self.config.local_rank == 0:
                             GroupStart()
                         elif self.config.local_rank == self.config.nrank - 1:
@@ -1129,8 +1134,8 @@ class SubExecutor4Pipedream(object):
 
             else:
                 """
-                doing backward, we choose the oldest in-flight batch to backward,
-                we use tmp_batch_id to access use the according maps
+                doing backward, we choose the oldest in-flight batch,
+                we use tmp_batch_id to access the according maps
                 """
                 tmp_batch_id = in_flight_batches.pop(0)
                 #print("rank: {}, schedule: {}, batch: {}".format(local_rank, cur_schedule, tmp_batch_id))
@@ -1179,6 +1184,17 @@ class SubExecutor4Pipedream(object):
                     node.compute(input_vals, node_val, self.d2h_stream)
 
                 elif isinstance(node, PipelineSendOp):
+                    """
+                    to avoid deadlock of PipelineSend/PipelineRecv pairs,
+                    we need wrap them in group call.
+
+                    Forward compute topo: [... node1 node2 SendOp]
+                    Backward compute topo: [RecvOp node3 node4 ...]
+
+                    for each rank, we need to insert GroupStart before the ending
+                    SendOp of each forward phase, and insert GroupEnd after the first
+                    RecvOp of the next backward phase
+                    """
                     group_call = False
                     if local_rank == 0 and tmp_batch_id >= start_group_call_idx:
                         group_call = True
@@ -1756,7 +1772,20 @@ def sum_node_list(node_list, ctx):
     return sum_node
 
 def get_scheduler(rank, nrank):
-    # used in pipedream; 0: forward, 1: backward
+    """
+    used in pipedream; 0: forward, 1: backward
+
+    the pipeline schedule is 1F1B in steady phase like following:
+        * -- means bubble
+        * 1F means forward of micro-batch1
+        * 2B means backward of micro-batch2
+    
+    gpu0: 1F -- 2F -- 3F -- 4F 1B 5F 2B 6F 3B 7F 4B -- 5B -- 6B -- 7B
+    gpu1:    1F -- 2F -- 3F 1B 4F 2B 5F 3B 6F 4B 7F 5B -- 6B -- 7B
+    gpu2:       1F -- 2F 1B 3F 2B 4F 3B 5F 4B 6F 5B 7F 6B -- 7B
+    gpu3:          1F 1B 2F 2B 3F 3B 4F 4B 5F 5B 6F 6B 7F 7B
+
+    """
     assert 0 <= rank < nrank, "invalid args for get_scheduler"
     prefix_forward = [0 for _ in range(nrank - rank)]
     for p in prefix_forward:

@@ -151,7 +151,7 @@ int DLGpuInstanceNormalization2dGradient(const DLArrayHandle out_grads,
                                          DLStreamHandle stream_handle) {
     /*
        already have mean and var, we directly get y = x-u / sigma
-       the grad_arr = out_grad * (1 - 1/WH - y^2) / var
+       the grad_arr = out_grad * (1 - 1/WH - y^2) / sigma
      */
     int dev_id = (out_grads->ctx).device_id;
     cudnn_init(dev_id, stream_handle);
