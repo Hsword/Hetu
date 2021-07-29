@@ -85,27 +85,62 @@ class MatMulOp(Op):
             shape_B = B[0]
         return (shape_A, shape_B)
 
-    def deduce_states(self, states, duplicates):
+    def deduce_states(self, states, duplicates, orders):
         def revert(x):
             return (x[1], x[0])
 
-        def gcd(x, y):
-            return y if x % y == 0 else gcd(y, x % y)
+        assert len(states) == 2 and len(duplicates) == 2 and len(orders) == 2
         if states[0] is None and states[1] is None:
-            return None, min(duplicates)
+            return None, 1, None
         if states[0] is None:
             states[0] = (1, 1)
         if states[1] is None:
             states[1] = (1, 1)
         assert len(states[0]) == 2 and len(states[1]) == 2
-        assert np.prod(states[0]) * \
-            duplicates[0] == np.prod(states[1]) * duplicates[1]
         if self.matmul_attr_trans_A:
             states[0] = revert(states[0])
         if self.matmul_attr_trans_B:
             states[1] = revert(states[1])
-        assert states[0][1] == states[1][0], 'Partition number of left matrix column shoule match that of right matrix row.'
-        return (states[0][0], states[1][1]), gcd(max(duplicates), min(duplicates)) * states[0][1]
+        assert states[0][1] == states[1][0], \
+            'Partition number of left matrix column shoule match that of right matrix row.'
+
+        if duplicates[0] is None:
+            duplicates[0] = states[1][1]
+        assert duplicates[0] == states[1][1], 'The duplicate number is not conform with states.'
+        if duplicates[1] is None:
+            duplicates[1] = states[0][0]
+        assert duplicates[1] == states[0][0], 'The duplicate number is not conform with states.'
+
+        map_index = self.matmul_attr_trans_B * 2 + self.matmul_attr_trans_A
+        l2r_map = [
+            {0: -1, -1: 1, 1: 0},  # no trans
+            {1: -1, -1: 1, 0: 0},  # trans A
+            {0: -1, -1: 0, 1: 1},  # trans B
+            {1: -1, -1: 0, 0: 1},  # trans both
+        ][map_index]
+        r2l_map = [
+            {-1: 0, 1: -1, 0: 1},  # no trans
+            {-1: 1, 1: -1, 0: 0},  # trans A
+            {-1: 0, 0: -1, 1: 1},  # trans B
+            {-1: 1, 0: -1, 1: 0},  # trans both
+        ][map_index]
+        l2res_map = [
+            {-1: 1, 0: 0, 1: -1},  # no trans
+            {-1: 1, 1: 0, 0: -1},  # trans A
+        ][self.matmul_attr_trans_A]
+        if orders[0] is None and orders[1] is None:
+            # for left matrix, the order of dimensions are (row, duplicate, column)
+            orders[0] = (1, -1, 0) if self.matmul_attr_trans_A else (0, -1, 1)
+            # for right matrix, the order of dimensions are (duplicate, column, row)
+            orders[1] = (-1, 0, 1) if self.matmul_attr_trans_B else (-1, 1, 0)
+        elif orders[0] is None and orders[1] is not None:
+            orders[0] = tuple(r2l_map[x] for x in orders[1])
+        elif orders[0] is not None and orders[1] is None:
+            orders[1] = tuple(l2r_map[x] for x in orders[0])
+        assert orders[0] == tuple(r2l_map[x] for x in orders[1])
+        assert orders[1] == tuple(l2r_map[x] for x in orders[0])
+
+        return (states[0][0], states[1][1]), states[0][1], tuple(l2res_map[x] for x in orders[0])
 
 
 def matmul_op(node_A, node_B, trans_A=False, trans_B=False, ctx=None):

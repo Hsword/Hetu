@@ -162,11 +162,18 @@ class Op(object):
     def backward_hook(self, config):
         pass
 
-    def deduce_states(self, input_states, input_duplicates):
-        assert len(input_states) == len(self.inputs)
-        assert len(input_states) == len(input_duplicates)
-        if len(input_states) == 1:
-            return input_states[0], input_duplicates[0]
+    def deduce_states(self, states, duplicates, orders):
+        assert len(states) == len(self.inputs)
+        assert len(states) == len(duplicates)
+        assert len(states) == len(orders)
+        if len(states) == 1:
+            return states[0], duplicates[0], orders[0]
         else:
-            assert all([x is None or x == (1, 1) for x in input_states])
-            return None, 1
+            assert all([x is None or x == (1, 1) for x in states])
+            cur_order = None
+            for order in orders:
+                if cur_order is None:
+                    cur_order = order
+                else:
+                    assert order in (None, cur_order)
+            return None, 1, cur_order

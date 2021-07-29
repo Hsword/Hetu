@@ -246,17 +246,15 @@ class HetuConfig(object):
             self.context = ndarray.gpu(device_id)
             self.p2p_stream = create_stream_handle(
                 self.context) if init_p2p_stream else None
-            self.my_eval_nodes, trainable_params, has_send_recv = assign_context_by_traverse_nodes(
+            self.my_eval_nodes, self.param_allreduce_group = assign_context_by_traverse_nodes(
                 eval_node_list, self.context, self.nccl_comm, self.p2p_stream)
-            if (self.comm_mode == "Hybrid" or self.comm_mode == "AllReduce") and has_send_recv:
-                # here we need to use group communicator to implement allreduce,
-                # since not all processes use the same group
-                groups = set([n.raw_ctx for n in trainable_params])
-                temp_group_comms = {}
-                for group in groups:
-                    temp_group_comms[group] = new_group_comm(group)
-                self.param_allreduce_group = {
-                    n: temp_group_comms[n.raw_ctx] for n in trainable_params}
+            for param in self.param_allreduce_group:
+                self.node_strategy[param] = 'AllReduce'
+            if self.param_allreduce_group != {}:
+                if self.comm_mode is None:
+                    self.comm_mode = 'AllReduce'
+                if self.comm_mode == 'PS':
+                    self.comm_mode = 'Hybrid'
         else:
             self.context = ctx
 
