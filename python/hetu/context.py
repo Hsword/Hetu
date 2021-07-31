@@ -92,6 +92,9 @@ class DeviceGroup(object):
     def __eq__(self, other):
         return hash(self) == hash(other)
 
+    def get_sorted(self):
+        return DeviceGroup(sorted(self._contexts, key=lambda x: hash(x.hostname) + hash(x.device_id)))
+
 
 class ContextStack(object):
     def __init__(self):
@@ -118,7 +121,7 @@ class NodeStatus(object):
         self._defaulted = False
         self.try_get_device_num()
 
-    @classmethod
+    @ classmethod
     def from_other(cls, other):
         if other is None:
             return cls(None, None, None)
@@ -138,15 +141,15 @@ class NodeStatus(object):
     def is_dist(self):
         return not (self._state is None or all([x == 1 for x in self._state]))
 
-    @property
+    @ property
     def state(self):
         return self._state
 
-    @property
+    @ property
     def duplicate(self):
         return self._duplicate
 
-    @property
+    @ property
     def order(self):
         return self._order
 
@@ -194,7 +197,7 @@ def get_current_context():
     return _default_ctx_stack.peek()
 
 
-@contextlib.contextmanager
+@ contextlib.contextmanager
 def context(ctx):
     try:
         ctx = DeviceGroup(ctx)
@@ -262,6 +265,26 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
     from .gpu_ops.AddElewise import add_op
     from .gpu_ops.executor import new_group_comm
 
+    def receiving(key, from_ctx):
+        if from_ctx == ctx:
+            return self_buffer[key]
+        else:
+            hostname = from_ctx.hostname
+            target_id = from_ctx.device_id
+            return pipeline_receive_op(mpi_comm.getRankFromDevice(
+                hostname, target_id), mpi_comm, stream=p2p_stream, ctx=ctx)
+
+    def sending(key, node, to_ctx):
+        if ctx == to_ctx:
+            self_buffer[key] = node
+        else:
+            hostname = to_ctx.hostname
+            target_id = to_ctx.device_id
+            target_rank = mpi_comm.getRankFromDevice(
+                hostname, target_id)
+            my_eval_nodes.append(pipeline_send_op(
+                node, target_rank, mpi_comm, stream=p2p_stream, ctx=ctx))
+
     def receive_model_parallel(prev_input, node):
         # assert dp_index_map[prev_input] < 0 and dp_index_map[node] >= 0
         dev_pos = dp_index_map[node]
@@ -269,11 +292,9 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
             # here we receive from a node on one device dispatching to many
             # in this case current node MUST have mp_index, and the split will be handled in sending
             assert mp_index_map[node] >= 0, 'Here only support 1 to N.'
-            hostname = prev_input.raw_ctx.workers[dev_pos].hostname
-            target_id = prev_input.raw_ctx.workers[dev_pos].device_id
             if prev_input not in recv_src:
-                recv_src[prev_input] = pipeline_receive_op(mpi_comm.getRankFromDevice(
-                    hostname, target_id), mpi_comm, stream=p2p_stream, ctx=ctx)
+                recv_src[prev_input] = receiving(
+                    prev_input, prev_input.raw_ctx.workers[dev_pos])
             return recv_src[prev_input]
         elif not isinstance(node.raw_ctx.workers[dev_pos], tuple):
             # here we receive from a node on multiple devices
@@ -287,8 +308,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 def make_comb(depth):
                     if depth == len(cur_order):
                         nonlocal device_index
-                        result = pipeline_receive_op(mpi_comm.getRankFromDevice(
-                            devices[device_index].hostname, devices[device_index].device_id), mpi_comm, stream=p2p_stream, ctx=ctx)
+                        result = receiving(prev_input, devices[device_index])
                         device_index += 1
                     else:
                         result = make_comb(depth + 1)
@@ -303,8 +323,8 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                                     depth + 1), axis=cur_dim, ctx=ctx)
                     return result
                 devices = prev_input.raw_ctx.workers[dev_pos]
-                cur_state, cur_duplicate, cur_order = \
-                    node_cur_state_map[prev_input].get_default()
+                cur_state, cur_duplicate, cur_order = node_cur_state_map[prev_input].get_default(
+                )
                 recv_src[prev_input] = make_comb(0)
                 assert device_index == len(prev_input.raw_ctx.workers[dev_pos])
             return recv_src[prev_input]
@@ -314,10 +334,8 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
             if prev_input not in recv_src:
                 prev_ns = node_cur_state_map[prev_input]
                 target_ns = node_tar_state_map[prev_input]
-                prev_state, prev_duplicate, prev_order = \
-                    prev_ns.get_default()
-                target_state, target_duplicate, target_order = \
-                    target_ns.get_default()
+                prev_state, prev_duplicate, prev_order = prev_ns.get_default()
+                target_state, target_duplicate, target_order = target_ns.get_default()
                 prev_ns.check_devices(prev_input.raw_ctx[dev_pos])
                 target_ns.check_devices(node.raw_ctx[dev_pos])
                 loop_sizes = prev_ns.get_loop_sizes()
@@ -328,8 +346,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 def cross_receive(depth):
                     nonlocal device_index
                     if depth == len(prev_order):
-                        res = pipeline_receive_op(mpi_comm.getRankFromDevice(
-                            devices[device_index].hostname, devices[device_index].device_id), mpi_comm, stream=p2p_stream, ctx=ctx)
+                        res = receiving(prev_input, devices[device_index])
                         device_index += 1
                     else:
                         cur_dim = prev_order[depth]
@@ -385,14 +402,9 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 def make_split(cur_state, depth):
                     if len(target_order) == depth:
                         nonlocal device_index
-                        hostname = devices[device_index].hostname
-                        target_id = devices[device_index].device_id
                         cur_node = prev_input if not target_ns.is_dist() else split_op(
                             prev_input, list(range(len(target_state))), list(cur_state), list(target_state), ctx=ctx)
-                        target_rank = mpi_comm.getRankFromDevice(
-                            hostname, target_id)
-                        my_eval_nodes.append(pipeline_send_op(
-                            cur_node, target_rank, mpi_comm, stream=p2p_stream, ctx=ctx))
+                        sending(prev_input, cur_node, devices[device_index])
                         device_index += 1
                     else:
                         cur_dim = target_order[depth]
@@ -404,8 +416,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                                 cur_state[cur_dim] = ts
                                 make_split(cur_state, depth + 1)
                 target_ns = node_tar_state_map[prev_input]
-                target_state, target_duplicate, target_order = \
-                    target_ns.get_default()
+                target_state, target_duplicate, target_order = target_ns.get_default()
                 make_split(target_ns.make_empty_state(), 0)
                 assert device_index == len(
                     node.raw_ctx.workers[dev_pos])
@@ -415,13 +426,11 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
             target = node_tar_state_map[prev_input]
             assert mp_index_map[prev_input] >= 0 and not target.is_dist(
             ), 'Here only support N to 1.'
-            hostname = node.raw_ctx.workers[dev_pos].hostname
-            target_id = node.raw_ctx.workers[dev_pos].device_id
-            key = (prev_input, target_id)
+            device = node.raw_ctx.workers[dev_pos]
+            key = (prev_input, device)
             if key not in send_dst:
                 send_dst[key] = True
-                my_eval_nodes.append(pipeline_send_op(prev_input, mpi_comm.getRankFromDevice(
-                    hostname, target_id), mpi_comm, stream=p2p_stream, ctx=ctx))
+                sending(prev_input, prev_input, device)
         else:
             # here the prev input and the node are both in model parallel, with different states
             assert mp_index_map[prev_input] >= 0, 'Here only support N to N.'
@@ -431,10 +440,8 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 send_dst[key] = True
                 prev_ns = node_cur_state_map[prev_input]
                 target_ns = node_tar_state_map[prev_input]
-                prev_state, prev_duplicate, prev_order = \
-                    prev_ns.get_default()
-                target_state, target_duplicate, target_order = \
-                    target_ns.get_default()
+                prev_state, prev_duplicate, prev_order = prev_ns.get_default()
+                target_state, target_duplicate, target_order = target_ns.get_default()
                 prev_ns.check_devices(prev_input.raw_ctx[dev_pos])
                 target_ns.check_devices(node.raw_ctx[dev_pos])
                 cur_state_index = prev_ns.map_dev_to_index(
@@ -445,14 +452,9 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 def cross_send(split_cur_state, split_target_state, depth, need_split):
                     nonlocal device_index
                     if depth == len(target_order):
-                        hostname = devices[device_index].hostname
-                        target_id = devices[device_index].device_id
                         cur_node = prev_input if not need_split else split_op(
                             prev_input, list(range(len(split_target_state))), list(split_cur_state), list(split_target_state), ctx=ctx)
-                        target_rank = mpi_comm.getRankFromDevice(
-                            hostname, target_id)
-                        my_eval_nodes.append(pipeline_send_op(
-                            cur_node, target_rank, mpi_comm, stream=p2p_stream, ctx=ctx))
+                        sending(prev_input, cur_node, devices[device_index])
                         device_index += 1
                     else:
                         cur_dim = target_order[depth]
@@ -556,6 +558,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                             allreduce_devices = None if len(
                                 allreduce_devices) <= 1 else DeviceGroup(allreduce_devices)
                         if allreduce_devices is not None:
+                            allreduce_devices = allreduce_devices.get_sorted()
                             if allreduce_devices not in comm_groups:
                                 comm_groups[allreduce_devices] = new_group_comm(
                                     allreduce_devices)
@@ -627,8 +630,6 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 # the device in correspondent place will communicate with each other
                 # TODO: not support following case: context(1,5) -> context(5,1); context(1,5) -> context(3,1)
                 # solution: modify following is_my_node logic to support
-                # TODO: not support the case that each process has different group init numbers, since there is an AllGather in mpi_nccl_comm's init
-                # solution: modify mpi_nccl_comm class, so that the MPI part only process once while nccl has several groups
                 assert node.raw_ctx.worker_num == n.raw_ctx.worker_num, \
                     'In pipeline + data parallel, devices number of each stage should be equal!'
 
@@ -637,8 +638,6 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                     # TODO: release the constraint above
                     # here in every context each device appear only once
                     # TODO: consider whether or not release the constraint above?
-                    # here we only allow one2n/n2one/n2n, can not change from x to y where x != 1 and y != 1 and x != y in dimension-granularity
-                    # TODO: consider whether or not release the constraint above? too complex and not realistic!
                     real_input = n.inputs[0]
                     if dp_index >= 0 and dp_index_map[real_input] < 0:
                         node.inputs[i] = receive_model_parallel(
@@ -646,32 +645,31 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                     elif dp_index < 0 and dp_index_map[real_input] >= 0:
                         send_model_parallel(real_input, node)
                     elif dp_index >= 0 and dp_index_map[real_input] >= 0:
-                        # now only allow initialized variables
-                        assert real_input.raw_ctx == node.raw_ctx
-                        assert isinstance(real_input, PlaceholderOp)
-                        node.inputs[i] = real_input
+                        if isinstance(real_input, PlaceholderOp):
+                            assert real_input.raw_ctx == node.raw_ctx
+                            node.inputs[i] = real_input
+                        else:
+                            send_model_parallel(real_input, node)
+                            node.inputs[i] = receive_model_parallel(
+                                real_input, node)
                 else:
                     assert mp_index == mp_index_map[n]
                     if mp_index < 0:
                         # handle receiving
                         if dp_index >= 0 and dp_index != dp_index_map[n]:
                             my_pos = dp_index
-                            hostname = n.raw_ctx.workers[my_pos].hostname
-                            target_id = n.raw_ctx.workers[my_pos].device_id
                             if n not in recv_src:
-                                recv_src[n] = pipeline_receive_op(mpi_comm.getRankFromDevice(
-                                    hostname, target_id), mpi_comm, stream=p2p_stream, ctx=ctx)
+                                recv_src[n] = receiving(
+                                    n, n.raw_ctx.workers[my_pos])
                             node.inputs[i] = recv_src[n]
                         # handle sending
                         if dp_index_map[n] >= 0 and dp_index != dp_index_map[n]:
                             my_pos = dp_index_map[n]
-                            hostname = node.raw_ctx.workers[my_pos].hostname
-                            target_id = node.raw_ctx.workers[my_pos].device_id
-                            key = (n, target_id)
+                            device = node.raw_ctx.workers[my_pos]
+                            key = (n, device)
                             if key not in send_dst:
                                 send_dst[key] = True
-                                my_eval_nodes.append(pipeline_send_op(n, mpi_comm.getRankFromDevice(
-                                    hostname, target_id), mpi_comm, stream=p2p_stream, ctx=ctx))
+                                sending(n, n, device)
                     else:
                         # here in the same model parallel
                         assert node.raw_ctx == n.raw_ctx
@@ -690,6 +688,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
     param_allreduce_group = {}
     send_dst = {}
     recv_src = {}
+    self_buffer = {}  # send and receive from self device
     mp_index_map = {}  # model parallel index
     dp_index_map = {}  # data parallel index
     node_cur_state_map = {}  # save nodes' current state
