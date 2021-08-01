@@ -7,4 +7,4 @@ from . import optimizer as optim
 from . import lr_scheduler as lr
 from . import initializers as init
 from . import data
-#from .tokenizers import *
+from .tokenizers import *

@@ -24,6 +24,7 @@ from .ReluLink import *
 from .LeakyReluLink import *
 from .ReshapeLink import *
 from .SoftmaxCrossEntropyLink import *
+from .SoftmaxCrossEntropySparseLink import *
 from .SoftmaxLink import *
 from .MatrixDivideConstLink import *
 from .MatrixDivideLink import *
