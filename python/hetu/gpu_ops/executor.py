@@ -139,6 +139,7 @@ class HetuConfig(object):
         'placeholder_to_arr_map',
         'gpipe',
         'pipedream',
+        'dynamic_memory',
     ]
 
     def __init__(
@@ -157,7 +158,8 @@ class HetuConfig(object):
         cache_bound=100,
         log_path=None,
         gpipe=False,
-        pipedream=False
+        pipedream=False,
+        dynamic_memory=False,
     ):
         '''
         context: default device context
@@ -173,6 +175,8 @@ class HetuConfig(object):
         self.eval_node_list = eval_node_list
         self.train_name = train_name
         self.val_name = val_name
+
+        self.dynamic_memory = dynamic_memory
 
         # check context
         if ctx is None:
@@ -288,6 +292,8 @@ class HetuConfig(object):
         self.enable_lazy = False and enable_lazy  # now we don't use lazy
         self.bsp = bsp
         self.cache_bound = int(cache_bound)
+        if self.dynamic_memory:
+            self.enable_lazy = False
 
         self.log_path = log_path
         if log_path is not None and (self.comm_mode == 'PS' or self.comm_mode == "Hybrid"):
@@ -1324,12 +1330,22 @@ class SubExecutor(object):
         self.use_sparse_pull = self.config.use_sparse_pull
         self.cstable_policy = self.config.cstable_policy
         self.use_p2p = self.config.p2p_stream is not None
+        self.dynamic_memory = self.config.dynamic_memory
 
         # assisting structures, improve performance
         self.need_feed_nodes = []
         self.param_nodes = []
         self.dataloader_nodes = []
         self.computing_nodes = []
+
+        # structures related to memory pool, used when dynamic_memory == True
+        self.node_outdeg_map = {}
+        self.node_ref_cnt = {}
+        self.memory_pool = {}
+        for node in self.topo_order:
+            self.node_outdeg_map[node] = 0
+            self.node_ref_cnt[node] = None
+
         for node in self.topo_order:
             if isinstance(node, DataloaderOp) or isinstance(node, GNNDataLoaderOp):
                 self.dataloader_nodes.append(node)
@@ -1340,6 +1356,8 @@ class SubExecutor(object):
                     self.param_nodes.append(node)
             elif not ((self.use_sparse_pull or self.cstable_policy) and isinstance(node, EmbeddingLookUp) and self.config.prefetch):
                 self.computing_nodes.append(node)
+            for n in node.inputs:
+                self.node_outdeg_map[n] += 1
         self.batch_num = set([node.get_batch_num(self.name)
                               for node in self.dataloader_nodes])
         assert len(self.batch_num) <= 1, 'Batch num not conform.'
@@ -1377,6 +1395,15 @@ class SubExecutor(object):
         self.param_nodes = []
         self.dataloader_nodes = []
         self.computing_nodes = []
+
+        # structures related to memory pool, used when dynamic_memory == True
+        self.node_outdeg_map = {}
+        self.node_ref_cnt = {}
+        self.memory_pool = {}
+        for node in self.topo_order:
+            self.node_outdeg_map[node] = 0
+            self.node_ref_cnt[node] = None
+
         for node in self.topo_order:
             if isinstance(node, DataloaderOp) or isinstance(node, GNNDataLoaderOp):
                 self.dataloader_nodes.append(node)
@@ -1387,6 +1414,8 @@ class SubExecutor(object):
                     self.param_nodes.append(node)
             elif not ((self.use_sparse_pull or self.cstable_policy) and isinstance(node, EmbeddingLookUp) and self.config.prefetch):
                 self.computing_nodes.append(node)
+            for n in node.inputs:
+                self.node_outdeg_map[n] += 1
         self.batch_num = set([node.get_batch_num(self.name)
                               for node in self.dataloader_nodes])
         assert len(self.batch_num) <= 1, 'Batch num not conform.'
@@ -1415,6 +1444,56 @@ class SubExecutor(object):
                 cur_shape = node.infer_shape(input_shapes)
                 self.node_to_shape_map[node] = cur_shape if cur_shape is None else tuple(
                     cur_shape)
+
+    def from_memory_pool(self, key, node):
+        if key in self.memory_pool:
+            self.node_to_arr_map[node] = self.memory_pool[key].pop()
+            if not len(self.memory_pool[key]):
+                del self.memory_pool[key]
+            return True
+        else:
+            return False
+
+    def to_memory_pool(self, key, node):
+        if key not in self.memory_pool:
+            self.memory_pool[key] = []
+        self.memory_pool[key].append(self.node_to_arr_map[node])
+        self.node_to_arr_map[node] = None
+
+    def node_memory_plan(self, node):
+        """Allocates ndarray.NDArray for the specified node, used when dynamic_memory == True
+        Parameters
+        ----------
+        """
+        shape = self.node_to_shape_map[node]
+        if isinstance(node, PlaceholderOp):
+            if self.config.placeholder_to_arr_map[node] is not None:
+                self.node_to_arr_map[node] = self.config.placeholder_to_arr_map[node]
+            elif node not in self.node_to_arr_map:
+                self.node_to_arr_map[node] = None
+        elif not isinstance(node, DataloaderOp) and not isinstance(node, GNNDataLoaderOp):
+            # add for OptimizerOp and ParameterServerOp
+            if shape is None:
+                self.node_to_arr_map[node] = None
+                return
+            if isinstance(node, (EmbeddingLookUp_Gradient, DataD2HSparseOp)):
+                if not self.from_memory_pool((shape,'IndexedSlices'), node):
+                    self.node_to_arr_map[node] = ndarray.IndexedSlices(dense_shape=shape)
+                return
+            if isinstance(node, EmbeddingLookUp) and (self.use_sparse_pull or self.cstable_policy) and self.config.prefetch:
+                self.node_to_arr_map[node] = self.param_psval_map[node.inputs[0]]
+                return
+            if node.on_gpu:
+                if node.inplace:
+                    self.node_to_arr_map[node] = ndarray.NDArray(None)
+                elif self.inference and isinstance(node, DropoutOp):
+                    self.node_to_arr_map[node] = self.node_to_arr_map[node.inputs[0]]
+                else:
+                    if not self.from_memory_pool(shape, node):
+                        self.node_to_arr_map[node] = ndarray.empty(shape, ctx=node.ctx)
+            else:
+                if not self.from_memory_pool(shape, node):
+                    self.node_to_arr_map[node] = ndarray.empty(shape, ctx=node.ctx)
 
     def memory_plan(self):
         """Allocates ndarray.NDArray for every node except feed_dict nodes.
@@ -1530,10 +1609,21 @@ class SubExecutor(object):
         if need_reallocation:
             self.init_need_allocation = False
             self.infer_shape(feed_shapes)
-            self.memory_plan()
+            if not self.dynamic_memory:
+                self.memory_plan()
 
         # computing
         for node in self.computing_nodes:
+            if self.dynamic_memory: 
+                # allocate memory for the node when dynamic_memory == True
+                if self.node_ref_cnt[node] is None or need_reallocation:
+                    self.node_memory_plan(node)
+                    self.node_ref_cnt[node] = self.node_outdeg_map[node]
+                for n in node.inputs:
+                    if n not in self.node_to_arr_map:
+                        self.node_memory_plan(n)
+                        self.node_ref_cnt[n] = self.node_outdeg_map[n]
+
             if node.on_cpu and isinstance(self.node_to_arr_map[node], ndarray.NDArray):
                 if DNNL_LIB['cpu_ArraySet'] and not isinstance(node, DataD2HOp):
                     cpu_array_set(self.node_to_arr_map[node], 0.0)
@@ -1578,6 +1668,23 @@ class SubExecutor(object):
                 if isinstance(node.event, Event):
                     # for d2h op / eval nodes / nodes before [allreduce or ps nodes or pipelinesend nodes]
                     node.event.record(self.comp_stream)
+
+
+            if self.dynamic_memory:
+                # free nodes whose reference count is 0 when dynamic_memory == True
+                for n in node.inputs:
+                    if n in self.computing_nodes:
+                        self.node_ref_cnt[n] -= 1
+                        if self.node_ref_cnt[n] <= 0 and n not in self.eval_node_list:
+                            self.node_ref_cnt[n] = None
+                            key = self.node_to_shape_map[n]
+                            if key is not None:
+                                if n.op_type in ['EmbeddingLookUp_Gradient', 'DataD2HSparseOp']:
+                                    key = (key, 'IndexedSlices')
+                                self.to_memory_pool(key, n)
+                            else:
+                                del self.node_to_arr_map[n]
+
         for n in self.eval_node_list:
             # every node in eval_node_list should have an event (except dataloader/optimizer...)
             if n.event:
