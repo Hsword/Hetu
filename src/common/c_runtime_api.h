@@ -290,6 +290,14 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle output_grad, const DLArrayHandle ids,
         DLArrayHandle input_grad, DLStreamHandle stream_handle);
 
+    int DLGpuSoftmaxCrossEntropySparse(const DLArrayHandle input_a,
+                                const DLArrayHandle input_b,
+                                const int ignored_index,
+                                DLArrayHandle output, DLStreamHandle stream_handle);
+    int DLGpuSoftmaxCrossEntropySparse_Gradient(const DLArrayHandle input_a, const DLArrayHandle input_b,
+                                        const DLArrayHandle input_c, const int ignored_index,
+                                        DLArrayHandle output,
+                                        DLStreamHandle stream_handle);
     int DLGpuSoftmaxCrossEntropy(
         const DLArrayHandle input_a, const DLArrayHandle input_b,
         DLArrayHandle output, DLStreamHandle stream_handle);
