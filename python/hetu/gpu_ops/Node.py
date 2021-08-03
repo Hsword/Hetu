@@ -169,7 +169,18 @@ class Op(object):
         if len(states) == 1:
             return states[0], duplicates[0], orders[0]
         else:
-            assert all([x is None or x == (1, 1) for x in states])
+            cur_state = None
+            for state in states:
+                if cur_state is None:
+                    cur_state = state
+                else:
+                    assert state in (None, cur_state)
+            cur_duplicate = None
+            for duplicate in duplicates:
+                if cur_duplicate is None:
+                    cur_duplicate = duplicate
+                else:
+                    assert duplicate in (None, cur_duplicate)
             cur_order = None
             for order in orders:
                 if cur_order is None:
