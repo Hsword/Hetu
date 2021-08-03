@@ -13,12 +13,10 @@ Committers should be familiar with the guidelines for new contributors in [CONTR
 - [codecaution](https://github.com/codecaution) - **Xiaonan Nie**
 - [HugoZHL](https://github.com/HugoZHL) - **Hailin Zhang**
 - [nox-410](https://github.com/nox-410) - **Yining Shi**
-- [initzhang](https://github.com/initzhang) - **Xin Zhang**
 - [lovelyhan](https://github.com/lovelyhan) - **Yuezihan Jiang**
 - [AFDWang](https://github.com/AFDWang) - **Yujie Wang**
 - [sj1104](https://github.com/sj1104) - **Jia Shen**
-- [zhouyuegit](https://github.com/zhouyuegit) - **Yue Zhou**
-- [zmxdream](https://github.com/zmxdream) - **Minxu Zhang**
+
 
 We would like to sincerely thank the following community members for their contributions to Hetu.
 
@@ -27,7 +25,10 @@ We would like to sincerely thank the following community members for their contr
 - [ghandzhipeng](https://github.com/ghandzhipeng) - **Zhipeng Zhang (Alibaba)**
 - [xysmlx](https://github.com/xysmlx) - **Lingxiao Ma (MSRA)**
 - [hbsun2113](https://github.com/hbsun2113) - **Haobo Sun (Microsoft STCA)**
-- [M-Arimase](https://github.com/M-Arimase) - **Yikai Zhao**
-- [tsingyawn](https://github.com/tsingyawn) - **Xinlei Xue**
+- [M-Arimase](https://github.com/M-Arimase) - **Yikai Zhao (PKU)**
+- [tsingyawn](https://github.com/tsingyawn) - **Xinlei Xue (PKU)**
 - **Lizi Su**
 - **Dong Li**
+- [zhouyuegit](https://github.com/zhouyuegit) - **Yue Zhou**
+- [zmxdream](https://github.com/zmxdream) - **Minxu Zhang (Baidu)**
+- [initzhang](https://github.com/initzhang) - **Xin Zhang (CUHK)**

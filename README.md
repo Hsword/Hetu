@@ -6,8 +6,7 @@
 
 <!--- [![license](https://img.shields.io/github/license/apache/zookeeper?color=282661)](LICENSE) --->
 
-[Documentation](https://hetu-doc.readthedocs.io) |
-[Examples](https://hetu-doc.readthedocs.io/en/latest/Overview/performance.html)
+[Documentation](https://hetu-doc.readthedocs.io) | [Examples](https://hetu-doc.readthedocs.io/en/latest/Overview/performance.html)
 
 Hetu is a high-performance distributed deep learning system targeting trillions of parameters DL model training, developed by <a href="http://net.pku.edu.cn/~cuibin/" target="_blank" rel="nofollow">DAIR Lab</a> at Peking University. It takes account of both high availability in industry and innovation in academia, which has a number of advanced characteristics:
 
@@ -26,11 +25,10 @@ We welcome everyone interested in machine learning or graph computing to contrib
 ## Installation
 1. Clone the repository.
 
-2. Prepare the environment. We use Anaconda to manage packages. The following command create the conda environment to be used:
-```conda env create -f environment.yml``` .
-Please prepare Cuda toolkit and CuDNN in advance.
+2. Prepare the environment. We use Anaconda to manage packages. The following command create the conda environment to be used:`conda env create -f environment.yml`. Please prepare Cuda toolkit and CuDNN in advance.
 
 3. We use CMake to compile Hetu. Please copy the example configuration for compilation by `cp cmake/config.example.cmake cmake/config.cmake`. Users can modify the configuration file to enable/disable the compilation of each module. For advanced users (who not using the provided conda environment), the prerequisites for different modules in Hetu is listed in appendix.
+
 ```bash
 # modify paths and configurations in cmake/config.cmake
 
@@ -51,7 +49,6 @@ make geometric -j 8
 # make hetu-cache module
 make hetu_cache -j 8
 ```
-
 
 4. Prepare environment for running. Edit the hetu.exp file and set the environment path for python and the path for executable mpirun if necessary (for advanced users not using the provided conda environment). Then execute the command `source hetu.exp` .
 
@@ -78,11 +75,13 @@ bash examples/cnn/scripts/hetu_1gpu.sh cnn_3_layers MNIST
 ```
 
 Train a 3-layer mlp with allreduce on 8 gpus (use mpirun):
+
 ```bash
 bash examples/cnn/scripts/hetu_8gpu.sh mlp CIFAR10
 ```
 
 Train a 3-layer mlp with PS on 1 server and 2 workers:
+
 ```bash
 # in the script we launch the scheduler and server, and two workers
 bash examples/cnn/scripts/hetu_2gpu_ps.sh mlp CIFAR10
@@ -94,12 +93,12 @@ Please refer to examples directory, which contains CNN, NLP, CTR, GNN training s
 
 ## Community
 * Email: xupeng.miao@pku.edu.cn
-* Slack: coming soon
 * Hetu homepage: https://hetu-doc.readthedocs.io
 * [Committers & Contributors](COMMITTERS.md)
 * [Contributing to Hetu](CONTRIBUTING.md)
 * [Development plan](https://hetu-doc.readthedocs.io/en/latest/plan.html)
 
+<!---
 ## Enterprise Users
 
 If you are enterprise users and find Hetu is useful in your work, please let us know, and we are glad to add your company logo here.
@@ -107,6 +106,7 @@ If you are enterprise users and find Hetu is useful in your work, please let us 
 <img src="./img/tencent.png" width = "200"/>
 <img src="./img/alibabacloud.png" width = "200"/>
 <img src="./img/kuaishou.png" width = "200"/>
+--->
 
 ## License
 
