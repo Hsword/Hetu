@@ -82,6 +82,9 @@ class PlaceholderOp(Op):
     def reshape_in_mp(self, cur_part, parts):
         if self.reshaped:
             return
+        if self.shape is None:
+            # TODO: support reshape in input nodes
+            return
         self.reshaped = True
         # this function only used in context launch to enable variable initialized in model parallel
         ori_shape = list(self.shape)

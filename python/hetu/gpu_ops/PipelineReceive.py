@@ -38,7 +38,7 @@ class PipelineReceiveOp(Op):
     def infer_shape(self, input_shapes):
         if not self.shape_is_received:
             # receive
-            shape_arr = ndarray.array([0, 0, 0], self.ctx)
+            shape_arr = ndarray.array([0, 0, 0, 0], self.ctx)
             self.comm.dlarrayRecv(shape_arr,
                                   ncclDataType_t.ncclFloat32,
                                   self.const_attr,

@@ -35,9 +35,9 @@ class PipelineSendOp(Op):
         self.shape = shape
         if not self.shape_is_sent:
             self.shape_is_sent = True
-            # pad shape so that len=3
-            if len(shape) < 3:
-                shape = [0] * (3 - len(shape)) + list(shape)
+            # pad shape so that len=4
+            if len(shape) < 4:
+                shape = [0] * (4 - len(shape)) + list(shape)
             # construct and send
             payload = ndarray.array(shape, self.ctx)
             self.comm.dlarraySend(payload,
