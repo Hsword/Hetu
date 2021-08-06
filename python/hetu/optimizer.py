@@ -133,14 +133,18 @@ class OptimizerOp(Op):
         for i, node in enumerate(self.inputs):
             current_strategy = config.node_strategy.get(
                 self.optimizer.params[i], self.comm_mode)
+            cur_node = node
             if current_strategy == 'AllReduce' or (current_strategy == 'Hybrid' and not isinstance(node, EmbeddingLookUp_Gradient)):
-                new_inputs.append(ht.allreduceCommunicate_op(
-                    node, config.param_allreduce_group.get(self.optimizer.params[i], config.nccl_comm)))
+                cur_node = ht.allreduceCommunicate_op(
+                    node, config.param_allreduce_group.get(self.optimizer.params[i], config.nccl_comm))
+                if node in config.layer_indices:
+                    config.layer_indices[cur_node] = config.layer_indices[node]
             elif current_strategy == 'PS' or (current_strategy == 'Hybrid' and isinstance(node, EmbeddingLookUp_Gradient)):
-                new_inputs.append(ht.parameterServerCommunicate_op(
-                    node, self.optimizer.params[i], self.optimizer.get_config()))
-            else:
-                new_inputs.append(node)
+                cur_node = ht.parameterServerCommunicate_op(
+                    node, self.optimizer.params[i], self.optimizer.get_config())
+                if node in config.layer_indices:
+                    config.layer_indices[cur_node] = config.layer_indices[node]
+            new_inputs.append(cur_node)
         self.inputs = new_inputs
 
 
