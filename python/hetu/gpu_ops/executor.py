@@ -2060,17 +2060,22 @@ def reorder_for_group(topo_order, layer_indices):
     # here we reorder for 2 reasons:
     # 1. group consecutive pipeline send/recv ops
     # 2. reorder pipeline send/recv ops according to grouping indices
+    has_pipeline_ops = set([layer_indices[x] for x in layer_indices if isinstance(
+        x, (PipelineSendOp, PipelineReceiveOp))])
     labels = {}
     for node in topo_order:
-        if isinstance(node, SplitOp):
+        if isinstance(node, (DataH2DOp, DataD2HOp, DataD2HSparseOp)):
+            layer_indices[node] = layer_indices[node.inputs[0]] + 0.5
+        cur_with_pipeline = layer_indices[node] in has_pipeline_ops
+        if cur_with_pipeline and isinstance(node, SplitOp):
             labels[node] = 1
         elif isinstance(node, (PipelineSendOp, PipelineReceiveOp)):
             labels[node] = 2
-        elif isinstance(node, (AddOp, ConcatOp)):
+        elif cur_with_pipeline and isinstance(node, (AddOp, ConcatOp)):
             labels[node] = 3
         else:
             labels[node] = 0
 
-    topo_order = sorted(topo_order, key=lambda x: 4 *
+    topo_order = sorted(topo_order, key=lambda x: 10 *
                         layer_indices[x] + labels[x])
     return topo_order

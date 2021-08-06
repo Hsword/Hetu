@@ -518,6 +518,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
         mp_index_map[node] = -1
         dp_index_map[node] = -1
         if isinstance(node, DataloaderOp):
+            layer_indices[node] = layer_id
             return
         elif isinstance(node, OptimizerOp):
             nonlocal opt
@@ -613,6 +614,9 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
             input_orders = []
             for i, n in enumerate(node.inputs):
                 if isinstance(n, DataloaderOp):
+                    if n not in dp_index_map:
+                        layer_indices[n] = layer_id
+                        dp_index_map[n] = -1
                     continue
                 assign_ctx(n)
                 if isinstance(n, (DispatchOp, DispatchGradientOp)):
