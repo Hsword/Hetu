@@ -544,6 +544,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                         my_pos = dp_index_map[real_input]
                         if my_pos >= 0:
                             send_model_parallel(ori_grad.inputs[0], param)
+                layer_id += 2
             if trainable_params:
                 # indices = [original_params.index(param) for param in trainable_params]
                 node.optimizer.params = trainable_params
