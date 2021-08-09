@@ -130,9 +130,9 @@ class MatMulOp(Op):
         ][self.matmul_attr_trans_A]
         if orders[0] is None and orders[1] is None:
             # for left matrix, the order of dimensions are (row, duplicate, column)
-            orders[0] = (1, -1, 0) if self.matmul_attr_trans_A else (0, -1, 1)
+            orders[0] = (0, 1, -1) if self.matmul_attr_trans_A else (1, 0, -1)
             # for right matrix, the order of dimensions are (duplicate, column, row)
-            orders[1] = (-1, 0, 1) if self.matmul_attr_trans_B else (-1, 1, 0)
+            orders[1] = (1, -1, 0) if self.matmul_attr_trans_B else (0, -1, 1)
         elif orders[0] is None and orders[1] is not None:
             orders[0] = tuple(r2l_map[x] for x in orders[1])
         elif orders[0] is not None and orders[1] is None:

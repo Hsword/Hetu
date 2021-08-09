@@ -82,6 +82,37 @@ class Array_ReshapeOp(Op):
     def backward_hook(self, config):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
 
+    def deduce_states(self, states, duplicates, orders):
+        # now only support: maintain batch size dimension
+        assert len(states) == 1 and len(duplicates) == 1 and len(orders) == 1
+        result_state = states[0]
+        result_dupli = duplicates[0]
+        result_order = orders[0]
+        output_dim = len(self.output_shape)
+        if output_dim > len(result_state):
+            assert len(result_state) == 2
+            assert self.output_shape[1] % result_state[1] == 0
+            result_state = result_state + (1, ) * (output_dim - 2)
+            mapper = {
+                0: (0,),
+                -1: (-1,),
+                1: tuple(range(1, output_dim))
+            }
+            result_order = sum([mapper[x] for x in result_order], ())
+        elif output_dim < len(result_state):
+            assert output_dim == 2
+            assert all([x == 1 for x in result_state[2:]])
+            start = result_order.index(1)
+            assert result_order[start:start +
+                                len(result_order)-2] == tuple(range(1, len(result_order) - 1))
+            result_state = result_state[:2]
+            temp_order = []
+            for i in result_order:
+                if i in (-1, 0, 1):
+                    temp_order.append(i)
+            result_order = tuple(temp_order)
+        return result_state, result_dupli, result_order
+
 
 class Array_Reshape_GradientOp(Op):
     def __init__(self, node_in, node_out, ctx=None):
@@ -109,6 +140,11 @@ class Array_Reshape_GradientOp(Op):
 
     def backward_hook(self, config):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
+
+    def deduce_states(self, states, duplicates, orders):
+        # now only support: maintain batch size dimension
+        assert len(states) == 2 and len(duplicates) == 2 and len(orders) == 2
+        return states[0], duplicates[0], orders[0]
 
 
 def array_reshape_op(node, output_shape, ctx=None):

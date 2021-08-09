@@ -110,8 +110,8 @@ class Conv2dOp(Op):
         lnr_map = {0: -1, -1: 0, 1: 1, 2: 2, 3: 3}
         l2res_map = {-1: 1, 0: 0, 1: -1, 2: 2, 3: 3}
         if orders[0] is None and orders[1] is None:
-            orders[0] = (0, -1, 1, 2, 3)
-            orders[1] = (-1, 0, 1, 2, 3)
+            orders[0] = (1, 0, -1, 2, 3)
+            orders[1] = (1, -1, 0, 2, 3)
         elif orders[0] is None and orders[1] is not None:
             orders[0] = tuple(lnr_map[x] for x in orders[1])
         elif orders[0] is not None and orders[1] is None:
@@ -222,8 +222,8 @@ class Conv2d_Gradient_of_DataOp(Op):
         r2l_map = {0: -1, 1: 0, -1: 1, 2: 2, 3: 3}
         l2res_map = {-1: 0, 0: -1, 1: 1, 2: 2, 3: 3}
         if orders[0] is None and orders[1] is None:
-            orders[0] = (1, 0, -1, 2, 3)
-            orders[1] = (-1, 1, 0, 2, 3)
+            orders[0] = (0, -1, 1, 2, 3)
+            orders[1] = (1, 0, -1, 2, 3)
         elif orders[0] is None and orders[1] is not None:
             orders[0] = tuple(r2l_map[x] for x in orders[1])
         elif orders[0] is not None and orders[1] is None:
@@ -343,8 +343,8 @@ class Conv2d_Gradient_of_FilterOp(Op):
         lnr_map = {0: 0, 1: -1, -1: 1, 2: 2, 3: 3}
         l2res_map = {-1: 0, 0: -1, 1: 1, 2: 2, 3: 3}
         if orders[0] is None and orders[1] is None:
-            orders[0] = (0, 1, -1, 2, 3)
-            orders[1] = (0, -1, 1, 2, 3)
+            orders[0] = (0, -1, 1, 2, 3)
+            orders[1] = (0, 1, -1, 2, 3)
         elif orders[0] is None and orders[1] is not None:
             orders[0] = tuple(lnr_map[x] for x in orders[1])
         elif orders[0] is not None and orders[1] is None:
