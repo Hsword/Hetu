@@ -19,6 +19,9 @@ from ..stream import create_stream_handle, Event
 from ..context import get_current_context, get_launch_config_by_traverse_nodes, assign_context_by_traverse_nodes, DeviceGroup
 from .PipelineSend import PipelineSendOp
 from .PipelineReceive import PipelineReceiveOp
+from .AddElewise import AddOp
+from .Split import SplitOp
+from .Concat import ConcatOp
 from .Dropout import DropoutOp
 from .LayerNorm import Layer_NormalizationOp
 from .OnesLike import OnesLikeOp
@@ -27,6 +30,7 @@ from functools import reduce
 import ctypes
 import os
 from time import time
+from ..communicator.mpi_nccl_comm import ncclDataType_t, GroupStart, GroupEnd
 
 
 def path_to_lib(name):
@@ -140,6 +144,7 @@ class HetuConfig(object):
         'gpipe',
         'pipedream',
         'dynamic_memory',
+        'layer_indices',
     ]
 
     def __init__(
@@ -248,12 +253,13 @@ class HetuConfig(object):
         self.my_eval_nodes = eval_node_list
         self.p2p_stream = None
         self.param_allreduce_group = {}
+        self.layer_indices = None
         if context_launch:
             # comm_mode is None <=> only 1 model parallel instance
             self.context = ndarray.gpu(device_id)
             self.p2p_stream = create_stream_handle(
                 self.context) if init_p2p_stream else None
-            self.my_eval_nodes, self.param_allreduce_group = assign_context_by_traverse_nodes(
+            self.my_eval_nodes, self.param_allreduce_group, self.layer_indices = assign_context_by_traverse_nodes(
                 eval_node_list, self.context, self.nccl_comm, self.p2p_stream)
             for param in self.param_allreduce_group:
                 self.node_strategy[param] = 'AllReduce'
@@ -500,9 +506,12 @@ class SubExecutor4Gpipe(object):
             self.backward_topo_order = self.topo_order[pivot_idx+1:]
 
         """
-        print("gpu {}'s topo: ".format(config.local_rank), [(x.name,x.desc) for x in self.topo_order])
-        print("gpu {}'s forward topo: ".format(config.local_rank), [(x.name,x.desc) for x in self.forward_topo_order])
-        print("gpu {}'s backward topo: ".format(config.local_rank), [(x.name,x.desc) for x in self.backward_topo_order])
+        print("gpu {}'s topo: ".format(config.local_rank),
+              [(x.name,x.desc) for x in self.topo_order])
+        print("gpu {}'s forward topo: ".format(config.local_rank),
+              [(x.name,x.desc) for x in self.forward_topo_order])
+        print("gpu {}'s backward topo: ".format(config.local_rank),
+              [(x.name,x.desc) for x in self.backward_topo_order])
         """
 
         self.micro_batches_num = -1
@@ -808,8 +817,8 @@ class SubExecutor4Pipedream(object):
         eval_node_list: list of nodes whose values need to be computed.
         topo_order: list of nodes in topological order
         node_to_shape_map: dict from node to shape of the node
-        batch_to_tensor_maps: a dict of maps storing intermediate tensors for each micro-batch 
-        batch_to_weight_maps: a dict of maps storing params tensors for each micro-batch 
+        batch_to_tensor_maps: a dict of maps storing intermediate tensors for each micro-batch
+        batch_to_weight_maps: a dict of maps storing params tensors for each micro-batch
         feed_shapes: shapes of feed_dict from last run(...)
 
         """
@@ -872,9 +881,12 @@ class SubExecutor4Pipedream(object):
             move_send_op(self.backward_topo_order)
 
         """
-        print("gpu {}'s topo: ".format(config.local_rank), [x.desc for x in self.topo_order])
-        print("gpu {}'s forward topo: ".format(config.local_rank), [x.desc for x in self.forward_topo_order])
-        print("gpu {}'s backward topo: ".format(config.local_rank), [x.desc for x in self.backward_topo_order])
+        print("gpu {}'s topo: ".format(config.local_rank),
+              [x.desc for x in self.topo_order])
+        print("gpu {}'s forward topo: ".format(config.local_rank),
+              [x.desc for x in self.forward_topo_order])
+        print("gpu {}'s backward topo: ".format(config.local_rank),
+              [x.desc for x in self.backward_topo_order])
         print("")
         """
 
@@ -1008,8 +1020,8 @@ class SubExecutor4Pipedream(object):
                         shape, ctx=node.ctx)
 
     def run(self, eval_node_list={}, feed_generator={}, convert_to_numpy_ret_vals=False):
-        #from .my_log import get_logger
-        #log = get_logger(self.config.local_rank)
+        # from .my_log import get_logger
+        # log = get_logger(self.config.local_rank)
         """
         Parameters
         ----------
@@ -1063,7 +1075,7 @@ class SubExecutor4Pipedream(object):
                     for n, g in feed_generator.items():
                         feed_dict[n] = next(g)
                 except StopIteration:
-                    #print("no enough data after {} batches, finish all training!".format(batch_id))
+                    # print("no enough data after {} batches, finish all training!".format(batch_id))
                     """
                     add necessary group call to finish the pipeline
                     """
@@ -1087,7 +1099,7 @@ class SubExecutor4Pipedream(object):
 
                 batch_id += 1
                 in_flight_batches.append(batch_id)
-                #print("rank: {}, schedule: {}, batch: {}".format(local_rank, cur_schedule, batch_id))
+                # print("rank: {}, schedule: {}, batch: {}".format(local_rank, cur_schedule, batch_id))
 
                 if last_vacant_batch == -1:
                     # no old NDArray to reuse, allocate new
@@ -1133,14 +1145,14 @@ class SubExecutor4Pipedream(object):
                         if isinstance(value, np.ndarray):
 
                             if local_realloc:
-                                #cur_node_to_arr_map[node] = ndarray.array(value, ctx=node.ctx)
+                                # cur_node_to_arr_map[node] = ndarray.array(value, ctx=node.ctx)
                                 cur_node_to_arr_map[node] = ndarray.empty(
                                     local_shape, ctx=node.ctx)
                                 cur_node_to_arr_map[node].async_h2d(
                                     value, self.comp_stream)
                             else:
                                 # reinit, use async_copy
-                                #cur_node_to_arr_map[node][:] = ndarray.array(value, ctx=node.ctx)
+                                # cur_node_to_arr_map[node][:] = ndarray.array(value, ctx=node.ctx)
                                 cur_node_to_arr_map[node].async_h2d(
                                     value, self.comp_stream)
 
@@ -1184,7 +1196,7 @@ class SubExecutor4Pipedream(object):
                 we use tmp_batch_id to access the according maps
                 """
                 tmp_batch_id = in_flight_batches.pop(0)
-                #print("rank: {}, schedule: {}, batch: {}".format(local_rank, cur_schedule, tmp_batch_id))
+                # print("rank: {}, schedule: {}, batch: {}".format(local_rank, cur_schedule, tmp_batch_id))
 
             assert len(
                 self.dataloader_nodes) == 0, "pipedream currently does not support dataloader"
@@ -1216,7 +1228,7 @@ class SubExecutor4Pipedream(object):
                         input_vals.append(
                             self.batch_to_tensor_maps[tmp_batch_id][n])
 
-                #print("start compute node: {}".format(node.desc))
+                # print("start compute node: {}".format(node.desc))
                 if isinstance(node, (ParameterServerCommunicateOp, ParameterServerSparsePullOp)):
                     # Here we use d2h stream in ps op, since the stream is used for d2h data transfer.
                     # Please take care at this part.
@@ -1286,7 +1298,7 @@ class SubExecutor4Pipedream(object):
                 if n.event:
                     n.event.sync()
 
-            #print("finish sync for batch{} at rank{}".format(tmp_batch_id, self.config.local_rank))
+            # print("finish sync for batch{} at rank{}".format(tmp_batch_id, self.config.local_rank))
 
             # save result as numpy(must), because the tensor will be reused later
             if cur_schedule == 1:
@@ -1304,7 +1316,7 @@ class SubExecutor4Pipedream(object):
 
             # after update, mark the vacant maps
             if cur_schedule == 1:
-                #assert last_vacant_batch == -1, "last_vacant_batch error, check the logic of code"
+                # assert last_vacant_batch == -1, "last_vacant_batch error, check the logic of code"
                 last_vacant_batch = tmp_batch_id
 
             # end of scheduling loop
@@ -1359,6 +1371,9 @@ class SubExecutor(object):
                 fetch_sparse_parameter_value(self.topo_order, self.config)
             else:
                 self.topo_order = find_topo_sort(self.eval_node_list)
+
+        self.topo_order = reorder_for_group(
+            self.topo_order, self.config.layer_indices)
 
         # main structures, nodes' shapes and arrays
         self.node_to_shape_map = {}
@@ -1432,6 +1447,9 @@ class SubExecutor(object):
             else:
                 self.topo_order = find_topo_sort(self.eval_node_list)
 
+        self.topo_order = reorder_for_group(
+            self.topo_order, self.config.layer_indices)
+
         # main structures, nodes' shapes and arrays
         self.node_to_shape_map = {}
         self.node_to_arr_map = {}
@@ -1481,15 +1499,64 @@ class SubExecutor(object):
         ----------
         feed_shapes: node->shapes mapping for feed_dict nodes.
         """
+
+        def make_group():
+            if len(grouping_nodes) > 1:
+                GroupStart()
+            temp_res = {node: ndarray.empty(
+                (4,), ctx=node.ctx) for node in grouping_nodes}
+            nccl_comm = self.config.nccl_comm
+            p2p_stream = self.config.p2p_stream
+            for node in grouping_nodes:
+                if isinstance(node, PipelineSendOp):
+                    shape = self.node_to_shape_map[node.inputs[0]]
+                    if len(shape) < 4:
+                        shape = [0] * (4 - len(shape)) + list(shape)
+                    # construct and send
+                    temp_res[node][:] = np.array(shape)
+                    nccl_comm.dlarraySend(temp_res[node],
+                                          ncclDataType_t.ncclFloat32,
+                                          node.const_attr,
+                                          p2p_stream)
+                else:
+                    nccl_comm.dlarrayRecv(temp_res[node],
+                                          ncclDataType_t.ncclFloat32,
+                                          node.const_attr,
+                                          p2p_stream)
+            if len(grouping_nodes) > 1:
+                GroupEnd()
+            p2p_stream.sync()
+            for node in grouping_nodes:
+                if isinstance(node, PipelineSendOp):
+                    self.node_to_shape_map[node] = None
+                else:
+                    shape_arr = [int(x) for x in list(
+                        temp_res[node].asnumpy()) if x != 0]
+                    self.node_to_shape_map[node] = tuple(shape_arr)
+            grouping_nodes.clear()
+
         self.node_to_shape_map = {}
+        grouping_nodes = []
+        cur_ind = -1
         for node in self.topo_order:
             if node in feed_shapes:
                 self.node_to_shape_map[node] = tuple(feed_shapes[node])
             else:
+                if isinstance(node, (PipelineSendOp, PipelineReceiveOp)):
+                    if len(grouping_nodes) > 0 and self.config.layer_indices[node] != cur_ind:
+                        make_group()
+                    if len(grouping_nodes) == 0:
+                        cur_ind = self.config.layer_indices[node]
+                    grouping_nodes.append(node)
+                    continue
+                elif len(grouping_nodes) > 0:
+                    make_group()
                 input_shapes = [self.node_to_shape_map[n] for n in node.inputs]
                 cur_shape = node.infer_shape(input_shapes)
                 self.node_to_shape_map[node] = cur_shape if cur_shape is None else tuple(
                     cur_shape)
+        if len(grouping_nodes) > 0:
+            make_group()
 
     def from_memory_pool(self, key, node):
         if key in self.memory_pool:
@@ -1523,8 +1590,9 @@ class SubExecutor(object):
                 self.node_to_arr_map[node] = None
                 return
             if isinstance(node, (EmbeddingLookUp_Gradient, DataD2HSparseOp)):
-                if not self.from_memory_pool((shape,'IndexedSlices'), node):
-                    self.node_to_arr_map[node] = ndarray.IndexedSlices(dense_shape=shape)
+                if not self.from_memory_pool((shape, 'IndexedSlices'), node):
+                    self.node_to_arr_map[node] = ndarray.IndexedSlices(
+                        dense_shape=shape)
                 return
             if isinstance(node, EmbeddingLookUp) and (self.use_sparse_pull or self.cstable_policy) and self.config.prefetch:
                 self.node_to_arr_map[node] = self.param_psval_map[node.inputs[0]]
@@ -1536,10 +1604,12 @@ class SubExecutor(object):
                     self.node_to_arr_map[node] = self.node_to_arr_map[node.inputs[0]]
                 else:
                     if not self.from_memory_pool(shape, node):
-                        self.node_to_arr_map[node] = ndarray.empty(shape, ctx=node.ctx)
+                        self.node_to_arr_map[node] = ndarray.empty(
+                            shape, ctx=node.ctx)
             else:
                 if not self.from_memory_pool(shape, node):
-                    self.node_to_arr_map[node] = ndarray.empty(shape, ctx=node.ctx)
+                    self.node_to_arr_map[node] = ndarray.empty(
+                        shape, ctx=node.ctx)
 
     def memory_plan(self):
         """Allocates ndarray.NDArray for every node except feed_dict nodes.
@@ -1659,8 +1729,33 @@ class SubExecutor(object):
                 self.memory_plan()
 
         # computing
+        grouping_nodes = []
+        cur_ind = -1
+
+        def make_group():
+            if len(grouping_nodes) > 1:
+                GroupStart()
+            nccl_comm = self.config.nccl_comm
+            p2p_stream = self.config.p2p_stream
+            for node in grouping_nodes:
+                if isinstance(node, PipelineSendOp):
+                    nccl_comm.dlarraySend(self.node_to_arr_map[node.inputs[0]],
+                                          ncclDataType_t.ncclFloat32,
+                                          node.const_attr,
+                                          p2p_stream)
+                else:
+                    nccl_comm.dlarrayRecv(self.node_to_arr_map[node],
+                                          ncclDataType_t.ncclFloat32,
+                                          node.const_attr,
+                                          p2p_stream)
+            if len(grouping_nodes) > 1:
+                GroupEnd()
+            for node in grouping_nodes:
+                if isinstance(node, PipelineReceiveOp):
+                    node.event.record(p2p_stream)
+            grouping_nodes.clear()
         for node in self.computing_nodes:
-            if self.dynamic_memory: 
+            if self.dynamic_memory:
                 # allocate memory for the node when dynamic_memory == True
                 if self.node_ref_cnt[node] is None or need_reallocation:
                     self.node_memory_plan(node)
@@ -1678,43 +1773,52 @@ class SubExecutor(object):
                     # self.node_to_arr_map[node][:] = np.zeros(self.node_to_shape_map[node]).astype(np.float32)
                     pass
 
-            input_vals = [self.node_to_arr_map[n] for n in node.inputs]
-            node_val = self.node_to_arr_map[node]
-
-            for n in node.inputs:
-                if n.event:
-                    n.event.sync()
-
-            if isinstance(node, (ParameterServerCommunicateOp, ParameterServerSparsePullOp)):
-                # Here we use d2h stream in ps op, since the stream is used for d2h data transfer.
-                # Please take care at this part.
-                node.compute(input_vals, node_val, self.d2h_stream)
-
-            elif isinstance(node, AllReduceCommunicateOp):
-                node.compute(input_vals, node_val, self.nccl_stream)
-
-            elif isinstance(node, DataH2DOp):
-                node.compute(input_vals, node_val, self.h2d_stream)
-
-            elif isinstance(node, (DataD2HOp, DataD2HSparseOp)):
-                node.compute(input_vals, node_val, self.d2h_stream)
-
-            elif isinstance(node, (PipelineSendOp, PipelineReceiveOp)):
-                node.compute(input_vals, node_val)
-
-            elif isinstance(node, (DropoutOp, Batch_NormalizationOp, Layer_NormalizationOp)):
-                node.compute(input_vals, node_val,
-                             self.comp_stream, inference=self.inference)
-                if isinstance(node.event, Event):
-                    # for d2h op / eval nodes / nodes before [allreduce or ps nodes or pipelinesend nodes]
-                    node.event.record(self.comp_stream)
-
+            if isinstance(node, (PipelineSendOp, PipelineReceiveOp)):
+                for n in node.inputs:
+                    if n.event:
+                        n.event.sync()
+                if len(grouping_nodes) > 0 and self.config.layer_indices[node] != cur_ind:
+                    make_group()
+                if len(grouping_nodes) == 0:
+                    cur_ind = self.config.layer_indices[node]
+                grouping_nodes.append(node)
+                continue
             else:
-                node.compute(input_vals, node_val, self.comp_stream)
-                if isinstance(node.event, Event):
-                    # for d2h op / eval nodes / nodes before [allreduce or ps nodes or pipelinesend nodes]
-                    node.event.record(self.comp_stream)
+                if len(grouping_nodes) > 0:
+                    make_group()
 
+                for n in node.inputs:
+                    if n.event:
+                        n.event.sync()
+                input_vals = [self.node_to_arr_map[n] for n in node.inputs]
+                node_val = self.node_to_arr_map[node]
+
+                if isinstance(node, (ParameterServerCommunicateOp, ParameterServerSparsePullOp)):
+                    # Here we use d2h stream in ps op, since the stream is used for d2h data transfer.
+                    # Please take care at this part.
+                    node.compute(input_vals, node_val, self.d2h_stream)
+
+                elif isinstance(node, AllReduceCommunicateOp):
+                    node.compute(input_vals, node_val, self.nccl_stream)
+
+                elif isinstance(node, DataH2DOp):
+                    node.compute(input_vals, node_val, self.h2d_stream)
+
+                elif isinstance(node, (DataD2HOp, DataD2HSparseOp)):
+                    node.compute(input_vals, node_val, self.d2h_stream)
+
+                elif isinstance(node, (DropoutOp, Batch_NormalizationOp, Layer_NormalizationOp)):
+                    node.compute(input_vals, node_val,
+                                 self.comp_stream, inference=self.inference)
+                    if isinstance(node.event, Event):
+                        # for d2h op / eval nodes / nodes before [allreduce or ps nodes or pipelinesend nodes]
+                        node.event.record(self.comp_stream)
+
+                else:
+                    node.compute(input_vals, node_val, self.comp_stream)
+                    if isinstance(node.event, Event):
+                        # for d2h op / eval nodes / nodes before [allreduce or ps nodes or pipelinesend nodes]
+                        node.event.record(self.comp_stream)
 
             if self.dynamic_memory:
                 # free nodes whose reference count is 0 when dynamic_memory == True
@@ -1730,6 +1834,9 @@ class SubExecutor(object):
                                 self.to_memory_pool(key, n)
                             else:
                                 del self.node_to_arr_map[n]
+
+        if len(grouping_nodes) > 0:
+            make_group()
 
         for n in self.eval_node_list:
             # every node in eval_node_list should have an event (except dataloader/optimizer...)
@@ -1945,3 +2052,30 @@ def get_scheduler(rank, nrank):
     while True:
         yield 1
         yield 0
+
+
+def reorder_for_group(topo_order, layer_indices):
+    if layer_indices is None:
+        return
+    # here we reorder for 2 reasons:
+    # 1. group consecutive pipeline send/recv ops
+    # 2. reorder pipeline send/recv ops according to grouping indices
+    has_pipeline_ops = set([layer_indices[x] for x in layer_indices if isinstance(
+        x, (PipelineSendOp, PipelineReceiveOp))])
+    labels = {}
+    for node in topo_order:
+        if isinstance(node, (DataH2DOp, DataD2HOp, DataD2HSparseOp)):
+            layer_indices[node] = layer_indices[node.inputs[0]] + 0.5
+        cur_with_pipeline = layer_indices[node] in has_pipeline_ops
+        if cur_with_pipeline and isinstance(node, SplitOp):
+            labels[node] = 1
+        elif isinstance(node, (PipelineSendOp, PipelineReceiveOp)):
+            labels[node] = 2
+        elif cur_with_pipeline and isinstance(node, (AddOp, ConcatOp)):
+            labels[node] = 3
+        else:
+            labels[node] = 0
+
+    topo_order = sorted(topo_order, key=lambda x: 10 *
+                        layer_indices[x] + labels[x])
+    return topo_order

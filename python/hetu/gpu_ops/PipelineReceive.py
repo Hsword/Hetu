@@ -21,8 +21,7 @@ class PipelineReceiveOp(Op):
         assert not self.on_cpu, "PipelineReceiveOp only support P2P communication between gpus"
         assert self.comm_stream, "communicate stream should not be None"
 
-        if self.event == None:
-            self.event = create_event_handle(self.ctx)
+        assert self.event is not None
         self.comm.dlarrayRecv(output_val,
                               ncclDataType_t.ncclFloat32,
                               self.const_attr,
@@ -54,6 +53,7 @@ class PipelineReceiveOp(Op):
     def forward_hook(self, config):
         self.on_gpu = ndarray.is_gpu_ctx(self.ctx)
         self.on_cpu = not self.on_gpu
+        self.event = create_event_handle(self.ctx)
 
 
 def pipeline_receive_op(source, comm, stream=None, ctx=None):
