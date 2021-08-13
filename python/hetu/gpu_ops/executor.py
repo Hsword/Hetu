@@ -2056,7 +2056,7 @@ def get_scheduler(rank, nrank):
 
 def reorder_for_group(topo_order, layer_indices):
     if layer_indices is None:
-        return
+        return topo_order
     # here we reorder for 2 reasons:
     # 1. group consecutive pipeline send/recv ops
     # 2. reorder pipeline send/recv ops according to grouping indices
