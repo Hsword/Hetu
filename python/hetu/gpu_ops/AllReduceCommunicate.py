@@ -14,23 +14,42 @@ class AllReduceCommunicateOp(Op):
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
-            assert not isinstance(
-                input_vals[0], (ndarray.IndexedSlices, ndarray.ND_Sparse_Array))
-            self.comm.dlarrayNcclAllReduce(
-                input_vals[0], output_val, self.dtype, self.reduce_op)
+            if isinstance(input_vals[0], ndarray.NDArray):
+                self.comm.dlarrayNcclAllReduce(
+                    input_vals[0], output_val, self.dtype, self.reduce_op)
+            elif isinstance(input_vals[0], ndarray.IndexedSlices):
+                if output_val.indices is None:
+                    ind_shape = list(input_vals[0].indices.shape)
+                    val_shape = list(input_vals[0].values.shape)
+                    ind_shape[0] *= self.comm.nrank
+                    val_shape[0] *= self.comm.nrank
+                    output_val.indices = ndarray.empty(ind_shape, self.ctx)
+                    output_val.values = ndarray.empty(val_shape, self.ctx)
+                self.comm.dlarrayAllGather(
+                    input_vals[0].indices, output_val.indices, self.dtype)
+                self.comm.dlarrayAllGather(
+                    input_vals[0].values, output_val.values, self.dtype)
+            else:
+                assert False
         else:
             if self.event == None:
-                self.event = create_event_handle(input_vals[0].ctx)
+                self.event = create_event_handle(self.ctx)
             if isinstance(input_vals[0], ndarray.NDArray):
                 self.comm.dlarrayNcclAllReduce(
                     input_vals[0], output_val, self.dtype, self.reduce_op, stream_handle)
                 self.event.record(stream_handle)
             elif isinstance(input_vals[0], ndarray.IndexedSlices):
-                # ?should use allgather?
-                self.comm.dlarrayNcclAllReduce(
-                    input_vals[0].indices, output_val.indices, self.dtype, self.reduce_op, stream_handle)
-                self.comm.dlarrayNcclAllReduce(
-                    input_vals[0].values, output_val.values, self.dtype, self.reduce_op, stream_handle)
+                if output_val.indices is None:
+                    ind_shape = list(input_vals[0].indices.shape)
+                    val_shape = list(input_vals[0].values.shape)
+                    ind_shape[0] *= self.comm.nrank
+                    val_shape[0] *= self.comm.nrank
+                    output_val.indices = ndarray.empty(ind_shape, self.ctx)
+                    output_val.values = ndarray.empty(val_shape, self.ctx)
+                self.comm.dlarrayAllGather(
+                    input_vals[0].indices, output_val.indices, self.dtype, stream_handle)
+                self.comm.dlarrayAllGather(
+                    input_vals[0].values, output_val.values, self.dtype, stream_handle)
                 self.event.record(stream_handle)
 
     def gradient(self, output_grad):
