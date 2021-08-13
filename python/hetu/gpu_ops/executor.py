@@ -1634,6 +1634,10 @@ class SubExecutor(object):
                 if isinstance(node, EmbeddingLookUp) and (self.use_sparse_pull or self.cstable_policy) and self.config.prefetch:
                     self.node_to_arr_map[node] = self.param_psval_map[node.inputs[0]]
                     continue
+                if isinstance(node, AllReduceCommunicateOp) and isinstance(node.inputs[0], EmbeddingLookUp_Gradient):
+                    self.node_to_arr_map[node] = ndarray.IndexedSlices(
+                        dense_shape=shape)
+                    continue
                 if node.on_gpu:
                     if node.inplace:
                         self.node_to_arr_map[node] = ndarray.NDArray(None)
@@ -2056,7 +2060,7 @@ def get_scheduler(rank, nrank):
 
 def reorder_for_group(topo_order, layer_indices):
     if layer_indices is None:
-        return
+        return topo_order
     # here we reorder for 2 reasons:
     # 1. group consecutive pipeline send/recv ops
     # 2. reorder pipeline send/recv ops according to grouping indices

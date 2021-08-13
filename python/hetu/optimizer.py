@@ -137,7 +137,7 @@ class OptimizerOp(Op):
             if current_strategy == 'AllReduce' or (current_strategy == 'Hybrid' and not isinstance(node, EmbeddingLookUp_Gradient)):
                 cur_node = ht.allreduceCommunicate_op(
                     node, config.param_allreduce_group.get(self.optimizer.params[i], config.nccl_comm))
-                if node in config.layer_indices:
+                if config.layer_indices is not None and node in config.layer_indices:
                     config.layer_indices[cur_node] = config.layer_indices[node] + 1
             elif current_strategy == 'PS' or (current_strategy == 'Hybrid' and isinstance(node, EmbeddingLookUp_Gradient)):
                 cur_node = ht.parameterServerCommunicate_op(
