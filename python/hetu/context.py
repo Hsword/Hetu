@@ -253,6 +253,69 @@ def traverse_dfs(node, node_strategy, devices, nrank):
         traverse_dfs(n, node_strategy, devices, nrank)
 
 
+def infer_states(node_list):
+    from .dataloader import DataloaderOp
+    from .optimizer import OptimizerOp
+    from .gpu_ops.Dispatch import DispatchOp, DispatchGradientOp
+
+    def infer_node_states(node):
+        if node in visited:
+            return
+        visited[node] = True
+        if isinstance(node, DataloaderOp):
+            pass
+        elif isinstance(node, OptimizerOp):
+            for n in node.inputs:
+                infer_node_states(n)
+        elif isinstance(node, DispatchOp):
+            real_node = node.inputs[0]
+            infer_node_states(real_node)
+            node_tar_state_map[real_node] = NodeStatus(node.parts)
+        elif isinstance(node, DispatchGradientOp):
+            real_node = node.inputs[0]
+            infer_node_states(real_node)
+            infer_node_states(node.inputs[1])
+            node_tar_state_map[real_node] = NodeStatus.from_other(
+                node_cur_state_map.get(node.inputs[1], None))
+        else:
+            # now we only support SAME model parallel in data parallel
+            # and 1 context can only appear once
+            need_state_deduction = any(
+                [isinstance(c, tuple) for c in node.raw_ctx.workers])
+            input_states = []
+            input_duplicates = []
+            input_orders = []
+            for i, n in enumerate(node.inputs):
+                infer_node_states(n)
+                if isinstance(n, (DispatchOp, DispatchGradientOp)):
+                    need_state_deduction = True
+                    node_status = node_tar_state_map[n.inputs[0]]
+                else:
+                    node_status = node_cur_state_map.get(n, None)
+                input_states.append(
+                    None if node_status is None else node_status.state)
+                input_duplicates.append(
+                    None if node_status is None else node_status.duplicate)
+                input_orders.append(
+                    None if node_status is None else node_status.order)
+            if need_state_deduction:
+                node_cur_state_map[node] = NodeStatus(
+                    *node.deduce_states(input_states, input_duplicates, input_orders))
+                for i, n in enumerate(node.inputs):
+                    if isinstance(n, (DispatchOp, DispatchGradientOp)):
+                        real_node = n.inputs[0]
+                        node_tar_state_map[real_node].set_attr(
+                            input_duplicates[i], input_orders[i])
+
+    visited = {}
+    node_cur_state_map = {}  # save nodes' current state
+    node_tar_state_map = {}  # save nodes' target state
+    for node in node_list:
+        infer_node_states(node)
+
+    return node_cur_state_map, node_tar_state_map
+
+
 def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
     from .dataloader import DataloaderOp
     from .optimizer import OptimizerOp
@@ -587,22 +650,17 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
         elif isinstance(node, DispatchOp):
             real_node = node.inputs[0]
             assign_ctx(real_node)
-            node_tar_state_map[real_node] = NodeStatus(node.parts)
         elif isinstance(node, DispatchGradientOp):
             real_node = node.inputs[0]
             assign_ctx(real_node)
             assign_ctx(node.inputs[1])
-            node_tar_state_map[real_node] = NodeStatus.from_other(
-                node_cur_state_map.get(node.inputs[1], None))
         else:
             # now we only support SAME model parallel in data parallel
             # and 1 context can only appear once
             mp_index = -1
             dp_index = -1
-            need_state_deduction = False
             for i, c in enumerate(node.raw_ctx.workers):
                 if isinstance(c, tuple):
-                    need_state_deduction = True
                     if ctx in c:
                         mp_index = c.index(ctx)
                         dp_index = i
@@ -610,9 +668,6 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                     dp_index = i
             mp_index_map[node] = mp_index
             dp_index_map[node] = dp_index
-            input_states = []
-            input_duplicates = []
-            input_orders = []
             for i, n in enumerate(node.inputs):
                 if isinstance(n, DataloaderOp):
                     if n not in dp_index_map:
@@ -622,28 +677,11 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                     continue
                 assign_ctx(n)
                 if isinstance(n, (DispatchOp, DispatchGradientOp)):
-                    need_state_deduction = True
-                    node_status = node_tar_state_map[n.inputs[0]]
-                else:
-                    node_status = node_cur_state_map.get(n, None)
-                input_states.append(
-                    None if node_status is None else node_status.state)
-                input_duplicates.append(
-                    None if node_status is None else node_status.duplicate)
-                input_orders.append(
-                    None if node_status is None else node_status.order)
-            if need_state_deduction:
-                node_cur_state_map[node] = NodeStatus(
-                    *node.deduce_states(input_states, input_duplicates, input_orders))
-                for i, n in enumerate(node.inputs):
-                    if isinstance(n, (DispatchOp, DispatchGradientOp)):
-                        real_node = n.inputs[0]
-                        node_tar_state_map[real_node].set_attr(
-                            input_duplicates[i], input_orders[i])
-                        if isinstance(real_node, PlaceholderOp) and mp_index_map[real_node] >= 0:
-                            node_status = node_tar_state_map[real_node]
-                            real_node.reshape_in_mp(node_status.map_dev_to_index(
-                                mp_index_map[real_node]), node_status.state)
+                    real_node = n.inputs[0]
+                    if isinstance(real_node, PlaceholderOp) and mp_index_map[real_node] >= 0:
+                        node_status = node_tar_state_map[real_node]
+                        real_node.reshape_in_mp(node_status.map_dev_to_index(
+                            mp_index_map[real_node]), node_status.state)
             for i, n in enumerate(node.inputs):
                 if isinstance(n, DataloaderOp):
                     if dp_index >= 0 and n in node_list and n not in my_eval_nodes:
@@ -693,7 +731,6 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                     else:
                         # here in the same model parallel
                         assert node.raw_ctx == n.raw_ctx
-                        assert need_state_deduction
                 layer_id += 1
 
             layer_indices[node] = layer_id
@@ -715,11 +752,10 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
     self_buffer = {}  # send and receive from self device
     mp_index_map = {}  # model parallel index
     dp_index_map = {}  # data parallel index
-    node_cur_state_map = {}  # save nodes' current state
-    node_tar_state_map = {}  # save nodes' target state
     layer_indices = {}
     layer_id = 0
     my_eval_nodes = []
+    node_cur_state_map, node_tar_state_map = infer_states(node_list)
     for node in node_list:
         assign_ctx(node)
 
