@@ -333,7 +333,10 @@ class Executor(object):
             else:
                 # get the last subexecutor not containing optimizer as val for ps op
                 val_name = k
-        all_eval_nodes = list(set(reduce(add, eval_node_dict.values())))
+        all_eval_nodes = []
+        for n in reduce(add, eval_node_dict.values()):
+            if n not in all_eval_nodes:
+                all_eval_nodes.append(n)
         if config is None:
             config = HetuConfig(eval_node_list=all_eval_nodes,
                                 train_name=train_name, val_name=val_name, **kargs)

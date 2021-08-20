@@ -49,7 +49,7 @@ class Array_ReshapeOp(Op):
                 array_reshape(input_vals[0], output_val, stream_handle)
 
     def gradient(self, output_grad):
-        return [array_reshape_gradient_op(self.inputs[0], output_grad, ctx=self.raw_ctx)]
+        return [array_reshape_gradient_op(self.inputs[0], output_grad, self.output_shape, ctx=self.raw_ctx)]
 
     def infer_shape(self, input_shapes):
 
@@ -82,41 +82,28 @@ class Array_ReshapeOp(Op):
     def backward_hook(self, config):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
 
-    def deduce_states(self, states, duplicates, orders):
-        # now only support: maintain batch size dimension
-        assert len(states) == 1 and len(duplicates) == 1 and len(orders) == 1
-        result_state = states[0]
-        result_dupli = duplicates[0]
-        result_order = orders[0]
-        output_dim = len(self.output_shape)
-        if output_dim > len(result_state):
-            assert len(result_state) == 2
-            assert self.output_shape[1] % result_state[1] == 0
-            result_state = result_state + (1, ) * (output_dim - 2)
-            mapper = {
-                0: (0,),
-                -1: (-1,),
-                1: tuple(range(1, output_dim))
-            }
-            result_order = sum([mapper[x] for x in result_order], ())
-        elif output_dim < len(result_state):
-            assert output_dim == 2
-            assert all([x == 1 for x in result_state[2:]])
-            start = result_order.index(1)
-            assert result_order[start:start +
-                                len(result_order)-2] == tuple(range(1, len(result_order) - 1))
-            result_state = result_state[:2]
-            temp_order = []
-            for i in result_order:
-                if i in (-1, 0, 1):
-                    temp_order.append(i)
-            result_order = tuple(temp_order)
-        return result_state, result_dupli, result_order
+    def get_default_state(self, status, enforce_order):
+        if enforce_order:
+            super().get_default_state(status, enforce_order)
+        elif self.raw_ctx.is_mp():
+            status.set_order((-1,) + tuple(range(len(self.output_shape))))
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        deduce_states(len(self.output_shape),
+                      input_statuses[0], status, deduce_order)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if input_statuses[0].state is not None:
+            deduce_states(
+                len(input_statuses[0].state), status, input_statuses[0], deduce_order)
 
 
 class Array_Reshape_GradientOp(Op):
-    def __init__(self, node_in, node_out, ctx=None):
+    def __init__(self, node_in, node_out, input_shape, ctx=None):
         super().__init__(Array_Reshape_GradientOp, [node_in, node_out], ctx)
+        self.input_shape = input_shape
 
     def compute(self, input_vals, output_val, stream_handle=None):
         # the size of input_array
@@ -141,10 +128,68 @@ class Array_Reshape_GradientOp(Op):
     def backward_hook(self, config):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
 
-    def deduce_states(self, states, duplicates, orders):
-        # now only support: maintain batch size dimension
-        assert len(states) == 2 and len(duplicates) == 2 and len(orders) == 2
-        return states[0], duplicates[0], orders[0]
+    def get_default_state(self, status, enforce_order):
+        if enforce_order:
+            super().get_default_state(status, enforce_order)
+        elif status.state is not None:
+            output_dim = len(status.state)
+            status.set_order((-1,) + tuple(range(output_dim)))
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if deduce_order:
+            if status.is_dist():
+                status.set_order((-1,) + tuple(range(len(status.state))))
+                status.copy_order_from(input_statuses[0])
+        else:
+            status.copy_state_from(input_statuses[0])
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if deduce_order:
+            input_statuses[0].copy_order_from(status)
+        else:
+            input_statuses[0].copy_state_from(status)
+        deduce_states(len(self.input_shape), status,
+                      input_statuses[1], deduce_order)
+
+
+def deduce_states(output_dim, input_status, output_status, deduce_order):
+    # now only support n -> 2 or 2 -> n dimension reshape
+    state, duplicate, order = input_status.get_all()
+    if deduce_order:
+        assert state is not None
+        if order is None:
+            return
+        if output_dim > len(state):
+            assert len(state) == 2
+            mapper = {
+                0: (0,),
+                -1: (-1,),
+                1: tuple(range(1, output_dim))
+            }
+            result_order = sum([mapper[x] for x in order], ())
+        elif output_dim < len(state):
+            assert output_dim == 2
+            assert all([x == 1 for x in state[2:]])
+            start = order.index(1)
+            assert order[start:start +
+                         len(order)-2] == tuple(range(1, len(order) - 1))
+            temp_order = []
+            for i in order:
+                if i in (-1, 0, 1):
+                    temp_order.append(i)
+            result_order = tuple(temp_order)
+        output_status.set_order(result_order)
+    elif state is not None:
+        if output_dim > len(state):
+            assert len(state) == 2
+            result_state = state + (1, ) * (output_dim - 2)
+        elif output_dim < len(state):
+            assert output_dim == 2
+            assert all([x == 1 for x in state[2:]])
+            result_state = state[:2]
+        output_status.set_state(result_state, duplicate)
 
 
 def array_reshape_op(node, output_shape, ctx=None):
@@ -165,7 +210,7 @@ def array_reshape_op(node, output_shape, ctx=None):
     return Array_ReshapeOp(node, output_shape, ctx=ctx)
 
 
-def array_reshape_gradient_op(node_in, node_out, ctx=None):
+def array_reshape_gradient_op(node_in, node_out, input_shape, ctx=None):
     """Gradient of reshape operation.
 
     Parameters:
@@ -180,4 +225,4 @@ def array_reshape_gradient_op(node_in, node_out, ctx=None):
     A new Node instance created by Op.
 
     """
-    return Array_Reshape_GradientOp(node_in, node_out, ctx=ctx)
+    return Array_Reshape_GradientOp(node_in, node_out, input_shape, ctx=ctx)

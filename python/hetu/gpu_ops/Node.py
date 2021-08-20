@@ -162,29 +162,24 @@ class Op(object):
     def backward_hook(self, config):
         pass
 
-    def deduce_states(self, states, duplicates, orders):
-        assert len(states) == len(self.inputs)
-        assert len(states) == len(duplicates)
-        assert len(states) == len(orders)
-        if len(states) == 1:
-            return states[0], duplicates[0], orders[0]
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if deduce_order:
+            for n in input_statuses:
+                status.copy_order_from(n)
         else:
-            cur_state = None
-            for state in states:
-                if cur_state is None:
-                    cur_state = state
-                else:
-                    assert state in (None, cur_state)
-            cur_duplicate = None
-            for duplicate in duplicates:
-                if cur_duplicate is None:
-                    cur_duplicate = duplicate
-                else:
-                    assert duplicate in (None, cur_duplicate)
-            cur_order = None
-            for order in orders:
-                if cur_order is None:
-                    cur_order = order
-                else:
-                    assert order in (None, cur_order)
-            return None, 1, cur_order
+            for n in input_statuses:
+                status.copy_state_from(n)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if deduce_order:
+            for n in input_statuses:
+                n.copy_order_from(status)
+        else:
+            for n in input_statuses:
+                n.copy_state_from(status)
+
+    def get_default_state(self, status, enforce_order):
+        if enforce_order:
+            status.set_order((-1,) + tuple(range(len(status.state))))

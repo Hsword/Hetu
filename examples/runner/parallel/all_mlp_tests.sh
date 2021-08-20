@@ -20,11 +20,11 @@ heturun -c config4.yml python test_mlp_mp.py --split 4      --log results/res8.n
 heturun -c config4.yml python test_mlp_mp_pp.py --split left   --log results/res9.npy
 heturun -c config4.yml python test_mlp_mp_pp.py --split middle --log results/res10.npy
 heturun -c config4.yml python test_mlp_mp_pp.py --split right  --log results/res11.npy
-heturun -c config6.yml python test_mlp_mp_pp.py --split 0      --log results/res12.npy
-heturun -c config6.yml python test_mlp_mp_pp.py --split 1      --log results/res13.npy
-heturun -c config6.yml python test_mlp_mp_pp.py --split 2      --log results/res14.npy
-heturun -c config6.yml python test_mlp_mp_pp.py --split 3      --log results/res15.npy
-heturun -c config6.yml python test_mlp_mp_pp.py --split 4      --log results/res16.npy
+heturun -c config4.yml python test_mlp_mp_pp.py --split 0      --log results/res12.npy
+heturun -c config4.yml python test_mlp_mp_pp.py --split 1      --log results/res13.npy
+heturun -c config4.yml python test_mlp_mp_pp.py --split 2      --log results/res14.npy
+heturun -c config4.yml python test_mlp_mp_pp.py --split 3      --log results/res15.npy
+heturun -c config4.yml python test_mlp_mp_pp.py --split 4      --log results/res16.npy
 
 python validate_results.py 17
 

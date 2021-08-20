@@ -8,6 +8,7 @@ class DeviceGroup(object):
     def __init__(self, ctxs):
         self._contexts = self.parse_contexts(ctxs)
         self.get_servers_n_workers()
+        self._is_mp = any([isinstance(c, tuple) for c in self._contexts])
 
     @classmethod
     def parse_contexts(cls, ctxs):
@@ -41,6 +42,9 @@ class DeviceGroup(object):
 
     def index(self, ctx):
         return self._contexts.index(ctx)
+
+    def is_mp(self):
+        return self._is_mp
 
     def __getitem__(self, key):
         return self._contexts[key]
@@ -114,32 +118,21 @@ _default_ctx_stack = ContextStack()
 
 
 class NodeStatus(object):
-    def __init__(self, state, duplicate=None, order=None):
+    def __init__(self, state=None, duplicate=None, order=None):
         self._state = state
         self._duplicate = duplicate
         self._order = order
-        self._defaulted = False
-        self.try_get_device_num()
+        self._valid_state = False
+        self._valid_all = False
 
-    @ classmethod
-    def from_other(cls, other):
-        if other is None:
-            return cls(None, None, None)
-        else:
-            return cls(other._state, other._duplicate, other._order)
+    def get(self):
+        return self._state, self._duplicate
 
-    def get_default(self):
-        # This function is VERY STRONG! Please use after any set_attr.
-        self._defaulted = True
-        if self._duplicate is None:
-            self._duplicate = 1
-        if self._order is None:
-            self._order = (-1,) + tuple(range(len(self._state)))
-        self.try_get_device_num()
+    def get_all(self):
         return self._state, self._duplicate, self._order
 
     def is_dist(self):
-        return not (self._state is None or all([x == 1 for x in self._state]))
+        return self._device_num > 1
 
     @ property
     def state(self):
@@ -153,13 +146,65 @@ class NodeStatus(object):
     def order(self):
         return self._order
 
-    def set_attr(self, duplicate, order):
-        if self._defaulted:
-            assert self._duplicate == duplicate
-            assert self._order == order
-        else:
+    def set_state(self, state=None, duplicate=None):
+        if state is not None:
+            assert self._state in (state, None)
+            self._state = state
+        if duplicate is not None:
+            assert self._duplicate in (duplicate, None)
             self._duplicate = duplicate
+
+    def set_order(self, order=None):
+        if order is not None:
+            assert self._order in (order, None)
             self._order = order
+
+    def set_one(self):
+        self._state = (1,)
+        self._duplicate = 1
+        self._order = None
+        self._device_num = 1
+        self._valid_state = True
+        self._valid_all = True
+
+    def copy_state_from(self, other):
+        self.set_state(other.state, other.duplicate)
+
+    def copy_order_from(self, other):
+        self.set_order(other.order)
+
+    def copy_from(self, other, copy_order):
+        if copy_order:
+            self.copy_order_from(other)
+        else:
+            self.copy_state_from(other)
+
+    def valid_state(self):
+        if self._valid_state:
+            return True
+        if self._state is None or self._duplicate is None:
+            return False
+        else:
+            self._valid_state = True
+            self._device_num = np.prod(
+                self._state, dtype=int) * self._duplicate
+            return True
+
+    def valid_all(self):
+        if self._valid_all:
+            # the one-device case has already set _valid_all to True
+            return True
+        if not self._valid_state or self._order is None:
+            return False
+        else:
+            self._valid_all = True
+            return True
+
+    def valid(self, include_order):
+        if include_order:
+            return self.valid_all()
+        else:
+            return self.valid_state()
 
     def map_dev_to_index(self, global_index):
         cur_state_index = self.make_empty_state()
@@ -175,10 +220,6 @@ class NodeStatus(object):
     def make_empty_state(self):
         return [0 for _ in range(len(self._state))]
 
-    def try_get_device_num(self):
-        self._device_num = None if self._duplicate is None or self._state is None else np.prod(
-            self._state, dtype=int) * self._duplicate
-
     def check_devices(self, devices):
         assert self._device_num == len(devices)
 
@@ -191,6 +232,9 @@ class NodeStatus(object):
             loop_sizes.insert(0, temp_size)
         loop_sizes.pop(0)
         return loop_sizes
+
+    def __repr__(self):
+        return '(' + str(self.state) + ', ' + str(self.duplicate) + ', ' + str(self.order) + ')'
 
 
 def get_current_context():
@@ -257,8 +301,32 @@ def infer_states(node_list):
     from .dataloader import DataloaderOp
     from .optimizer import OptimizerOp
     from .gpu_ops.Dispatch import DispatchOp, DispatchGradientOp
+    from .gpu_ops.Variable import PlaceholderOp
 
-    def infer_node_states(node):
+    def get_node_count(node):
+        if node in visited:
+            return
+        visited[node] = True
+        nonlocal cnt
+        single = False
+        if not isinstance(node, (DataloaderOp, OptimizerOp, DispatchOp, DispatchGradientOp)):
+            node_cur_state_map[node] = NodeStatus()
+            node.get_default_state(
+                node_cur_state_map[node], enforce_order=False)
+            cnt += 1
+            single = not node.raw_ctx.is_mp()
+            if single:
+                node_cur_state_map[node].set_one()
+        elif isinstance(node, DispatchOp):
+            node_tar_state_map[node.inputs[0]] = NodeStatus(node.parts)
+        elif isinstance(node, DispatchGradientOp):
+            node_tar_state_map[node.inputs[0]] = NodeStatus()
+        for n in node.inputs:
+            get_node_count(n)
+            if single and isinstance(n, (DispatchOp, DispatchGradientOp)):
+                node_tar_state_map[n.inputs[0]].set_state(None, 1)
+
+    def infer_node_states(node, infer_order):
         if node in visited:
             return
         visited[node] = True
@@ -266,52 +334,81 @@ def infer_states(node_list):
             pass
         elif isinstance(node, OptimizerOp):
             for n in node.inputs:
-                infer_node_states(n)
+                infer_node_states(n, infer_order)
         elif isinstance(node, DispatchOp):
             real_node = node.inputs[0]
-            infer_node_states(real_node)
-            node_tar_state_map[real_node] = NodeStatus(node.parts)
+            infer_node_states(real_node, infer_order)
+            node_tar_state_map[real_node].valid(infer_order)
         elif isinstance(node, DispatchGradientOp):
             real_node = node.inputs[0]
-            infer_node_states(real_node)
-            infer_node_states(node.inputs[1])
-            node_tar_state_map[real_node] = NodeStatus.from_other(
-                node_cur_state_map.get(node.inputs[1], None))
+            infer_node_states(real_node, infer_order)
+            infer_node_states(node.inputs[1], infer_order)
+            node_tar_state_map[real_node].copy_from(
+                node_cur_state_map[node.inputs[1]], infer_order)
+            node_tar_state_map[real_node].valid(infer_order)
         else:
-            # now we only support SAME model parallel in data parallel
-            # and 1 context can only appear once
-            need_state_deduction = any(
-                [isinstance(c, tuple) for c in node.raw_ctx.workers])
-            input_states = []
-            input_duplicates = []
-            input_orders = []
-            for i, n in enumerate(node.inputs):
-                infer_node_states(n)
-                if isinstance(n, (DispatchOp, DispatchGradientOp)):
-                    need_state_deduction = True
-                    node_status = node_tar_state_map[n.inputs[0]]
+            input_statuses = []
+            if node.raw_ctx.is_mp():
+                if isinstance(node, PlaceholderOp):
+                    # in this case the node is initialized in mp
+                    node_cur_state_map[node].copy_from(
+                        node_tar_state_map[node], infer_order)
                 else:
-                    node_status = node_cur_state_map.get(n, None)
-                input_states.append(
-                    None if node_status is None else node_status.state)
-                input_duplicates.append(
-                    None if node_status is None else node_status.duplicate)
-                input_orders.append(
-                    None if node_status is None else node_status.order)
-            if need_state_deduction:
-                node_cur_state_map[node] = NodeStatus(
-                    *node.deduce_states(input_states, input_duplicates, input_orders))
-                for i, n in enumerate(node.inputs):
-                    if isinstance(n, (DispatchOp, DispatchGradientOp)):
-                        real_node = n.inputs[0]
-                        node_tar_state_map[real_node].set_attr(
-                            input_duplicates[i], input_orders[i])
+                    if infer_order:
+                        nonlocal chance
+                        if chance and not node_cur_state_map[node].valid_all():
+                            node.get_default_state(
+                                node_cur_state_map[node], enforce_order=True)
+                            chance = False
+                    input_statuses = []
+                    for n in node.inputs:
+                        if isinstance(n, (DispatchOp, DispatchGradientOp)):
+                            node_status = node_tar_state_map[n.inputs[0]]
+                        else:
+                            node_status = node_cur_state_map[n]
+                        input_statuses.append(node_status)
+                    node.backward_deduce_states(
+                        node_cur_state_map[node], input_statuses, deduce_order=infer_order)
+                    for n in node.inputs:
+                        infer_node_states(n, infer_order)
+                    node.forward_deduce_states(
+                        input_statuses, node_cur_state_map[node], deduce_order=infer_order)
+            else:
+                for n in node.inputs:
+                    infer_node_states(n, infer_order)
+            if node_cur_state_map[node].valid(infer_order):
+                valid_nodes.add(node)
 
     visited = {}
     node_cur_state_map = {}  # save nodes' current state
     node_tar_state_map = {}  # save nodes' target state
+    cnt = 0
+    valid_nodes = set()
     for node in node_list:
-        infer_node_states(node)
+        get_node_count(node)
+    # TODO: implement dynamic states: use only necessary dimensions, less than shape
+    # first infer state and duplicate
+    while True:
+        visited = {}
+        for node in node_list:
+            infer_node_states(node, infer_order=False)
+        valid_cnt = len(valid_nodes)
+        if valid_cnt == cnt:
+            break
+    chance = False
+    last_cnt = 0
+    valid_nodes = set()
+    # next infer order
+    while True:
+        visited = {}
+        for node in node_list:
+            infer_node_states(node, infer_order=True)
+        valid_cnt = len(valid_nodes)
+        if valid_cnt == last_cnt:
+            chance = True
+        if valid_cnt == cnt:
+            break
+        last_cnt = valid_cnt
 
     return node_cur_state_map, node_tar_state_map
 
@@ -392,7 +489,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                                 layer_indices[result] = layer_id
                     return result
                 devices = prev_input.raw_ctx.workers[dev_pos]
-                cur_state, cur_duplicate, cur_order = node_cur_state_map[prev_input].get_default(
+                cur_state, cur_duplicate, cur_order = node_cur_state_map[prev_input].get_all(
                 )
                 recv_src[prev_input] = make_comb(0)
                 assert device_index == len(prev_input.raw_ctx.workers[dev_pos])
@@ -403,8 +500,8 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
             if prev_input not in recv_src:
                 prev_ns = node_cur_state_map[prev_input]
                 target_ns = node_tar_state_map[prev_input]
-                prev_state, prev_duplicate, prev_order = prev_ns.get_default()
-                target_state, target_duplicate, target_order = target_ns.get_default()
+                prev_state, prev_duplicate, prev_order = prev_ns.get_all()
+                target_state, target_duplicate, target_order = target_ns.get_all()
                 prev_ns.check_devices(prev_input.raw_ctx[dev_pos])
                 target_ns.check_devices(node.raw_ctx[dev_pos])
                 loop_sizes = prev_ns.get_loop_sizes()
@@ -491,7 +588,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                                 cur_state[cur_dim] = ts
                                 make_split(cur_state, depth + 1)
                 target_ns = node_tar_state_map[prev_input]
-                target_state, target_duplicate, target_order = target_ns.get_default()
+                target_state, target_duplicate, target_order = target_ns.get_all()
                 make_split(target_ns.make_empty_state(), 0)
                 assert device_index == len(
                     node.raw_ctx.workers[dev_pos])
@@ -515,8 +612,8 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 send_dst[key] = True
                 prev_ns = node_cur_state_map[prev_input]
                 target_ns = node_tar_state_map[prev_input]
-                prev_state, prev_duplicate, prev_order = prev_ns.get_default()
-                target_state, target_duplicate, target_order = target_ns.get_default()
+                prev_state, prev_duplicate, prev_order = prev_ns.get_all()
+                target_state, target_duplicate, target_order = target_ns.get_all()
                 prev_ns.check_devices(prev_input.raw_ctx[dev_pos])
                 target_ns.check_devices(node.raw_ctx[dev_pos])
                 cur_state_index = prev_ns.map_dev_to_index(
@@ -627,7 +724,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                         elif mp_index_map[param] >= 0:
                             allreduce_devices = []
                             target_state, target_duplicate, target_order = \
-                                node_tar_state_map[param].get_default()
+                                node_tar_state_map[param].get_all()
                             mp_index = mp_index_map[param]
                             interval = 1
                             dup_dim = target_order.index(-1)

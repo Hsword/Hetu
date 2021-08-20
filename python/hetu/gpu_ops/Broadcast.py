@@ -24,6 +24,7 @@ class BroadcastToOp(Op):
                     input_vals[0], output_val, self.out_strides, self.in_dims, stream_handle)
 
     def gradient(self, output_grad):
+        self.grad_set = False
         self.grad_node = reduce_sum_op(
             output_grad, None, None, ctx=self.raw_ctx)
         return [self.grad_node, None]
@@ -65,6 +66,24 @@ class BroadcastToOp(Op):
 
     def backward_hook(self, config):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if deduce_order:
+            status.copy_order_from(input_statuses[1])
+        else:
+            status.copy_state_from(input_statuses[1])
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if hasattr(self, 'grad_node') and not self.grad_set:
+            self.grad_node.ori_status = input_statuses[0]
+            self.grad_node.tar_status = status
+            self.grad_set = True
+        if deduce_order:
+            input_statuses[1].copy_order_from(status)
+        else:
+            input_statuses[1].copy_state_from(status)
 
 
 def broadcastto_op(node_A, node_B, ctx=None):

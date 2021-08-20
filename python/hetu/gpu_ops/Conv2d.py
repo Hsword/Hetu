@@ -88,38 +88,65 @@ class Conv2dOp(Op):
         out_W = (W + 2 * padding - filter_W) // stride + 1
         return (N, f_O, out_H, out_W)
 
-    def deduce_states(self, states, duplicates, orders):
-        assert len(states) == 2 and len(duplicates) == 2 and len(orders) == 2
-        if states[0] is None and states[1] is None:
-            return None, 1, None
-        if states[0] is None:
-            states[0] = (1, 1, 1, 1)
-        if states[1] is None:
-            states[1] = (1, 1, 1, 1)
-        assert len(states[0]) == 4 and len(states[1]) == 4
-        assert states[0][1] == states[1][1], \
-            'Partition number of activation channel shoule match partition number of convolution kernel input channel.'
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        l2res_map = {0: 0, 1: -1, -1: 1, 2: 2, 3: 3}
+        r2res_map = {-1: 0, 0: 1, 1: -1, 2: 2, 3: 3}
+        res2l_map = {0: 0, -1: 1, 1: -1, 2: 2, 3: 3}
+        res2r_map = {0: -1, -1: 1, 1: 0, 2: 2, 3: 3}
+        if deduce_order:
+            if input_statuses[0].valid_all():
+                order = input_statuses[0].order
+                status.set_order(tuple(l2res_map[x] for x in order))
+            elif input_statuses[1].valid_all():
+                order = input_statuses[1].order
+                status.set_order(tuple(r2res_map[x] for x in order))
+        else:
+            if input_statuses[0].valid_state():
+                state, duplicate = input_statuses[0].get()
+                keys = {i: st for i, st in enumerate(state)}
+                keys[-1] = duplicate
+                res_state = tuple(keys[res2l_map[x]] for x in range(4))
+                res_duplicate = keys[res2l_map[-1]]
+                status.set_state(res_state, res_duplicate)
+            elif input_statuses[1].valid_state():
+                state, duplicate = input_statuses[1].get()
+                keys = {i: st for i, st in enumerate(state)}
+                keys[-1] = duplicate
+                res_state = tuple(keys[res2r_map[x]] for x in range(4))
+                res_duplicate = keys[res2r_map[-1]]
+                status.set_state(res_state, res_duplicate)
 
-        if duplicates[0] is None:
-            duplicates[0] = states[1][0]
-        assert duplicates[0] == states[1][0], 'The duplicate number is not conform with states.'
-        if duplicates[1] is None:
-            duplicates[1] = states[0][0]
-        assert duplicates[1] == states[0][0], 'The duplicate number is not conform with states.'
-
-        lnr_map = {0: -1, -1: 0, 1: 1, 2: 2, 3: 3}
-        l2res_map = {-1: 1, 0: 0, 1: -1, 2: 2, 3: 3}
-        if orders[0] is None and orders[1] is None:
-            orders[0] = (1, 0, -1, 2, 3)
-            orders[1] = (1, -1, 0, 2, 3)
-        elif orders[0] is None and orders[1] is not None:
-            orders[0] = tuple(lnr_map[x] for x in orders[1])
-        elif orders[0] is not None and orders[1] is None:
-            orders[1] = tuple(lnr_map[x] for x in orders[0])
-        assert orders[0] == tuple(lnr_map[x] for x in orders[1])
-        assert orders[1] == tuple(lnr_map[x] for x in orders[0])
-
-        return (states[0][0], states[1][0], states[0][2], states[0][3]), states[0][1], tuple(l2res_map[x] for x in orders[0])
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        l2res_map = {0: 0, 1: -1, -1: 1, 2: 2, 3: 3}
+        r2res_map = {-1: 0, 0: 1, 1: -1, 2: 2, 3: 3}
+        res2l_map = {0: 0, -1: 1, 1: -1, 2: 2, 3: 3}
+        res2r_map = {0: -1, -1: 1, 1: 0, 2: 2, 3: 3}
+        if deduce_order:
+            if status.valid_all():
+                res_order = tuple(res2l_map[x] for x in status.order)
+                input_statuses[0].set_order(res_order)
+                res_order = tuple(res2r_map[x] for x in status.order)
+                input_statuses[1].set_order(res_order)
+        else:
+            if status.valid_state():
+                state, duplicate = status.get()
+                keys = {i: st for i, st in enumerate(state)}
+                keys[-1] = duplicate
+                res_state = tuple(keys[l2res_map[x]] for x in range(4))
+                res_duplicate = keys[l2res_map[-1]]
+                input_statuses[0].set_state(res_state, res_duplicate)
+                res_state = tuple(keys[r2res_map[x]] for x in range(4))
+                res_duplicate = keys[r2res_map[-1]]
+                input_statuses[1].set_state(res_state, res_duplicate)
+            else:
+                if input_statuses[0].state is not None:
+                    input_statuses[1].set_state(
+                        None, input_statuses[0].state[0])
+                if input_statuses[1].state is not None:
+                    input_statuses[0].set_state(
+                        None, input_statuses[1].state[0])
 
 
 class Conv2d_Gradient_of_DataOp(Op):
@@ -199,39 +226,65 @@ class Conv2d_Gradient_of_DataOp(Op):
             input_shapes[0][3] - 2 * self.padding
         return (N, C, H, W)
 
-    def deduce_states(self, states, duplicates, orders):
-        assert len(states) == 2 and len(duplicates) == 2 and len(orders) == 2
-        if states[0] is None and states[1] is None:
-            return None, 1, None
-        if states[0] is None:
-            states[0] = (1, 1, 1, 1)
-        if states[1] is None:
-            states[1] = (1, 1, 1, 1)
-        assert len(states[0]) == 4 and len(states[1]) == 4
-        assert states[0][0] == states[1][1], \
-            'Partition number of convolution kernel shoule match partition number of gradient output channel.'
-
-        if duplicates[0] is None:
-            duplicates[0] = states[1][0]
-        assert duplicates[0] == states[1][0], 'The duplicate number is not conform with states.'
-        if duplicates[1] is None:
-            duplicates[1] = states[0][1]
-        assert duplicates[1] == states[0][1], 'The duplicate number is not conform with states.'
-
-        l2r_map = {0: 1, 1: -1, -1: 0, 2: 2, 3: 3}
-        r2l_map = {0: -1, 1: 0, -1: 1, 2: 2, 3: 3}
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
         l2res_map = {-1: 0, 0: -1, 1: 1, 2: 2, 3: 3}
-        if orders[0] is None and orders[1] is None:
-            orders[0] = (0, -1, 1, 2, 3)
-            orders[1] = (1, 0, -1, 2, 3)
-        elif orders[0] is None and orders[1] is not None:
-            orders[0] = tuple(r2l_map[x] for x in orders[1])
-        elif orders[0] is not None and orders[1] is None:
-            orders[1] = tuple(l2r_map[x] for x in orders[0])
-        assert orders[0] == tuple(r2l_map[x] for x in orders[1])
-        assert orders[1] == tuple(l2r_map[x] for x in orders[0])
+        r2res_map = {-1: 1, 0: 0, 1: -1, 2: 2, 3: 3}
+        res2l_map = {-1: 0, 0: -1, 1: 1, 2: 2, 3: 3}
+        res2r_map = {-1: 1, 0: 0, 1: -1, 2: 2, 3: 3}
+        if deduce_order:
+            if input_statuses[0].valid_all():
+                order = input_statuses[0].order
+                status.set_order(tuple(l2res_map[x] for x in order))
+            elif input_statuses[1].valid_all():
+                order = input_statuses[1].order
+                status.set_order(tuple(r2res_map[x] for x in order))
+        else:
+            if input_statuses[0].valid_state():
+                state, duplicate = input_statuses[0].get()
+                keys = {i: st for i, st in enumerate(state)}
+                keys[-1] = duplicate
+                res_state = tuple(keys[res2l_map[x]] for x in range(4))
+                res_duplicate = keys[res2l_map[-1]]
+                status.set_state(res_state, res_duplicate)
+            elif input_statuses[1].valid_state():
+                state, duplicate = input_statuses[1].get()
+                keys = {i: st for i, st in enumerate(state)}
+                keys[-1] = duplicate
+                res_state = tuple(keys[res2r_map[x]] for x in range(4))
+                res_duplicate = keys[res2r_map[-1]]
+                status.set_state(res_state, res_duplicate)
 
-        return (states[1][0], states[0][1], states[0][2], states[0][3]), states[0][0], tuple(l2res_map[x] for x in orders[0])
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        l2res_map = {-1: 0, 0: -1, 1: 1, 2: 2, 3: 3}
+        r2res_map = {-1: 1, 0: 0, 1: -1, 2: 2, 3: 3}
+        res2l_map = {-1: 0, 0: -1, 1: 1, 2: 2, 3: 3}
+        res2r_map = {-1: 1, 0: 0, 1: -1, 2: 2, 3: 3}
+        if deduce_order:
+            if status.valid_all():
+                res_order = tuple(res2l_map[x] for x in status.order)
+                input_statuses[0].set_order(res_order)
+                res_order = tuple(res2r_map[x] for x in status.order)
+                input_statuses[1].set_order(res_order)
+        else:
+            if status.valid_state():
+                state, duplicate = status.get()
+                keys = {i: st for i, st in enumerate(state)}
+                keys[-1] = duplicate
+                res_state = tuple(keys[l2res_map[x]] for x in range(4))
+                res_duplicate = keys[l2res_map[-1]]
+                input_statuses[0].set_state(res_state, res_duplicate)
+                res_state = tuple(keys[r2res_map[x]] for x in range(4))
+                res_duplicate = keys[r2res_map[-1]]
+                input_statuses[1].set_state(res_state, res_duplicate)
+            else:
+                if input_statuses[0].state is not None:
+                    input_statuses[1].set_state(
+                        None, input_statuses[0].state[1])
+                if input_statuses[1].state is not None:
+                    input_statuses[0].set_state(
+                        None, input_statuses[1].state[0])
 
 
 class Conv2d_Gradient_of_FilterOp(Op):
@@ -321,38 +374,65 @@ class Conv2d_Gradient_of_FilterOp(Op):
 
         return (f_N, f_C, f_H, f_W)
 
-    def deduce_states(self, states, duplicates, orders):
-        assert len(states) == 2 and len(duplicates) == 2 and len(orders) == 2
-        if states[0] is None and states[1] is None:
-            return None, 1, None
-        if states[0] is None:
-            states[0] = (1, 1, 1, 1)
-        if states[1] is None:
-            states[1] = (1, 1, 1, 1)
-        assert len(states[0]) == 4 and len(states[1]) == 4
-        assert states[0][0] == states[1][0], \
-            'Partition number of batch size dimention not match.'
-
-        if duplicates[0] is None:
-            duplicates[0] = states[1][1]
-        assert duplicates[0] == states[1][1], 'The duplicate number is not conform with states.'
-        if duplicates[1] is None:
-            duplicates[1] = states[0][1]
-        assert duplicates[1] == states[0][1], 'The duplicate number is not conform with states.'
-
-        lnr_map = {0: 0, 1: -1, -1: 1, 2: 2, 3: 3}
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
         l2res_map = {-1: 0, 0: -1, 1: 1, 2: 2, 3: 3}
-        if orders[0] is None and orders[1] is None:
-            orders[0] = (0, -1, 1, 2, 3)
-            orders[1] = (0, 1, -1, 2, 3)
-        elif orders[0] is None and orders[1] is not None:
-            orders[0] = tuple(lnr_map[x] for x in orders[1])
-        elif orders[0] is not None and orders[1] is None:
-            orders[1] = tuple(lnr_map[x] for x in orders[0])
-        assert orders[0] == tuple(lnr_map[x] for x in orders[1])
-        assert orders[1] == tuple(lnr_map[x] for x in orders[0])
+        r2res_map = {-1: 1, 0: -1, 1: 0, 2: 2, 3: 3}
+        res2l_map = {-1: 0, 0: -1, 1: 1, 2: 2, 3: 3}
+        res2r_map = {-1: 0, 0: 1, 1: -1, 2: 2, 3: 3}
+        if deduce_order:
+            if input_statuses[0].valid_all():
+                order = input_statuses[0].order
+                status.set_order(tuple(l2res_map[x] for x in order))
+            elif input_statuses[1].valid_all():
+                order = input_statuses[1].order
+                status.set_order(tuple(r2res_map[x] for x in order))
+        else:
+            if input_statuses[0].valid_state():
+                state, duplicate = input_statuses[0].get()
+                keys = {i: st for i, st in enumerate(state)}
+                keys[-1] = duplicate
+                res_state = tuple(keys[res2l_map[x]] for x in range(4))
+                res_duplicate = keys[res2l_map[-1]]
+                status.set_state(res_state, res_duplicate)
+            elif input_statuses[1].valid_state():
+                state, duplicate = input_statuses[1].get()
+                keys = {i: st for i, st in enumerate(state)}
+                keys[-1] = duplicate
+                res_state = tuple(keys[res2r_map[x]] for x in range(4))
+                res_duplicate = keys[res2r_map[-1]]
+                status.set_state(res_state, res_duplicate)
 
-        return (states[1][1], states[0][1], states[0][2], states[0][3]), states[0][0], tuple(l2res_map[x] for x in orders[0])
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        l2res_map = {-1: 0, 0: -1, 1: 1, 2: 2, 3: 3}
+        r2res_map = {-1: 1, 0: -1, 1: 0, 2: 2, 3: 3}
+        res2l_map = {-1: 0, 0: -1, 1: 1, 2: 2, 3: 3}
+        res2r_map = {-1: 0, 0: 1, 1: -1, 2: 2, 3: 3}
+        if deduce_order:
+            if status.valid_all():
+                res_order = tuple(res2l_map[x] for x in status.order)
+                input_statuses[0].set_order(res_order)
+                res_order = tuple(res2r_map[x] for x in status.order)
+                input_statuses[1].set_order(res_order)
+        else:
+            if status.valid_state():
+                state, duplicate = status.get()
+                keys = {i: st for i, st in enumerate(state)}
+                keys[-1] = duplicate
+                res_state = tuple(keys[l2res_map[x]] for x in range(4))
+                res_duplicate = keys[l2res_map[-1]]
+                input_statuses[0].set_state(res_state, res_duplicate)
+                res_state = tuple(keys[r2res_map[x]] for x in range(4))
+                res_duplicate = keys[r2res_map[-1]]
+                input_statuses[1].set_state(res_state, res_duplicate)
+            else:
+                if input_statuses[0].state is not None:
+                    input_statuses[1].set_state(
+                        None, input_statuses[0].state[1])
+                if input_statuses[1].state is not None:
+                    input_statuses[0].set_state(
+                        None, input_statuses[1].state[1])
 
 
 def conv2d_op(node_A, node_B, padding=0, stride=1, ctx=None):
