@@ -41,6 +41,38 @@ class SoftmaxCrossEntropyOp(Op):
         assert len(input_shapes[0]) >= 2
         return input_shapes[0][:-1]
 
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if deduce_order:
+            if input_statuses[0].valid_all():
+                order = list(input_statuses[0].order)
+                order.remove(len(order) - 2)
+                status.set_order(tuple(order))
+            elif input_statuses[1].valid_all():
+                order = list(input_statuses[1].order)
+                order.remove(len(order) - 2)
+                status.set_order(tuple(order))
+        else:
+            if input_statuses[0].valid_state():
+                state, duplicate = input_statuses[0].get()
+                assert state[-1] == 1
+                status.set_state(state[:-1], duplicate)
+            elif input_statuses[1].valid_state():
+                state, duplicate = input_statuses[1].get()
+                assert state[-1] == 1
+                status.set_state(state[:-1], duplicate)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if deduce_order:
+            pass
+        else:
+            if status.valid_state():
+                state, duplicate = status.get()
+                state += (1,)
+                input_statuses[0].set_state(state, duplicate)
+                input_statuses[1].set_state(state, duplicate)
+
 
 class SoftmaxCrossEntropyGradientOp(Op):
     def __init__(self, node_A, node_B, node_C, use_cudnn=True, ctx=None):
@@ -69,6 +101,35 @@ class SoftmaxCrossEntropyGradientOp(Op):
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 3
         return input_shapes[0]
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        if deduce_order:
+            if input_statuses[0].valid_all():
+                status.copy_order_from(input_statuses[0])
+            elif input_statuses[1].valid_all():
+                status.copy_order_from(input_statuses[1])
+        else:
+            if input_statuses[0].valid_state():
+                status.copy_state_from(input_statuses[0])
+            elif input_statuses[1].valid_state():
+                status.copy_state_from(input_statuses[1])
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        if deduce_order:
+            if status.valid_all():
+                order = status.order
+                input_statuses[0].set_order(order)
+                input_statuses[1].set_order(order)
+                order = list(order)
+                order.remove(len(order) - 2)
+                input_statuses[2].set_order(tuple(order))
+        else:
+            if status.valid_state():
+                input_statuses[0].copy_state_from(status)
+                input_statuses[1].copy_state_from(status)
+                state, duplicate = status.get()
+                assert state[-1] == 1
+                input_statuses[2].set_state(state[:-1], duplicate)
 
 
 def softmaxcrossentropy_op(node_A, node_B, use_cudnn=True, ctx=None):
