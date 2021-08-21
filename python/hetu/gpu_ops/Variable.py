@@ -80,12 +80,14 @@ class PlaceholderOp(Op):
         self.on_cpu = not self.on_gpu
 
     def reshape_in_mp(self, cur_part, parts):
+        self.cur_part = cur_part
+        self.parts = parts
         if self.reshaped:
             return
+        self.reshaped = True
         if self.shape is None:
             # TODO: support reshape in input nodes
             return
-        self.reshaped = True
         # this function only used in context launch to enable variable initialized in model parallel
         ori_shape = list(self.shape)
         for i, pts in enumerate(parts):
@@ -95,17 +97,21 @@ class PlaceholderOp(Op):
         if self.initializer is not None:
             self.initializer.shape = self.shape
         elif self.tensor_value is not None:
-            slcs = []
-            for i in range(len(ori_shape)):
-                st = ori_shape[i] * cur_part[i]
-                en = st + ori_shape[i]
-                slcs.append(slice(st, en))
-            ori_value = self.tensor_value
-            if not isinstance(ori_value, np.ndarray):
-                ori_value = ori_value.asnumpy()
-            ori_value = ori_value[tuple(slcs)]
-            assert ori_value.shape == self.shape
-            self.tensor_value = ori_value
+            self.tensor_value = self.reshape_tensor(self.tensor_value)
+            assert self.shape == self.tensor_value.shape
+
+    def reshape_tensor(self, tensor):
+        if not isinstance(tensor, np.ndarray):
+            tensor = tensor.asnumpy()
+        ori_shape = tensor.shape
+        slcs = []
+        for i in range(len(ori_shape)):
+            part = ori_shape[i] // self.parts[i]
+            st = part * self.cur_part[i]
+            en = st + part
+            slcs.append(slice(st, en))
+        tensor = tensor[tuple(slcs)]
+        return tensor
 
 
 def placeholder_op(name, value=None, initializer=None, trainable=True, dtype=np.float32, ctx=None):

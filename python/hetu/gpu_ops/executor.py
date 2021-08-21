@@ -1678,6 +1678,8 @@ class SubExecutor(object):
                 continue
             assert node in self.need_feed_nodes, 'Only allow feed in PlaceholderOp with no values, here got %s:%s.' % (
                 str(type(node)), node.name)
+            if node.reshaped:
+                value = node.reshape_tensor(value)
             local_shape = tuple(value.shape)
             local_realloc = local_shape != self.node_to_shape_map.get(
                 node, None)
