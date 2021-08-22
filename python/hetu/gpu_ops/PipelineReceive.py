@@ -20,14 +20,7 @@ class PipelineReceiveOp(Op):
     def compute(self, input_vals, output_val, stream_handle=None, group_call=False):
         assert not self.on_cpu, "PipelineReceiveOp only support P2P communication between gpus"
         assert self.comm_stream, "communicate stream should not be None"
-
-        if self.event == None:
-            self.event = create_event_handle(self.ctx)
-        self.comm.dlarrayRecv(output_val,
-                              ncclDataType_t.ncclFloat32,
-                              self.const_attr,
-                              self.comm_stream)
-        self.event.record(self.comm_stream)
+        self.comm.dlarrayRecv(output_val, ncclDataType_t.ncclFloat32, self.const_attr, stream_handle)
 
         if group_call:
             GroupEnd()

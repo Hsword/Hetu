@@ -7,89 +7,76 @@ import argparse
 import numpy as np
 
 def fc(x, shape, name, with_relu=True):
-    weight = ht.init.random_normal(shape, stddev=0.1, name=name+'_weight')
-    bias = ht.init.random_normal(shape[-1:], stddev=0.1, name=name+'_bias')
+    weight = ht.init.random_normal(shape, stddev=0.04, name=name+'_weight')
+    bias = ht.init.random_normal(shape[-1:], stddev=0.04, name=name+'_bias')
     x = ht.matmul_op(x, weight)
     x = x + ht.broadcastto_op(bias, x)
     if with_relu:
         x = ht.relu_op(x)
     return x
 
-def make_generator(bs, x, y):
-    total_batches = x.shape[0] // bs
-
-    def x_gen_f():
-        for i in range(total_batches):
-            start = i * bs
-            end = (i+1) * bs
-            cur_x = x[start:end]
-            yield cur_x
-
-    def y_gen_f():
-        for i in range(total_batches):
-            start = i * bs
-            end = (i+1) * bs
-            cur_y = y[start:end]
-            yield cur_y
-
-    return x_gen_f(), y_gen_f()
-
 if __name__ == "__main__":
     # argument parser
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=5, help='training epochs')
-    parser.add_argument('--warmup', type=int, default=2, help='warm up steps excluded from timing')
-    parser.add_argument('--batch-size', type=int, default=2048, help='batch size')
-    parser.add_argument('--learning-rate', type=float, default=0.0001, help='learning rate')
+    parser.add_argument('--log_every', type=int, default=240, help='warm up steps excluded from timing')
+    parser.add_argument('--batch-size', type=int, default=1024, help='batch size')
+    parser.add_argument('--learning-rate', type=float, default=0.01, help='learning rate')
     args = parser.parse_args()
+    np.random.seed(0)
 
     datasets = ht.data.mnist()
     train_set_x, train_set_y = datasets[0]
     valid_set_x, valid_set_y = datasets[1]
     test_set_x, test_set_y = datasets[2]
+    iterations = len(train_set_x) // args.batch_size * args.epochs
 
     # pipeline parallel
-    with ht.context(ht.gpu(0)):
-        x = ht.Variable(name="dataloader_x", trainable=False)
+    with ht.context(ht.gpu(1)):
+        x = ht.dataloader_op([
+            ht.Dataloader(train_set_x, args.batch_size, "train"),
+            ht.Dataloader(valid_set_x, args.batch_size, "validate"),
+        ])
         activation = fc(x, (784, 1024), 'mlp_fc1', with_relu=True)
 
-    for i in range(1, 7):
+    for i in range(2, 3):
         with ht.context(ht.gpu(i)):
             activation = fc(activation, (1024, 1024), 'mlp_fc%d' % (i + 1), with_relu=True)
 
-    with ht.context(ht.gpu(7)):
-        y_pred = fc(activation, (1024, 10), 'mlp_fc8', with_relu=True)
-        y_ = ht.Variable(name="dataloader_y", trainable=False)
+    with ht.context(ht.gpu(3)):
+        y_pred = fc(activation, (1024, 10), 'mlp_fc8', with_relu=False)
+        y_ = ht.dataloader_op([
+            ht.Dataloader(train_set_y, args.batch_size, "train"),
+            ht.Dataloader(valid_set_y, args.batch_size, "validate"),
+        ])
         loss = ht.softmaxcrossentropy_op(y_pred, y_)
         loss = ht.reduce_mean_op(loss, [0])
         opt = ht.optim.SGDOptimizer(learning_rate=args.learning_rate)
         train_op = opt.minimize(loss)
-        executor = ht.Executor([loss, train_op], pipedream=True)
+        executor = ht.Executor({"train" : [loss, train_op], "validate" : [loss]}, seed=0, pipedream=True)
 
-    """
-    notice: in pipedream mode, we have multiple version of weights, to achieve the best throughput
-    and train all the versions equally, we should combine the training data in advance and train them
-    in one pass
-    """
-    # combine the feed dataset
-    train_set_x_list = []
-    train_set_y_list = []
-    for epoch in range(args.epochs):
-        rand_ind = np.random.randint(train_set_y.shape[0], size=(train_set_y.shape[0],))
-        train_set_x_list.append(train_set_x[rand_ind])
-        train_set_y_list.append(train_set_y[rand_ind])
-    train_set_x = np.concatenate(train_set_x_list, axis=0)
-    train_set_y = np.concatenate(train_set_y_list, axis=0)
+    def validate():
+        val_batch_num = steps = valid_set_x.shape[0] // args.batch_size
+        val_loss = []
+        for i in range(val_batch_num):
+            loss = executor.run("validate", convert_to_numpy_ret_vals=True)
+            val_loss.append(loss)
+        if executor.rank == 2:
+            print("EVAL LOSS: ", np.mean(val_loss))
 
     # training
-    x_gen, y_gen = make_generator(args.batch_size, train_set_x, train_set_y)
-    res = executor.run(feed_dict={x: x_gen, y_: y_gen})
-    reduced_res = []
-    for elements in res:
-        for e in elements:
-            if e:
-                reduced_res.append(e[0])
-    if reduced_res:
-        print("epoch {}, avg loss {}, max loss {}, min loss {}".format(epoch,
-                np.mean(reduced_res), np.max(reduced_res), np.min(reduced_res)))
-        #print(reduced_res)
+    for _ in range(iterations // args.log_every):
+        start = time.time()
+        res = executor.run("train", batch_num = args.log_every)
+        time_used = time.time() - start
+        reduced_res = []
+        for elements in res:
+            for e in elements:
+                if e:
+                    reduced_res.append(e[0])
+        if reduced_res:
+            print("TRAIN avg loss {}, max loss {}, min loss {} time {}".format(
+                    np.mean(reduced_res), np.max(reduced_res), np.min(reduced_res), time_used))
+
+        validate()
+
