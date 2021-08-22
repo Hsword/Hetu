@@ -164,22 +164,17 @@ class Op(object):
 
     def forward_deduce_states(self, input_statuses, status, deduce_order):
         assert len(input_statuses) == len(self.inputs)
-        if deduce_order:
-            for n in input_statuses:
-                status.copy_order_from(n)
-        else:
-            for n in input_statuses:
-                status.copy_state_from(n)
+        for nst in input_statuses:
+            status.copy_from(nst, deduce_order)
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
         assert len(input_statuses) == len(self.inputs)
-        if deduce_order:
-            for n in input_statuses:
-                n.copy_order_from(status)
-        else:
-            for n in input_statuses:
-                n.copy_state_from(status)
+        for nst in input_statuses:
+            nst.copy_from(status, deduce_order)
 
     def get_default_state(self, status, enforce_order):
         if enforce_order:
-            status.set_order((-1,) + tuple(range(len(status.state))))
+            order = tuple(sorted(status.state.keys()))
+            if status.duplicate > 1:
+                order = (-1,) + order
+            status.set_order(order)

@@ -105,13 +105,15 @@ class MatMulOp(Op):
         else:
             if input_statuses[0].valid_state():
                 state, duplicate = input_statuses[0].get()
-                res_state = (state[self.matmul_attr_trans_A], duplicate)
-                res_duplicate = state[1-self.matmul_attr_trans_A]
+                res_state = (
+                    state.get(int(self.matmul_attr_trans_A), 1), duplicate)
+                res_duplicate = state.get(1-self.matmul_attr_trans_A, 1)
                 status.set_state(res_state, res_duplicate)
             elif input_statuses[1].valid_state():
                 state, duplicate = input_statuses[1].get()
-                res_state = (duplicate, state[1-self.matmul_attr_trans_B])
-                res_duplicate = state[self.matmul_attr_trans_B]
+                res_state = (duplicate, state.get(
+                    1-self.matmul_attr_trans_B, 1))
+                res_duplicate = state.get(int(self.matmul_attr_trans_B), 1)
                 status.set_state(res_state, res_duplicate)
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
@@ -136,20 +138,20 @@ class MatMulOp(Op):
             if status.valid_state():
                 state, duplicate = status.get()
                 res_state = revert(
-                    (state[0], duplicate), self.matmul_attr_trans_A)
-                res_duplicate = state[1]
+                    (state.get(0, 1), duplicate), self.matmul_attr_trans_A)
+                res_duplicate = state.get(1, 1)
                 input_statuses[0].set_state(res_state, res_duplicate)
                 res_state = revert(
-                    (duplicate, state[1]), self.matmul_attr_trans_B)
-                res_duplicate = state[0]
+                    (duplicate, state.get(1, 1)), self.matmul_attr_trans_B)
+                res_duplicate = state.get(0, 1)
                 input_statuses[1].set_state(res_state, res_duplicate)
             else:
                 if input_statuses[0].state is not None:
                     input_statuses[1].set_state(
-                        None, input_statuses[0].state[self.matmul_attr_trans_A])
+                        None, input_statuses[0].state.get(int(self.matmul_attr_trans_A), 1))
                 if input_statuses[1].state is not None:
                     input_statuses[0].set_state(
-                        None, input_statuses[1].state[1 - self.matmul_attr_trans_B])
+                        None, input_statuses[1].state.get(1 - self.matmul_attr_trans_B, 1))
 
 
 def matmul_op(node_A, node_B, trans_A=False, trans_B=False, ctx=None):

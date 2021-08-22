@@ -105,28 +105,20 @@ class BroadcastShapeOp(Op):
             if hasattr(self, 'ori_status') and self.ori_status.valid_all():
                 status.copy_order_from(self.ori_status)
             else:
-                # now only consider naive situation
+                # only support data parallel
                 order = input_statuses[0].order
                 if order is not None:
-                    ori_len = len(order) - 1
-                    tar_len = len(self.target_shape)
-                    assert order == tuple(range(-1, ori_len))
-                    status.set_order(tuple(range(-1, tar_len)))
+                    input_statuses[0].check_state(1, deduce_order)
+                    status.set_order(order)
         else:
             if hasattr(self, 'ori_status') and self.ori_status.valid_state():
                 status.copy_state_from(self.ori_status)
             else:
+                # only support data parallel
                 state, duplicate = input_statuses[0].get()
-                if state is not None and self.target_shape is not None:
-                    state = list(state)
-                    diff = len(self.target_shape) - len(state)
-                    if self.add_axes:
-                        state = [1, ] * diff + state
-                    else:
-                        assert diff == len(self.add_axes)
-                        for ax in self.add_axes:
-                            state.insert(ax, 1)
-                    status.set_state(tuple(state), duplicate)
+                if state is not None:
+                    input_statuses[0].check_state(1, deduce_order)
+                status.set_state(state, duplicate)
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
         assert len(input_statuses) == len(self.inputs)
@@ -137,9 +129,21 @@ class BroadcastShapeOp(Op):
         if deduce_order:
             if hasattr(self, 'tar_status'):
                 input_statuses[0].copy_order_from(self.tar_status)
+            else:
+                # only support data parallel
+                order = input_statuses[0].order
+                if order is not None:
+                    status.check_state(1, deduce_order)
+                    input_statuses[0].set_order(order)
         else:
             if hasattr(self, 'tar_status'):
                 input_statuses[0].copy_state_from(self.tar_status)
+            else:
+                # only support data parallel
+                state, duplicate = input_statuses[0].get()
+                if state is not None:
+                    status.check_state(1, deduce_order)
+                input_statuses[0].set_state(state, duplicate)
 
 
 def broadcast_shape_op(node_A, shape, add_axes=(), ctx=None):

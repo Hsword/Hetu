@@ -71,16 +71,10 @@ class ReduceSumOp(Op):
                 status.copy_order_from(self.ori_status)
             elif input_statuses[0].order is not None:
                 order = list(input_statuses[0].order)
-                for ax, kd in sorted(zip(self.axes, self.keepdims))[::-1]:
-                    assert order[ax+1] == ax
-                    if not kd:
-                        order.pop(ax+1)
-                cur = -1
-                for ind in range(-1, len(order) - 1):
-                    while cur not in order:
-                        cur += 1
-                    order[order.index(cur)] = ind
-                    cur += 1
+                assert all([x not in order for x in self.axes])
+                for i in range(len(order)):
+                    order[i] -= sum([x < order[i]
+                                     for j, x in enumerate(self.axes) if not self.keepdims[j]])
                 status.set_order(tuple(order))
         else:
             if hasattr(self, 'ori_status'):
@@ -88,12 +82,15 @@ class ReduceSumOp(Op):
             else:
                 state, duplicate = input_statuses[0].get()
                 if state is not None:
-                    state = list(state)
-                    for ax, kd in sorted(zip(self.axes, self.keepdims))[::-1]:
-                        assert state[ax] == 1
-                        if not kd:
-                            state.pop(ax)
-                    status.set_state(tuple(state), duplicate)
+                    state = dict(state)
+                    assert all([x not in state for x in self.axes])
+                    for k in sorted(state.keys()):
+                        new_k = k - \
+                            sum([x < k for j, x in enumerate(
+                                self.axes) if not self.keepdims[j]])
+                        if new_k != k:
+                            state[new_k] = state.pop(k)
+                status.set_state(state, duplicate)
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
         assert len(input_statuses) == len(self.inputs)
@@ -106,11 +103,11 @@ class ReduceSumOp(Op):
                 input_statuses[0].copy_order_from(self.tar_status)
             elif status.order is not None:
                 order = list(status.order)
-                min_ax = min(self.axes)
-                for kd in self.keepdims:
+                for ax, kd in sorted(zip(self.axes, self.keepdims)):
                     if not kd:
-                        order += [len(order) - 1]
-                assert order[min_ax + 1:] == list(range(min_ax, len(order)-1))
+                        for i in range(len(order)):
+                            if order[i] >= ax:
+                                order[i] += 1
                 input_statuses[0].set_order(tuple(order))
         else:
             if hasattr(self, 'tar_status'):
@@ -118,13 +115,16 @@ class ReduceSumOp(Op):
             else:
                 state, duplicate = status.get()
                 if state is not None:
-                    state = list(state)
+                    state = dict(state)
+                    state_keys = {i: i for i in state}
                     for ax, kd in sorted(zip(self.axes, self.keepdims)):
-                        if kd:
-                            assert state[ax] == 1
-                        else:
-                            state.insert(ax, 1)
-                    input_statuses[0].set_state(tuple(state), duplicate)
+                        if not kd:
+                            for i, v in enumerate(state_keys):
+                                if v >= ax:
+                                    state_keys[i] += 1
+                    for k in sorted(state_keys.keys())[::-1]:
+                        state[state_keys[k]] = state.pop(k)
+                input_statuses[0].set_state(state, duplicate)
 
 
 def reduce_sum_op(node, axes, keepdims=False, ctx=None):

@@ -69,10 +69,7 @@ class BroadcastToOp(Op):
 
     def forward_deduce_states(self, input_statuses, status, deduce_order):
         assert len(input_statuses) == len(self.inputs)
-        if deduce_order:
-            status.copy_order_from(input_statuses[1])
-        else:
-            status.copy_state_from(input_statuses[1])
+        status.copy_from(input_statuses[1], deduce_order)
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
         assert len(input_statuses) == len(self.inputs)
@@ -80,10 +77,8 @@ class BroadcastToOp(Op):
             self.grad_node.ori_status = input_statuses[0]
             self.grad_node.tar_status = status
             self.grad_set = True
-        if deduce_order:
-            input_statuses[1].copy_order_from(status)
-        else:
-            input_statuses[1].copy_state_from(status)
+        # there is no information for input[0] here, so we don't deduce
+        input_statuses[1].copy_from(status, deduce_order)
 
 
 def broadcastto_op(node_A, node_B, ctx=None):

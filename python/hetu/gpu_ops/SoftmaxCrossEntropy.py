@@ -42,36 +42,20 @@ class SoftmaxCrossEntropyOp(Op):
         return input_shapes[0][:-1]
 
     def forward_deduce_states(self, input_statuses, status, deduce_order):
+        # only allow data parallel in softmax cross entropy
         assert len(input_statuses) == len(self.inputs)
-        if deduce_order:
-            if input_statuses[0].valid_all():
-                order = list(input_statuses[0].order)
-                order.remove(len(order) - 2)
-                status.set_order(tuple(order))
-            elif input_statuses[1].valid_all():
-                order = list(input_statuses[1].order)
-                order.remove(len(order) - 2)
-                status.set_order(tuple(order))
-        else:
-            if input_statuses[0].valid_state():
-                state, duplicate = input_statuses[0].get()
-                assert state[-1] == 1
-                status.set_state(state[:-1], duplicate)
-            elif input_statuses[1].valid_state():
-                state, duplicate = input_statuses[1].get()
-                assert state[-1] == 1
-                status.set_state(state[:-1], duplicate)
+        for nst in input_statuses:
+            if nst.valid(deduce_order):
+                nst.check_state(1, deduce_order)
+                status.copy_from(nst, deduce_order)
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
+        # only allow data parallel in softmax cross entropy
         assert len(input_statuses) == len(self.inputs)
-        if deduce_order:
-            pass
-        else:
-            if status.valid_state():
-                state, duplicate = status.get()
-                state += (1,)
-                input_statuses[0].set_state(state, duplicate)
-                input_statuses[1].set_state(state, duplicate)
+        if status.valid(deduce_order):
+            status.check_state(1, deduce_order)
+            for nst in input_statuses:
+                nst.copy_from(status, deduce_order)
 
 
 class SoftmaxCrossEntropyGradientOp(Op):
@@ -103,33 +87,20 @@ class SoftmaxCrossEntropyGradientOp(Op):
         return input_shapes[0]
 
     def forward_deduce_states(self, input_statuses, status, deduce_order):
-        if deduce_order:
-            if input_statuses[0].valid_all():
-                status.copy_order_from(input_statuses[0])
-            elif input_statuses[1].valid_all():
-                status.copy_order_from(input_statuses[1])
-        else:
-            if input_statuses[0].valid_state():
-                status.copy_state_from(input_statuses[0])
-            elif input_statuses[1].valid_state():
-                status.copy_state_from(input_statuses[1])
+        # only allow data parallel in softmax cross entropy
+        assert len(input_statuses) == len(self.inputs)
+        for nst in input_statuses:
+            if nst.valid(deduce_order):
+                nst.check_state(1, deduce_order)
+                status.copy_from(nst, deduce_order)
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
-        if deduce_order:
-            if status.valid_all():
-                order = status.order
-                input_statuses[0].set_order(order)
-                input_statuses[1].set_order(order)
-                order = list(order)
-                order.remove(len(order) - 2)
-                input_statuses[2].set_order(tuple(order))
-        else:
-            if status.valid_state():
-                input_statuses[0].copy_state_from(status)
-                input_statuses[1].copy_state_from(status)
-                state, duplicate = status.get()
-                assert state[-1] == 1
-                input_statuses[2].set_state(state[:-1], duplicate)
+        # only allow data parallel in softmax cross entropy
+        assert len(input_statuses) == len(self.inputs)
+        if status.valid(deduce_order):
+            status.check_state(1, deduce_order)
+            for nst in input_statuses:
+                nst.copy_from(status, deduce_order)
 
 
 def softmaxcrossentropy_op(node_A, node_B, use_cudnn=True, ctx=None):

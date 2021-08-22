@@ -90,7 +90,7 @@ class PlaceholderOp(Op):
             return
         # this function only used in context launch to enable variable initialized in model parallel
         ori_shape = list(self.shape)
-        for i, pts in enumerate(parts):
+        for i, pts in parts.items():
             assert ori_shape[i] % pts == 0
             ori_shape[i] //= pts
         self.shape = tuple(ori_shape)
@@ -101,14 +101,20 @@ class PlaceholderOp(Op):
             assert self.shape == self.tensor_value.shape
 
     def reshape_tensor(self, tensor):
+        if self.parts == {}:
+            return tensor
         if not isinstance(tensor, np.ndarray):
             tensor = tensor.asnumpy()
         ori_shape = tensor.shape
         slcs = []
         for i in range(len(ori_shape)):
-            part = ori_shape[i] // self.parts[i]
-            st = part * self.cur_part[i]
-            en = st + part
+            if i in self.parts:
+                part = ori_shape[i] // self.parts[i]
+                st = part * self.cur_part[i]
+                en = st + part
+            else:
+                st = 0
+                en = ori_shape[i]
             slcs.append(slice(st, en))
         tensor = tensor[tuple(slcs)]
         return tensor

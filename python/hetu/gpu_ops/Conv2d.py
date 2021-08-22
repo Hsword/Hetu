@@ -104,17 +104,17 @@ class Conv2dOp(Op):
         else:
             if input_statuses[0].valid_state():
                 state, duplicate = input_statuses[0].get()
-                keys = {i: st for i, st in enumerate(state)}
+                keys = dict(state)
                 keys[-1] = duplicate
-                res_state = tuple(keys[res2l_map[x]] for x in range(4))
-                res_duplicate = keys[res2l_map[-1]]
+                res_state = tuple(keys.get(res2l_map[x], 1) for x in range(4))
+                res_duplicate = keys.get(res2l_map[-1], 1)
                 status.set_state(res_state, res_duplicate)
             elif input_statuses[1].valid_state():
                 state, duplicate = input_statuses[1].get()
-                keys = {i: st for i, st in enumerate(state)}
+                keys = dict(state)
                 keys[-1] = duplicate
-                res_state = tuple(keys[res2r_map[x]] for x in range(4))
-                res_duplicate = keys[res2r_map[-1]]
+                res_state = tuple(keys.get(res2r_map[x], 1) for x in range(4))
+                res_duplicate = keys.get(res2r_map[-1], 1)
                 status.set_state(res_state, res_duplicate)
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
@@ -132,21 +132,21 @@ class Conv2dOp(Op):
         else:
             if status.valid_state():
                 state, duplicate = status.get()
-                keys = {i: st for i, st in enumerate(state)}
+                keys = dict(state)
                 keys[-1] = duplicate
-                res_state = tuple(keys[l2res_map[x]] for x in range(4))
-                res_duplicate = keys[l2res_map[-1]]
+                res_state = tuple(keys.get(l2res_map[x], 1) for x in range(4))
+                res_duplicate = keys.get(l2res_map[-1], 1)
                 input_statuses[0].set_state(res_state, res_duplicate)
-                res_state = tuple(keys[r2res_map[x]] for x in range(4))
-                res_duplicate = keys[r2res_map[-1]]
+                res_state = tuple(keys.get(r2res_map[x], 1) for x in range(4))
+                res_duplicate = keys.get(r2res_map[-1], 1)
                 input_statuses[1].set_state(res_state, res_duplicate)
             else:
                 if input_statuses[0].state is not None:
                     input_statuses[1].set_state(
-                        None, input_statuses[0].state[0])
+                        None, input_statuses[0].state.get(0, 1))
                 if input_statuses[1].state is not None:
                     input_statuses[0].set_state(
-                        None, input_statuses[1].state[0])
+                        None, input_statuses[1].state.get(0, 1))
 
 
 class Conv2d_Gradient_of_DataOp(Op):
@@ -242,17 +242,17 @@ class Conv2d_Gradient_of_DataOp(Op):
         else:
             if input_statuses[0].valid_state():
                 state, duplicate = input_statuses[0].get()
-                keys = {i: st for i, st in enumerate(state)}
+                keys = dict(state)
                 keys[-1] = duplicate
-                res_state = tuple(keys[res2l_map[x]] for x in range(4))
-                res_duplicate = keys[res2l_map[-1]]
+                res_state = tuple(keys.get(res2l_map[x], 1) for x in range(4))
+                res_duplicate = keys.get(res2l_map[-1], 1)
                 status.set_state(res_state, res_duplicate)
             elif input_statuses[1].valid_state():
                 state, duplicate = input_statuses[1].get()
-                keys = {i: st for i, st in enumerate(state)}
+                keys = dict(state)
                 keys[-1] = duplicate
-                res_state = tuple(keys[res2r_map[x]] for x in range(4))
-                res_duplicate = keys[res2r_map[-1]]
+                res_state = tuple(keys.get(res2r_map[x], 1) for x in range(4))
+                res_duplicate = keys.get(res2r_map[-1], 1)
                 status.set_state(res_state, res_duplicate)
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
@@ -270,21 +270,21 @@ class Conv2d_Gradient_of_DataOp(Op):
         else:
             if status.valid_state():
                 state, duplicate = status.get()
-                keys = {i: st for i, st in enumerate(state)}
+                keys = dict(state)
                 keys[-1] = duplicate
-                res_state = tuple(keys[l2res_map[x]] for x in range(4))
-                res_duplicate = keys[l2res_map[-1]]
+                res_state = tuple(keys.get(l2res_map[x], 1) for x in range(4))
+                res_duplicate = keys.get(l2res_map[-1], 1)
                 input_statuses[0].set_state(res_state, res_duplicate)
-                res_state = tuple(keys[r2res_map[x]] for x in range(4))
-                res_duplicate = keys[r2res_map[-1]]
+                res_state = tuple(keys.get(r2res_map[x], 1) for x in range(4))
+                res_duplicate = keys.get(r2res_map[-1], 1)
                 input_statuses[1].set_state(res_state, res_duplicate)
             else:
                 if input_statuses[0].state is not None:
                     input_statuses[1].set_state(
-                        None, input_statuses[0].state[1])
+                        None, input_statuses[0].state.get(1, 1))
                 if input_statuses[1].state is not None:
                     input_statuses[0].set_state(
-                        None, input_statuses[1].state[0])
+                        None, input_statuses[1].state.get(0, 1))
 
 
 class Conv2d_Gradient_of_FilterOp(Op):
@@ -390,17 +390,17 @@ class Conv2d_Gradient_of_FilterOp(Op):
         else:
             if input_statuses[0].valid_state():
                 state, duplicate = input_statuses[0].get()
-                keys = {i: st for i, st in enumerate(state)}
+                keys = dict(state)
                 keys[-1] = duplicate
-                res_state = tuple(keys[res2l_map[x]] for x in range(4))
-                res_duplicate = keys[res2l_map[-1]]
+                res_state = tuple(keys.get(res2l_map[x], 1) for x in range(4))
+                res_duplicate = keys.get(res2l_map[-1], 1)
                 status.set_state(res_state, res_duplicate)
             elif input_statuses[1].valid_state():
                 state, duplicate = input_statuses[1].get()
-                keys = {i: st for i, st in enumerate(state)}
+                keys = dict(state)
                 keys[-1] = duplicate
-                res_state = tuple(keys[res2r_map[x]] for x in range(4))
-                res_duplicate = keys[res2r_map[-1]]
+                res_state = tuple(keys.get(res2r_map[x], 1) for x in range(4))
+                res_duplicate = keys.get(res2r_map[-1], 1)
                 status.set_state(res_state, res_duplicate)
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
@@ -418,21 +418,21 @@ class Conv2d_Gradient_of_FilterOp(Op):
         else:
             if status.valid_state():
                 state, duplicate = status.get()
-                keys = {i: st for i, st in enumerate(state)}
+                keys = dict(state)
                 keys[-1] = duplicate
-                res_state = tuple(keys[l2res_map[x]] for x in range(4))
-                res_duplicate = keys[l2res_map[-1]]
+                res_state = tuple(keys.get(l2res_map[x], 1) for x in range(4))
+                res_duplicate = keys.get(l2res_map[-1], 1)
                 input_statuses[0].set_state(res_state, res_duplicate)
-                res_state = tuple(keys[r2res_map[x]] for x in range(4))
-                res_duplicate = keys[r2res_map[-1]]
+                res_state = tuple(keys.get(r2res_map[x], 1) for x in range(4))
+                res_duplicate = keys.get(r2res_map[-1], 1)
                 input_statuses[1].set_state(res_state, res_duplicate)
             else:
                 if input_statuses[0].state is not None:
                     input_statuses[1].set_state(
-                        None, input_statuses[0].state[1])
+                        None, input_statuses[0].state.get(1, 1))
                 if input_statuses[1].state is not None:
                     input_statuses[0].set_state(
-                        None, input_statuses[1].state[1])
+                        None, input_statuses[1].state.get(1, 1))
 
 
 def conv2d_op(node_A, node_B, padding=0, stride=1, ctx=None):

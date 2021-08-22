@@ -118,10 +118,15 @@ _default_ctx_stack = ContextStack()
 
 
 class NodeStatus(object):
-    def __init__(self, state=None, duplicate=None, order=None):
+    def __init__(self, state=None):
+        if state is not None:
+            if not isinstance(state, dict):
+                state = {i: v for i, v in enumerate(state) if v != 1}
+            else:
+                state = {i: v for i, v in sorted(state.items()) if v != 1}
         self._state = state
-        self._duplicate = duplicate
-        self._order = order
+        self._duplicate = None
+        self._order = None
         self._valid_state = False
         self._valid_all = False
 
@@ -148,6 +153,10 @@ class NodeStatus(object):
 
     def set_state(self, state=None, duplicate=None):
         if state is not None:
+            if not isinstance(state, dict):
+                state = {i: v for i, v in enumerate(state) if v != 1}
+            else:
+                state = {i: v for i, v in sorted(state.items()) if v != 1}
             assert self._state in (state, None)
             self._state = state
         if duplicate is not None:
@@ -160,7 +169,7 @@ class NodeStatus(object):
             self._order = order
 
     def set_one(self):
-        self._state = (1,)
+        self._state = {}
         self._duplicate = 1
         self._order = None
         self._device_num = 1
@@ -187,7 +196,7 @@ class NodeStatus(object):
         else:
             self._valid_state = True
             self._device_num = np.prod(
-                self._state, dtype=int) * self._duplicate
+                list(self._state.values()), dtype=int) * self._duplicate
             return True
 
     def valid_all(self):
@@ -206,8 +215,15 @@ class NodeStatus(object):
         else:
             return self.valid_state()
 
+    def check_state(self, max_dim, check_order):
+        # only allow dimensions lower than max_dim to split
+        if check_order:
+            assert all([o < max_dim for o in self.order])
+        else:
+            assert all([o < max_dim for o in self.state])
+
     def map_dev_to_index(self, global_index):
-        cur_state_index = self.make_empty_state()
+        cur_state_index = {}
         for cur_order in self._order[::-1]:
             if cur_order < 0:
                 global_index //= self._duplicate
@@ -216,9 +232,6 @@ class NodeStatus(object):
                 cur_state_index[cur_order] = global_index % ts
                 global_index //= ts
         return cur_state_index
-
-    def make_empty_state(self):
-        return [0 for _ in range(len(self._state))]
 
     def check_devices(self, devices):
         assert self._device_num == len(devices)
@@ -501,7 +514,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 prev_ns = node_cur_state_map[prev_input]
                 target_ns = node_tar_state_map[prev_input]
                 prev_state, prev_duplicate, prev_order = prev_ns.get_all()
-                target_state, target_duplicate, target_order = target_ns.get_all()
+                target_state = target_ns.state
                 prev_ns.check_devices(prev_input.raw_ctx[dev_pos])
                 target_ns.check_devices(node.raw_ctx[dev_pos])
                 loop_sizes = prev_ns.get_loop_sizes()
@@ -523,30 +536,31 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                                     res, cross_receive(depth+1), ctx=ctx)
                                 layer_indices[res] = layer_id
                         else:
-                            if prev_state[cur_dim] % target_state[cur_dim] == 0:
+                            tar_st = target_state.get(cur_dim, 1)
+                            cur_st = cur_state_index.get(cur_dim, 0)
+                            if prev_state[cur_dim] % tar_st == 0:
                                 # at `cur_dim` dimension we need to concat some inputs
-                                multiple = prev_state[cur_dim] // \
-                                    target_state[cur_dim]
-                                device_index += cur_state_index[cur_dim] * \
+                                multiple = prev_state[cur_dim] // tar_st
+                                device_index += cur_st * \
                                     multiple * loop_sizes[depth]
                                 res = cross_receive(depth+1)
                                 for _ in range(1, multiple):
                                     res = concat_op(
                                         res, cross_receive(depth+1), axis=cur_dim, ctx=ctx)
                                     layer_indices[res] = layer_id
-                                device_index += (target_state[cur_dim] - 1 -
-                                                 cur_state_index[cur_dim]) * multiple * loop_sizes[depth]
-                            elif target_state[cur_dim] % prev_state[cur_dim] == 0:
+                                device_index += (tar_st - 1 - cur_st) * \
+                                    multiple * loop_sizes[depth]
+                            elif tar_st % prev_state[cur_dim] == 0:
                                 # at `cur_dim` dimension we need to specify one input
-                                multiple = target_state[cur_dim] // prev_state[cur_dim]
-                                device_index += cur_state_index[cur_dim] // multiple * \
+                                multiple = tar_st // prev_state[cur_dim]
+                                device_index += cur_st // multiple * \
                                     loop_sizes[depth]
                                 res = cross_receive(depth+1)
-                                device_index += (target_state[cur_dim] - 1 -
-                                                 cur_state_index[cur_dim]) // multiple * loop_sizes[depth]
+                                device_index += (tar_st - 1 -
+                                                 cur_st) // multiple * loop_sizes[depth]
                             else:
                                 assert False, 'The dispatch state (%d, %d) at dimension %d is invalid.' % (
-                                    prev_state[cur_dim], target_state[cur_dim], cur_dim)
+                                    prev_state[cur_dim], tar_st, cur_dim)
                     return res
                 devices = prev_input.raw_ctx.workers[dev_pos]
                 recv_src[prev_input] = cross_receive(0)
@@ -571,8 +585,11 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                     if len(target_order) == depth:
                         nonlocal device_index
                         if target_ns.is_dist():
-                            cur_node = split_op(prev_input, list(range(len(target_state))), list(
-                                cur_state), list(target_state), ctx=ctx)
+                            keys = list(target_state.keys())
+                            indices = [cur_state[k] for k in keys]
+                            splits = [target_state[k] for k in keys]
+                            cur_node = split_op(
+                                prev_input, keys, indices, splits, ctx=ctx)
                             layer_indices[cur_node] = layer_id
                         else:
                             cur_node = prev_input
@@ -589,7 +606,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                                 make_split(cur_state, depth + 1)
                 target_ns = node_tar_state_map[prev_input]
                 target_state, target_duplicate, target_order = target_ns.get_all()
-                make_split(target_ns.make_empty_state(), 0)
+                make_split({}, 0)
                 assert device_index == len(
                     node.raw_ctx.workers[dev_pos])
         elif not isinstance(node.raw_ctx.workers[dev_pos], tuple):
@@ -612,7 +629,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 send_dst[key] = True
                 prev_ns = node_cur_state_map[prev_input]
                 target_ns = node_tar_state_map[prev_input]
-                prev_state, prev_duplicate, prev_order = prev_ns.get_all()
+                prev_state = prev_ns.state
                 target_state, target_duplicate, target_order = target_ns.get_all()
                 prev_ns.check_devices(prev_input.raw_ctx[dev_pos])
                 target_ns.check_devices(node.raw_ctx[dev_pos])
@@ -625,8 +642,11 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                     nonlocal device_index
                     if depth == len(target_order):
                         if need_split:
-                            cur_node = split_op(prev_input, list(range(len(split_target_state))), list(
-                                split_cur_state), list(split_target_state), ctx=ctx)
+                            keys = list(split_target_state.keys())
+                            indices = [split_cur_state[k] for k in keys]
+                            splits = [split_target_state[k] for k in keys]
+                            cur_node = split_op(
+                                prev_input, keys, indices, splits, ctx=ctx)
                             layer_indices[cur_node] = layer_id
                         else:
                             cur_node = prev_input
@@ -639,36 +659,35 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                                 cross_send(
                                     split_cur_state, split_target_state, depth+1, need_split)
                         else:
-                            if prev_state[cur_dim] % target_state[cur_dim] == 0:
+                            pre_st = prev_state.get(cur_dim, 1)
+                            cur_st = cur_state_index.get(cur_dim, 0)
+                            if pre_st % target_state[cur_dim] == 0:
                                 # at `cur_dim` dimension we need to send one output
-                                multiple = prev_state[cur_dim] // \
-                                    target_state[cur_dim]
-                                device_index += cur_state_index[cur_dim] // multiple * \
+                                multiple = pre_st // target_state[cur_dim]
+                                device_index += cur_st // multiple * \
                                     loop_sizes[depth]
                                 split_cur_state[cur_dim] = 0
                                 split_target_state[cur_dim] = 1
                                 cross_send(split_cur_state,
                                            split_target_state, depth+1, need_split)
-                                device_index += (prev_state[cur_dim] - 1 -
-                                                 cur_state_index[cur_dim]) // multiple * loop_sizes[depth]
-                            elif target_state[cur_dim] % prev_state[cur_dim] == 0:
+                                device_index += (pre_st - 1 -
+                                                 cur_st) // multiple * loop_sizes[depth]
+                            elif target_state[cur_dim] % pre_st == 0:
                                 # at `cur_dim` dimension we need to split and send some outputs
-                                multiple = target_state[cur_dim] // prev_state[cur_dim]
-                                device_index += cur_state_index[cur_dim] * \
+                                multiple = target_state[cur_dim] // pre_st
+                                device_index += cur_st * \
                                     multiple * loop_sizes[depth]
                                 for index in range(multiple):
                                     split_cur_state[cur_dim] = index
                                     split_target_state[cur_dim] = multiple
                                     cross_send(split_cur_state,
                                                split_target_state, depth+1, True)
-                                device_index += (prev_state[cur_dim] - 1 -
-                                                 cur_state_index[cur_dim]) * multiple * loop_sizes[depth]
+                                device_index += (pre_st - 1 -
+                                                 cur_st) * multiple * loop_sizes[depth]
                             else:
                                 assert False, 'The dispatch state (%d, %d) at dimension %d is invalid.' % (
-                                    prev_state[cur_dim], target_state[cur_dim], cur_dim)
-                split_cur_state = prev_ns.make_empty_state()
-                split_target_state = prev_ns.make_empty_state()
-                cross_send(split_cur_state, split_target_state, 0, False)
+                                    pre_st, target_state[cur_dim], cur_dim)
+                cross_send({}, {}, 0, False)
                 assert device_index == len(devices)
 
     def assign_ctx(node):
@@ -722,22 +741,23 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                         if mp_index_map[param] < 0 and param.raw_ctx.worker_num > 1:
                             allreduce_devices = param.raw_ctx
                         elif mp_index_map[param] >= 0:
-                            allreduce_devices = []
                             target_state, target_duplicate, target_order = \
                                 node_tar_state_map[param].get_all()
-                            mp_index = mp_index_map[param]
-                            interval = 1
-                            dup_dim = target_order.index(-1)
-                            for cur_order in target_order[dup_dim+1:]:
-                                interval *= target_state[cur_order]
-                            macro_interval = interval * target_duplicate
-                            start = mp_index - mp_index % macro_interval + mp_index % interval
-                            for rc in range(param.raw_ctx.worker_num):
-                                for ind in range(start, start + interval * target_duplicate, interval):
-                                    allreduce_devices.append(
-                                        param.raw_ctx[rc][ind])
-                            allreduce_devices = None if len(
-                                allreduce_devices) <= 1 else DeviceGroup(allreduce_devices)
+                            if -1 in target_order:
+                                mp_index = mp_index_map[param]
+                                interval = 1
+                                allreduce_devices = []
+                                dup_dim = target_order.index(-1)
+                                for cur_order in target_order[dup_dim+1:]:
+                                    interval *= target_state[cur_order]
+                                macro_interval = interval * target_duplicate
+                                start = mp_index - mp_index % macro_interval + mp_index % interval
+                                for rc in range(param.raw_ctx.worker_num):
+                                    for ind in range(start, start + interval * target_duplicate, interval):
+                                        allreduce_devices.append(
+                                            param.raw_ctx[rc][ind])
+                                allreduce_devices = None if len(
+                                    allreduce_devices) <= 1 else DeviceGroup(allreduce_devices)
                         if allreduce_devices is not None:
                             allreduce_devices = allreduce_devices.get_sorted()
                             if allreduce_devices not in comm_groups:
