@@ -87,14 +87,14 @@ class Array_ReshapeOp(Op):
         assert len(input_statuses) == len(self.inputs)
         if input_statuses[0].valid(deduce_order):
             input_statuses[0].check_state(1, deduce_order)
-            status.copy_from(input_statuses[0], deduce_order)
+        status.copy_from(input_statuses[0], deduce_order)
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
         # only allow data parallel in reshape
         assert len(input_statuses) == len(self.inputs)
         if status.valid(deduce_order):
             status.check_state(1, deduce_order)
-            input_statuses[0].copy_from(status, deduce_order)
+        input_statuses[0].copy_from(status, deduce_order)
 
 
 class Array_Reshape_GradientOp(Op):
@@ -131,15 +131,15 @@ class Array_Reshape_GradientOp(Op):
         for nst in input_statuses:
             if nst.valid(deduce_order):
                 nst.check_state(1, deduce_order)
-                status.copy_from(nst, deduce_order)
+            status.copy_from(nst, deduce_order)
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
         # only allow data parallel in reshape
         assert len(input_statuses) == len(self.inputs)
         if status.valid(deduce_order):
             status.check_state(1, deduce_order)
-            for nst in input_statuses:
-                nst.copy_from(status, deduce_order)
+        for nst in input_statuses:
+            nst.copy_from(status, deduce_order)
 
 
 def array_reshape_op(node, output_shape, ctx=None):

@@ -8,7 +8,16 @@ class DeviceGroup(object):
     def __init__(self, ctxs):
         self._contexts = self.parse_contexts(ctxs)
         self.get_servers_n_workers()
-        self._is_mp = any([isinstance(c, tuple) for c in self._contexts])
+        self._is_mp = False
+        self._mp_device_num = None
+        for c in self._contexts:
+            if isinstance(c, tuple):
+                self._is_mp = True
+                assert self._mp_device_num in (None, len(c)), \
+                    'Now only support same model parallel in data parallel.'
+                self._mp_device_num = len(c)
+        if self._mp_device_num is None:
+            self._mp_device_num = 1
 
     @classmethod
     def parse_contexts(cls, ctxs):
@@ -54,6 +63,10 @@ class DeviceGroup(object):
 
     def __len__(self):
         return len(self._contexts)
+
+    @property
+    def mp_device_num(self):
+        return self._mp_device_num
 
     @property
     def worker_num(self):
@@ -118,14 +131,20 @@ _default_ctx_stack = ContextStack()
 
 
 class NodeStatus(object):
-    def __init__(self, state=None):
+    def __init__(self, state=None, dev_num=None):
         if state is not None:
             if not isinstance(state, dict):
                 state = {i: v for i, v in enumerate(state) if v != 1}
             else:
                 state = {i: v for i, v in sorted(state.items()) if v != 1}
         self._state = state
-        self._duplicate = None
+        self._device_num = dev_num
+        if self._device_num is not None and self._state is not None:
+            temp = np.prod(list(self._state.values()), dtype=int)
+            assert dev_num % temp == 0
+            self._duplicate = dev_num // temp
+        else:
+            self._duplicate = None
         self._order = None
         self._valid_state = False
         self._valid_all = False
@@ -159,6 +178,12 @@ class NodeStatus(object):
                 state = {i: v for i, v in sorted(state.items()) if v != 1}
             assert self._state in (state, None)
             self._state = state
+            if self._device_num is not None:
+                temp = np.prod(list(self._state.values()), dtype=int)
+                assert self._device_num % temp == 0
+                temp_duplicate = self._device_num // temp
+                assert self._duplicate in (temp_duplicate, None)
+                self._duplicate = temp_duplicate
         if duplicate is not None:
             assert self._duplicate in (duplicate, None)
             self._duplicate = duplicate
@@ -195,8 +220,9 @@ class NodeStatus(object):
             return False
         else:
             self._valid_state = True
-            self._device_num = np.prod(
-                list(self._state.values()), dtype=int) * self._duplicate
+            if self._device_num is None:
+                self._device_num = np.prod(
+                    list(self._state.values()), dtype=int) * self._duplicate
             return True
 
     def valid_all(self):
@@ -232,9 +258,6 @@ class NodeStatus(object):
                 cur_state_index[cur_order] = global_index % ts
                 global_index //= ts
         return cur_state_index
-
-    def check_devices(self, devices):
-        assert self._device_num == len(devices)
 
     def get_loop_sizes(self):
         loop_sizes = [1]
@@ -323,7 +346,8 @@ def infer_states(node_list):
         nonlocal cnt
         single = False
         if not isinstance(node, (DataloaderOp, OptimizerOp, DispatchOp, DispatchGradientOp)):
-            node_cur_state_map[node] = NodeStatus()
+            node_cur_state_map[node] = NodeStatus(
+                dev_num=node.raw_ctx.mp_device_num)
             node.get_default_state(
                 node_cur_state_map[node], enforce_order=False)
             cnt += 1
@@ -399,15 +423,18 @@ def infer_states(node_list):
     valid_nodes = set()
     for node in node_list:
         get_node_count(node)
-    # TODO: implement dynamic states: use only necessary dimensions, less than shape
     # first infer state and duplicate
+    last_cnt = 0
     while True:
         visited = {}
         for node in node_list:
             infer_node_states(node, infer_order=False)
         valid_cnt = len(valid_nodes)
-        if valid_cnt == cnt:
+        if last_cnt == cnt:
+            # here we use another loop to ensure node_tar_state_map
             break
+        assert valid_cnt > last_cnt, "Not enough information for model parallel."
+        last_cnt = valid_cnt
     chance = False
     last_cnt = 0
     valid_nodes = set()
@@ -417,10 +444,11 @@ def infer_states(node_list):
         for node in node_list:
             infer_node_states(node, infer_order=True)
         valid_cnt = len(valid_nodes)
+        if last_cnt == cnt:
+            # here we use another loop to ensure node_tar_state_map
+            break
         if valid_cnt == last_cnt:
             chance = True
-        if valid_cnt == cnt:
-            break
         last_cnt = valid_cnt
 
     return node_cur_state_map, node_tar_state_map
@@ -515,8 +543,6 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 target_ns = node_tar_state_map[prev_input]
                 prev_state, prev_duplicate, prev_order = prev_ns.get_all()
                 target_state = target_ns.state
-                prev_ns.check_devices(prev_input.raw_ctx[dev_pos])
-                target_ns.check_devices(node.raw_ctx[dev_pos])
                 loop_sizes = prev_ns.get_loop_sizes()
                 cur_state_index = target_ns.map_dev_to_index(
                     mp_index_map[node])
@@ -631,8 +657,6 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 target_ns = node_tar_state_map[prev_input]
                 prev_state = prev_ns.state
                 target_state, target_duplicate, target_order = target_ns.get_all()
-                prev_ns.check_devices(prev_input.raw_ctx[dev_pos])
-                target_ns.check_devices(node.raw_ctx[dev_pos])
                 cur_state_index = prev_ns.map_dev_to_index(
                     mp_index_map[prev_input])
                 loop_sizes = target_ns.get_loop_sizes()
