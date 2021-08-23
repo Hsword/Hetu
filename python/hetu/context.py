@@ -361,7 +361,7 @@ def infer_states(node_list):
         for n in node.inputs:
             get_node_count(n)
             if single and isinstance(n, (DispatchOp, DispatchGradientOp)):
-                node_tar_state_map[n.inputs[0]].set_state(None, 1)
+                node_tar_state_map[n.inputs[0]].set_state({}, 1)
 
     def infer_node_states(node, infer_order):
         if node in visited:
