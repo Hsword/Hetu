@@ -47,6 +47,7 @@ class PipelineReceiveOp(Op):
     def forward_hook(self, config):
         self.on_gpu = ndarray.is_gpu_ctx(self.ctx)
         self.on_cpu = not self.on_gpu
+        self.event = create_event_handle(self.ctx)
 
 
 def pipeline_receive_op(source, comm, stream=None, ctx=None):

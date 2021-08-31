@@ -271,8 +271,10 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
         else:
             hostname = from_ctx.hostname
             target_id = from_ctx.device_id
-            return pipeline_receive_op(mpi_comm.getRankFromDevice(
+            result = pipeline_receive_op(mpi_comm.getRankFromDevice(
                 hostname, target_id), mpi_comm, stream=p2p_stream, ctx=ctx)
+            layer_indices[result] = layer_id
+            return result
 
     def sending(key, node, to_ctx):
         if ctx == to_ctx:
@@ -282,8 +284,10 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
             target_id = to_ctx.device_id
             target_rank = mpi_comm.getRankFromDevice(
                 hostname, target_id)
-            my_eval_nodes.append(pipeline_send_op(
-                node, target_rank, mpi_comm, stream=p2p_stream, ctx=ctx))
+            result = pipeline_send_op(
+                node, target_rank, mpi_comm, stream=p2p_stream, ctx=ctx)
+            layer_indices[result] = layer_id
+            my_eval_nodes.append(result)
 
     def receive_model_parallel(prev_input, node):
         # assert dp_index_map[prev_input] < 0 and dp_index_map[node] >= 0
@@ -317,10 +321,12 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                             for _ in range(1, cur_duplicate):
                                 result = add_op(result, make_comb(
                                     depth + 1), ctx=ctx)
+                                layer_indices[result] = layer_id
                         else:
                             for _ in range(1, cur_state[cur_dim]):
                                 result = concat_op(result, make_comb(
                                     depth + 1), axis=cur_dim, ctx=ctx)
+                                layer_indices[result] = layer_id
                     return result
                 devices = prev_input.raw_ctx.workers[dev_pos]
                 cur_state, cur_duplicate, cur_order = node_cur_state_map[prev_input].get_default(
@@ -355,6 +361,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                             for _ in range(1, prev_duplicate):
                                 res = add_op(
                                     res, cross_receive(depth+1), ctx=ctx)
+                                layer_indices[res] = layer_id
                         else:
                             if prev_state[cur_dim] % target_state[cur_dim] == 0:
                                 # at `cur_dim` dimension we need to concat some inputs
@@ -366,6 +373,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                                 for _ in range(1, multiple):
                                     res = concat_op(
                                         res, cross_receive(depth+1), axis=cur_dim, ctx=ctx)
+                                    layer_indices[res] = layer_id
                                 device_index += (target_state[cur_dim] - 1 -
                                                  cur_state_index[cur_dim]) * multiple * loop_sizes[depth]
                             elif target_state[cur_dim] % prev_state[cur_dim] == 0:
@@ -402,8 +410,12 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 def make_split(cur_state, depth):
                     if len(target_order) == depth:
                         nonlocal device_index
-                        cur_node = prev_input if not target_ns.is_dist() else split_op(
-                            prev_input, list(range(len(target_state))), list(cur_state), list(target_state), ctx=ctx)
+                        if target_ns.is_dist():
+                            cur_node = split_op(prev_input, list(range(len(target_state))), list(
+                                cur_state), list(target_state), ctx=ctx)
+                            layer_indices[cur_node] = layer_id
+                        else:
+                            cur_node = prev_input
                         sending(prev_input, cur_node, devices[device_index])
                         device_index += 1
                     else:
@@ -452,8 +464,12 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 def cross_send(split_cur_state, split_target_state, depth, need_split):
                     nonlocal device_index
                     if depth == len(target_order):
-                        cur_node = prev_input if not need_split else split_op(
-                            prev_input, list(range(len(split_target_state))), list(split_cur_state), list(split_target_state), ctx=ctx)
+                        if need_split:
+                            cur_node = split_op(prev_input, list(range(len(split_target_state))), list(
+                                split_cur_state), list(split_target_state), ctx=ctx)
+                            layer_indices[cur_node] = layer_id
+                        else:
+                            cur_node = prev_input
                         sending(prev_input, cur_node, devices[device_index])
                         device_index += 1
                     else:
@@ -496,11 +512,14 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 assert device_index == len(devices)
 
     def assign_ctx(node):
+        nonlocal layer_id
         if node in dp_index_map:
             return
         mp_index_map[node] = -1
         dp_index_map[node] = -1
         if isinstance(node, DataloaderOp):
+            layer_indices[node] = layer_id
+            layer_id += 1
             return
         elif isinstance(node, OptimizerOp):
             nonlocal opt
@@ -527,6 +546,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                         my_pos = dp_index_map[real_input]
                         if my_pos >= 0:
                             send_model_parallel(ori_grad.inputs[0], param)
+                layer_id += 2
             if trainable_params:
                 # indices = [original_params.index(param) for param in trainable_params]
                 node.optimizer.params = trainable_params
@@ -534,6 +554,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 node.inputs = grads
                 node.ctx = ctx
                 my_eval_nodes.append(node)
+                layer_indices[node] = layer_id
                 for param in trainable_params:
                     # here handle the nodes that need allreduce
                     if param.raw_ctx.server_num == 0:
@@ -594,6 +615,10 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
             input_orders = []
             for i, n in enumerate(node.inputs):
                 if isinstance(n, DataloaderOp):
+                    if n not in dp_index_map:
+                        layer_indices[n] = layer_id
+                        layer_id += 1
+                        dp_index_map[n] = -1
                     continue
                 assign_ctx(n)
                 if isinstance(n, (DispatchOp, DispatchGradientOp)):
@@ -619,23 +644,18 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                             node_status = node_tar_state_map[real_node]
                             real_node.reshape_in_mp(node_status.map_dev_to_index(
                                 mp_index_map[real_node]), node_status.state)
-
             for i, n in enumerate(node.inputs):
                 if isinstance(n, DataloaderOp):
                     if dp_index >= 0 and n in node_list and n not in my_eval_nodes:
                         my_eval_nodes.append(n)
                     continue
-                # we assume that in model parallel + data parallel mode,
+                # we assume that in pipeline + data parallel mode,
                 # devices number of each stage is equal
                 # the device in correspondent place will communicate with each other
-                # TODO: not support following case: context(1,5) -> context(5,1); context(1,5) -> context(3,1)
-                # solution: modify following is_my_node logic to support
                 assert node.raw_ctx.worker_num == n.raw_ctx.worker_num, \
                     'In pipeline + data parallel, devices number of each stage should be equal!'
 
                 if isinstance(n, (DispatchOp, DispatchGradientOp)):
-                    # here we only allow pipeline + model parallel, which means the devices are all different
-                    # TODO: release the constraint above
                     # here in every context each device appear only once
                     # TODO: consider whether or not release the constraint above?
                     real_input = n.inputs[0]
@@ -674,6 +694,10 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                         # here in the same model parallel
                         assert node.raw_ctx == n.raw_ctx
                         assert need_state_deduction
+                layer_id += 1
+
+            layer_indices[node] = layer_id
+            layer_id += 1
 
             if dp_index >= 0:
                 node.ctx = ctx
@@ -693,8 +717,10 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
     dp_index_map = {}  # data parallel index
     node_cur_state_map = {}  # save nodes' current state
     node_tar_state_map = {}  # save nodes' target state
+    layer_indices = {}
+    layer_id = 0
     my_eval_nodes = []
     for node in node_list:
         assign_ctx(node)
 
-    return my_eval_nodes, param_allreduce_group
+    return my_eval_nodes, param_allreduce_group, layer_indices

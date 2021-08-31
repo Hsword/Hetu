@@ -6,15 +6,11 @@ import os
 import numpy as np
 
 
-def fc(x, shape, name, with_relu=True, rank=-1):
-    weight_save = np.random.normal(0, 0.04, size=shape)
-    bias_save = np.random.normal(0, 0.04, size=shape[-1:])
+def fc(x, shape, name, with_relu=True):
+    weight_save = np.load('std/' + name + '_weight.npy')
+    bias_save = np.load('std/' + name + '_bias.npy')
     weight = ht.Variable(value=weight_save, name=name+'_weight')
     bias = ht.Variable(value=bias_save, name=name+'_bias')
-    global args
-    if args.save and args.rank == rank:
-        np.save('std/' + name + '_weight.npy', weight_save)
-        np.save('std/' + name + '_bias.npy', bias_save)
     x = ht.matmul_op(x, weight)
     x = x + ht.broadcastto_op(bias, x)
     if with_relu:
@@ -30,17 +26,12 @@ if __name__ == "__main__":
                         help='warm up steps excluded from timing')
     parser.add_argument('--batch-size', type=int, default=8, help='batch size')
     parser.add_argument('--learning-rate', type=float,
-                        default=0.00001, help='learning rate')
+                        default=0.01, help='learning rate')
     parser.add_argument('--save', action='store_true')
-    parser.add_argument('--trans', action='store_true')
+    parser.add_argument('--more', action='store_true')
     parser.add_argument('--log', default=None)
     global args
     args = parser.parse_args()
-    if args.save:
-        comm = ht.wrapped_mpi_nccl_init()
-        args.rank = comm.rank
-        if args.rank == 0 and not os.path.exists('std'):
-            os.mkdir('std')
 
     # dataset
     datasets = ht.data.mnist()
@@ -61,25 +52,21 @@ if __name__ == "__main__":
     # model parallel
     with ht.context(ht.gpu(0)):
         x = ht.Variable(name="dataloader_x", trainable=False)
-        activation = fc(x, (784, 1024), 'mlp_fc1', with_relu=True, rank=0)
+        activation = fc(x, (784, 1024), 'mlp_fc1', with_relu=True)
 
     with ht.context(ht.gpu(1)):
-        weight_save = np.random.normal(0, 0.04, size=(1024, 2048))
-        if args.save and args.rank == 1:
-            np.save('std/' + 'special_weight.npy', weight_save)
+        weight_save = np.load('std/' + 'special_weight.npy')
         weight = ht.Variable(value=weight_save, name='special_mlp_fc1_weight')
         activation = ht.matmul_op(activation, weight)
-        if args.trans:
-            weight_save = np.random.normal(0, 0.04, size=(2048, 2048))
-            if args.save and args.rank == 1:
-                np.save('std/' + 'special_weight2.npy', weight_save)
+        if args.more:
+            weight_save = np.load('std/' + 'special_weight2.npy')
             weight = ht.Variable(
                 value=weight_save, name='special_mlp_fc2_weight')
             activation = ht.matmul_op(activation, weight)
 
     with ht.context(ht.gpu(2)):
         activation = ht.relu_op(activation)
-        y_pred = fc(activation, (2048, 10), 'mlp_fc2', with_relu=False, rank=2)
+        y_pred = fc(activation, (2048, 10), 'mlp_fc2', with_relu=False)
         y_ = ht.Variable(name="dataloader_y", trainable=False)
         loss = ht.softmaxcrossentropy_op(y_pred, y_)
         loss = ht.reduce_mean_op(loss, [0])

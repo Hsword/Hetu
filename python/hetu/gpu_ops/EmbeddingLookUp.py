@@ -76,8 +76,8 @@ class EmbeddingLookUp(Op):
     def backward_hook(self, config):
         # insert data transfer op if needed
         local_comm_mode = config.node_strategy.get(self, config.comm_mode)
-        assert local_comm_mode != 'AllReduce' and local_comm_mode == config.node_strategy.get(self.inputs[0], config.comm_mode), \
-            'Embedding lookup communication mode invalid. Should conform with embedding parameter and not be AllReduce.'
+        assert local_comm_mode == config.node_strategy.get(self.inputs[0], config.comm_mode), \
+            'Embedding lookup communication mode invalid. Should conform with embedding parameter.'
         if local_comm_mode in ('PS', 'Hybrid'):
             cpu_ctx = ndarray.cpu(0)
             self.ctx = cpu_ctx

@@ -85,6 +85,11 @@ def worker(args):
         device_id = comm.dev_id
         rank = comm.rank
         nrank = int(os.environ['DMLC_NUM_WORKER'])
+    elif args.comm == 'AllReduce':
+        comm = ht.wrapped_mpi_nccl_init()
+        device_id = comm.dev_id
+        rank = comm.rank
+        nrank = comm.nrank
 
     if dataset == 'criteo':
         # define models for criteo
@@ -145,7 +150,7 @@ def worker(args):
 
     if args.all and dataset == 'criteo':
         print('Processing all data...')
-        file_path = '%s_%s' % ({None: 'local', 'PS': 'ps', 'Hybrid': 'hybrid'}[
+        file_path = '%s_%s' % ({None: 'local', 'PS': 'ps', 'Hybrid': 'hybrid', 'AllReduce': 'allreduce'}[
                                args.comm], args.raw_model)
         file_path += '%d.log' % rank if args.comm else '.log'
         file_path = osp.join(osp.dirname(
@@ -226,5 +231,7 @@ if __name__ == '__main__':
         worker(args)
     elif args.comm == 'PS':
         launch(worker, args)
+    elif args.comm == 'AllReduce':
+        worker(args)
     else:
         raise NotImplementedError

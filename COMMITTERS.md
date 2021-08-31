@@ -31,4 +31,4 @@ We would like to sincerely thank the following community members for their contr
 - **Dong Li**
 - [zhouyuegit](https://github.com/zhouyuegit) - **Yue Zhou**
 - [zmxdream](https://github.com/zmxdream) - **Minxu Zhang (Baidu)**
-- [initzhang](https://github.com/initzhang) - **Xin Zhang (CUHK)**
+- [initzhang](https://github.com/initzhang) - **Xin Zhang (HKUST)**

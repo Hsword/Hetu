@@ -25,10 +25,17 @@ if __name__ == "__main__":
                         help='warm up steps excluded from timing')
     parser.add_argument('--batch-size', type=int, default=8, help='batch size')
     parser.add_argument('--learning-rate', type=float,
-                        default=0.00001, help='learning rate')
+                        default=0.01, help='learning rate')
     parser.add_argument('--split', type=str, default='left')
+    parser.add_argument('--split2', type=str, default=None)
+    parser.add_argument('--complex', action='store_true')
+    parser.add_argument('--log', default=None)
     args = parser.parse_args()
-    assert args.split in ('left', 'right', 'middle')
+    assert args.split in ('left', 'right', 'middle', '0', '1', '2', '3', '4')
+    assert args.split2 in (None, 'left', 'right',
+                           'middle', '0', '1', '2', '3', '4')
+    args.complex = not args.split in ('left', 'right', 'middle')
+    args.complex2 = not args.split2 in ('left', 'right', 'middle')
 
     # dataset
     datasets = ht.data.mnist()
@@ -50,6 +57,10 @@ if __name__ == "__main__":
     with ht.context(ht.gpu(0)):
         x = ht.Variable(name="dataloader_x", trainable=False)
         activation = fc(x, (784, 1024), 'mlp_fc1', with_relu=True)
+
+    context1 = tuple((ht.gpu(0), ht.gpu(1), ht.gpu(2), ht.gpu(
+        3))) if args.complex else tuple((ht.gpu(1), ht.gpu(2)))
+    with ht.context(context1):
         weight_save = np.load('std/' + 'special_weight.npy')
         weight = ht.Variable(value=weight_save, name='mlp_fc1_weight')
         if args.split == 'left':
@@ -58,15 +69,61 @@ if __name__ == "__main__":
         elif args.split == 'right':
             activation = ht.dispatch(activation, (1, 1))
             weight = ht.dispatch(weight, (1, 2))
-        else:
+        elif args.split == 'middle':
             activation = ht.dispatch(activation, (1, 2))
             weight = ht.dispatch(weight, (2, 1))
-
-    with ht.context((ht.gpu(1), ht.gpu(2))):
+        elif args.split == '0':
+            activation = ht.dispatch(activation, (4, 1))
+            weight = ht.dispatch(weight, (1, 1))
+        elif args.split == '1':
+            activation = ht.dispatch(activation, (2, 2))
+            weight = ht.dispatch(weight, (2, 1))
+        elif args.split == '2':
+            activation = ht.dispatch(activation, (2, 1))
+            weight = ht.dispatch(weight, (1, 2))
+        elif args.split == '3':
+            activation = ht.dispatch(activation, (1, 2))
+            weight = ht.dispatch(weight, (2, 2))
+        elif args.split == '4':
+            activation = ht.dispatch(activation, (1, 1))
+            weight = ht.dispatch(weight, (1, 4))
         activation = ht.matmul_op(activation, weight)
-        activation = ht.dispatch(activation, (1, 1))
+
+    if args.split2:
+        context2 = tuple((ht.gpu(4), ht.gpu(5), ht.gpu(6), ht.gpu(
+            7))) if args.complex2 else tuple((ht.gpu(4), ht.gpu(5)))
+        with ht.context(context2):
+            weight_save = np.load('std/' + 'special_weight2.npy')
+            weight = ht.Variable(
+                value=weight_save, name='special_mlp_fc2_weight')
+            if args.split2 == 'left':
+                activation = ht.dispatch(activation, (2, 1))
+                weight = ht.dispatch(weight, (1, 1))
+            elif args.split2 == 'right':
+                activation = ht.dispatch(activation, (1, 1))
+                weight = ht.dispatch(weight, (1, 2))
+            elif args.split2 == 'middle':
+                activation = ht.dispatch(activation, (1, 2))
+                weight = ht.dispatch(weight, (2, 1))
+            elif args.split2 == '0':
+                activation = ht.dispatch(activation, (4, 1))
+                weight = ht.dispatch(weight, (1, 1))
+            elif args.split2 == '1':
+                activation = ht.dispatch(activation, (2, 2))
+                weight = ht.dispatch(weight, (2, 1))
+            elif args.split2 == '2':
+                activation = ht.dispatch(activation, (2, 1))
+                weight = ht.dispatch(weight, (1, 2))
+            elif args.split2 == '3':
+                activation = ht.dispatch(activation, (1, 2))
+                weight = ht.dispatch(weight, (2, 2))
+            elif args.split2 == '4':
+                activation = ht.dispatch(activation, (1, 1))
+                weight = ht.dispatch(weight, (1, 4))
+            activation = ht.matmul_op(activation, weight)
 
     with ht.context(ht.gpu(3)):
+        activation = ht.dispatch(activation, (1, 1))
         activation = ht.relu_op(activation)
         y_pred = fc(activation, (2048, 10), 'mlp_fc2', with_relu=False)
         y_ = ht.Variable(name="dataloader_y", trainable=False)
@@ -78,6 +135,7 @@ if __name__ == "__main__":
         executor = ht.Executor([loss, train_op])
 
     # training
+    results = []
     for step in range(args.steps):
         if step == args.warmup:
             start = time.time()
@@ -85,8 +143,11 @@ if __name__ == "__main__":
                                    x: value_x_list[step % batch_num], y_: value_y_list[step % batch_num]}, convert_to_numpy_ret_vals=True)
         if executor.rank == 3:
             print('step:', step, 'loss:', loss_val)
+            results.extend(loss_val)
 
     end = time.time()
     if executor.rank == 3:
         print("time elapsed for {} steps: {}s".format(
             args.steps-args.warmup, round(end-start, 3)))
+        if args.log:
+            np.save(args.log, results)
