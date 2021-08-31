@@ -28,6 +28,12 @@ class ReluOp(Op):
         assert len(input_shapes) == 1
         return input_shapes[0]
 
+    def get_default_state(self, status, enforce_order):
+        if enforce_order:
+            super().get_default_state(status, enforce_order)
+        else:
+            status.set_state(None, 1)
+
 
 class ReluGradientOp(Op):
     def __init__(self, node_A, node_B, ctx=None):
@@ -52,22 +58,11 @@ class ReluGradientOp(Op):
         assert len(input_shapes) == 2
         return input_shapes[0]
 
-    def deduce_states(self, states, duplicates, orders):
-        assert len(states) == 2 and len(duplicates) == 2 and len(orders) == 2
-        assert duplicates[0] in (
-            1, None) and duplicates[1] in (1, None)
-        cur_state, cur_order = None, None
-        for state in states:
-            if cur_state is None:
-                cur_state = state
-            else:
-                assert state in (None, cur_state)
-        for order in orders:
-            if cur_order is None:
-                cur_order = order
-            else:
-                assert order in (None, cur_order)
-        return cur_state, duplicates[0], cur_order
+    def get_default_state(self, status, enforce_order):
+        if enforce_order:
+            super().get_default_state(status, enforce_order)
+        else:
+            status.set_state(None, 1)
 
 
 def relu_op(node, ctx=None):

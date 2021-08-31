@@ -131,10 +131,6 @@ class Max_Pool2d_GradientOp(Op):
         assert len(input_shapes) == 3
         return input_shapes[2]
 
-    def deduce_states(self, states, duplicates, orders):
-        assert len(states) == 3 and len(duplicates) == 3 and len(orders) == 3
-        return states[2], duplicates[2], orders[2]
-
 
 def max_pool2d_op(node_A, kernel_H, kernel_W, padding, stride, ctx=None):
     """Make a new instance of Max_Pool2dOp and call the instance.

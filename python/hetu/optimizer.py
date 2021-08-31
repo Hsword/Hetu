@@ -142,7 +142,7 @@ class OptimizerOp(Op):
             elif current_strategy == 'PS' or (current_strategy == 'Hybrid' and isinstance(node, EmbeddingLookUp_Gradient)):
                 cur_node = ht.parameterServerCommunicate_op(
                     node, self.optimizer.params[i], self.optimizer.get_config())
-                if node in config.layer_indices:
+                if config.layer_indices is not None and node in config.layer_indices:
                     config.layer_indices[cur_node] = config.layer_indices[node] + 1
             new_inputs.append(cur_node)
         self.inputs = new_inputs

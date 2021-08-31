@@ -31,7 +31,7 @@ class DispatchGradientOp(Op):
         assert False, "This Op should be replaced in preprocessing phase."
 
 
-def dispatch(node, parts):
+def dispatch(node, parts={}):
     """Dispatch a node into several parts, so the nodes following up can use model parallel.
 
     Parameters:

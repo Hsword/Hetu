@@ -31,6 +31,7 @@ class BroadcastShapeOp(Op):
                     input_vals[0], output_val, self.out_strides, self.in_dims, stream_handle)
 
     def gradient(self, output_grad):
+        self.grad_set = False
         self.grad_node = reduce_sum_op(
             output_grad, None, None, ctx=self.raw_ctx)
         return [self.grad_node]
@@ -97,6 +98,52 @@ class BroadcastShapeOp(Op):
 
     def backward_hook(self, config):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if deduce_order:
+            if hasattr(self, 'ori_status') and self.ori_status.valid_all():
+                status.copy_order_from(self.ori_status)
+            else:
+                # only support data parallel
+                order = input_statuses[0].order
+                if order is not None:
+                    input_statuses[0].check_state(1, deduce_order)
+                    status.set_order(order)
+        else:
+            if hasattr(self, 'ori_status') and self.ori_status.valid_state():
+                status.copy_state_from(self.ori_status)
+            else:
+                # only support data parallel
+                state, duplicate = input_statuses[0].get()
+                if state is not None:
+                    input_statuses[0].check_state(1, deduce_order)
+                status.set_state(state, duplicate)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if hasattr(self, 'grad_node') and not self.grad_set:
+            self.grad_node.ori_status = input_statuses[0]
+            self.grad_node.tar_status = status
+            self.grad_set = True
+        if deduce_order:
+            if hasattr(self, 'tar_status'):
+                input_statuses[0].copy_order_from(self.tar_status)
+            else:
+                # only support data parallel
+                order = input_statuses[0].order
+                if order is not None:
+                    status.check_state(1, deduce_order)
+                    input_statuses[0].set_order(order)
+        else:
+            if hasattr(self, 'tar_status'):
+                input_statuses[0].copy_state_from(self.tar_status)
+            else:
+                # only support data parallel
+                state, duplicate = input_statuses[0].get()
+                if state is not None:
+                    status.check_state(1, deduce_order)
+                input_statuses[0].set_state(state, duplicate)
 
 
 def broadcast_shape_op(node_A, shape, add_axes=(), ctx=None):

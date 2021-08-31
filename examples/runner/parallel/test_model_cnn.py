@@ -67,14 +67,14 @@ if __name__ == "__main__":
         weight_save = np.load('std/' + 'special_cnn_weight.npy')
         weight = ht.Variable(value=weight_save, name='special_cnn_weight')
         if args.split == 'left':
-            activation = ht.dispatch(activation, (2, 1, 1, 1))
-            weight = ht.dispatch(weight, (1, 1, 1, 1))
+            activation = ht.dispatch(activation, (2, 1))
+            weight = ht.dispatch(weight, (1, 1))
         elif args.split == 'right':
-            activation = ht.dispatch(activation, (1, 1, 1, 1))
-            weight = ht.dispatch(weight, (2, 1, 1, 1))
+            activation = ht.dispatch(activation, (1, 1))
+            weight = ht.dispatch(weight, (2, 1))
         else:
-            activation = ht.dispatch(activation, (1, 2, 1, 1))
-            weight = ht.dispatch(weight, (1, 2, 1, 1))
+            activation = ht.dispatch(activation, (1, 2))
+            weight = ht.dispatch(weight, (1, 2))
         activation = ht.conv2d_op(activation, weight, padding=2, stride=1)
 
     if args.split2:
@@ -83,18 +83,18 @@ if __name__ == "__main__":
             weight = ht.Variable(
                 value=weight_save, name='special_cnn_weight2')
             if args.split2 == 'left':
-                activation = ht.dispatch(activation, (2, 1, 1, 1))
-                weight = ht.dispatch(weight, (1, 1, 1, 1))
+                activation = ht.dispatch(activation, (2, 1))
+                weight = ht.dispatch(weight, (1, 1))
             elif args.split2 == 'right':
-                activation = ht.dispatch(activation, (1, 1, 1, 1))
-                weight = ht.dispatch(weight, (2, 1, 1, 1))
+                activation = ht.dispatch(activation, (1, 1))
+                weight = ht.dispatch(weight, (2, 1))
             else:
-                activation = ht.dispatch(activation, (1, 2, 1, 1))
-                weight = ht.dispatch(weight, (1, 2, 1, 1))
+                activation = ht.dispatch(activation, (1, 2))
+                weight = ht.dispatch(weight, (1, 2))
             activation = ht.conv2d_op(activation, weight, padding=2, stride=1)
 
     with ht.context(ht.gpu(3)):
-        activation = ht.dispatch(activation, (1, 1, 1, 1))
+        activation = ht.dispatch(activation, (1, 1))
         activation = ht.relu_op(activation)
         activation = ht.array_reshape_op(activation, (-1, 28 * 28 * 64))
         y_pred = fc(activation, (28 * 28 * 64, 10),
