@@ -148,14 +148,28 @@ def get_subnet(local_address, remote_hostnames, identify_file=''):
 def main():
     signal.signal(signal.SIGINT, signal_handler)
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--config', required=True,
+    parser.add_argument('-c', '--config', default=None,
                         help='Configuration file.')
+    parser.add_argument('-w', '--workers', type=int, default=0,
+                        help='Shorthand for the number of local worker.')
+    parser.add_argument('-s', '--servers', type=int, default=0,
+                        help='Shorthand for the number of local server.')
     parser.add_argument('-i', '--identify', default='',
                         help='SSH identify file.')
     parser.add_argument('command', nargs=argparse.REMAINDER,
                         help='Command to be executed.')
     args = parser.parse_args()
-    settings = yaml.load(open(args.config).read(), Loader=yaml.FullLoader)
+    if args.config is None:
+        assert args.workers > 0, \
+            'Please specify the configuration file or set the number of local workers.'
+        settings = {'nodes': [{
+            'host': 'localhost',
+            'servers': args.servers,
+            'workers': args.workers,
+            'chief': True,
+        }]}
+    else:
+        settings = yaml.load(open(args.config).read(), Loader=yaml.FullLoader)
     attributes = set(['host', 'servers', 'workers', 'chief'])
     hosts = []
     servers, workers = {}, {}
