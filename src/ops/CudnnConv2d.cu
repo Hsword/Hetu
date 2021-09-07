@@ -1,8 +1,9 @@
 #include "gpu_runtime.h"
 
 int CuDNN_DLGpuConv2d(const DLArrayHandle input_x, const DLArrayHandle input_f,
-                      DLArrayHandle output, const int padding, const int stride,
-                      DLStreamHandle stream_handle = NULL) {
+                      DLArrayHandle output, const int padding_h,
+                      const int padding_w, const int stride_h,
+                      const int stride_w, DLStreamHandle stream_handle = NULL) {
     int dev_id = (input_x->ctx).device_id;
     cudnn_init(dev_id, stream_handle);
     size_t input_N = input_x->shape[0];
@@ -34,7 +35,7 @@ int CuDNN_DLGpuConv2d(const DLArrayHandle input_x, const DLArrayHandle input_f,
     cudnnConvolutionDescriptor_t conv_desc;
     CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
     CUDNN_CALL(cudnnSetConvolution2dDescriptor(
-        conv_desc, padding, padding, stride, stride, 1, 1,
+        conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
         CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT));
     size_t out_N = output->shape[0];
     size_t out_C = output->shape[1];
@@ -80,7 +81,9 @@ int CuDNN_DLGpuConv2d(const DLArrayHandle input_x, const DLArrayHandle input_f,
 int CuDNN_DLGpuConv2d_Gradient_of_Filter(const DLArrayHandle input_x,
                                          const DLArrayHandle gradient_y,
                                          DLArrayHandle gradient_f,
-                                         const int padding, const int stride,
+                                         const int padding_h,
+                                         const int padding_w,
+                                         const int stride_h, const int stride_w,
                                          DLStreamHandle stream_handle = NULL) {
     // create handle
     int dev_id = (input_x->ctx).device_id;
@@ -114,7 +117,7 @@ int CuDNN_DLGpuConv2d_Gradient_of_Filter(const DLArrayHandle input_x,
     cudnnConvolutionDescriptor_t conv_desc;
     CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
     CUDNN_CALL(cudnnSetConvolution2dDescriptor(
-        conv_desc, padding, padding, stride, stride, 1, 1,
+        conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
         CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT));
     // dw
     size_t df_N = gradient_f->shape[0];
@@ -159,7 +162,8 @@ int CuDNN_DLGpuConv2d_Gradient_of_Filter(const DLArrayHandle input_x,
 int CuDNN_DLGpuConv2d_Gradient_of_Data(const DLArrayHandle input_f,
                                        const DLArrayHandle gradient_y,
                                        DLArrayHandle gradient_x,
-                                       const int padding, const int stride,
+                                       const int padding_h, const int padding_w,
+                                       const int stride_h, const int stride_w,
                                        DLStreamHandle stream_handle = NULL) {
     // create handle
     int dev_id = (input_f->ctx).device_id;
@@ -193,7 +197,7 @@ int CuDNN_DLGpuConv2d_Gradient_of_Data(const DLArrayHandle input_f,
     cudnnConvolutionDescriptor_t conv_desc;
     CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
     CUDNN_CALL(cudnnSetConvolution2dDescriptor(
-        conv_desc, padding, padding, stride, stride, 1, 1,
+        conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
         CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT));
     // dx
     size_t dx_N = gradient_x->shape[0];

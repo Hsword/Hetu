@@ -290,14 +290,14 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle output_grad, const DLArrayHandle ids,
         DLArrayHandle input_grad, DLStreamHandle stream_handle);
 
-    int DLGpuSoftmaxCrossEntropySparse(const DLArrayHandle input_a,
-                                const DLArrayHandle input_b,
-                                const int ignored_index,
-                                DLArrayHandle output, DLStreamHandle stream_handle);
-    int DLGpuSoftmaxCrossEntropySparse_Gradient(const DLArrayHandle input_a, const DLArrayHandle input_b,
-                                        const DLArrayHandle input_c, const int ignored_index,
-                                        DLArrayHandle output,
-                                        DLStreamHandle stream_handle);
+    int DLGpuSoftmaxCrossEntropySparse(
+        const DLArrayHandle input_a, const DLArrayHandle input_b,
+        const int ignored_index, DLArrayHandle output,
+        DLStreamHandle stream_handle);
+    int DLGpuSoftmaxCrossEntropySparse_Gradient(
+        const DLArrayHandle input_a, const DLArrayHandle input_b,
+        const DLArrayHandle input_c, const int ignored_index,
+        DLArrayHandle output, DLStreamHandle stream_handle);
     int DLGpuSoftmaxCrossEntropy(
         const DLArrayHandle input_a, const DLArrayHandle input_b,
         DLArrayHandle output, DLStreamHandle stream_handle);
@@ -354,20 +354,20 @@ HETUSYS_EXTERN_C {
                                DLArrayHandle output_y,
                                DLStreamHandle stream_handle);
 
-    int CuDNN_DLGpuConv2d(const DLArrayHandle input_x,
-                          const DLArrayHandle input_f, DLArrayHandle output,
-                          const int padding, const int stride,
-                          DLStreamHandle stream_handle);
+    int CuDNN_DLGpuConv2d(
+        const DLArrayHandle input_x, const DLArrayHandle input_f,
+        DLArrayHandle output, const int padding_h, const int padding_w,
+        const int stride_h, const int stride_w, DLStreamHandle stream_handle);
 
     int CuDNN_DLGpuConv2d_Gradient_of_Filter(
         const DLArrayHandle input_x, const DLArrayHandle gradient_y,
-        DLArrayHandle gradient_f, const int padding, const int stride,
-        DLStreamHandle stream_handle);
+        DLArrayHandle gradient_f, const int padding_h, const int padding_w,
+        const int stride_h, const int stride_w, DLStreamHandle stream_handle);
 
     int CuDNN_DLGpuConv2d_Gradient_of_Data(
         const DLArrayHandle input_f, const DLArrayHandle gradient_y,
-        DLArrayHandle gradient_x, const int padding, const int stride,
-        DLStreamHandle stream_handle);
+        DLArrayHandle gradient_x, const int padding_h, const int padding_w,
+        const int stride_h, const int stride_w, DLStreamHandle stream_handle);
 
     int CuDNN_DLGpuAvgerage_Pooling2d(
         const DLArrayHandle input, const size_t kernel_H, const size_t kernel_W,
@@ -403,10 +403,10 @@ HETUSYS_EXTERN_C {
 
     int CuDNN_DLGpuBatch_Normalization(
         const DLArrayHandle input_X, const DLArrayHandle bn_scale,
-        const DLArrayHandle bn_bias, DLArrayHandle output_Y,
-        float momentum , float eps, DLArrayHandle save_mean_arr,
-        DLArrayHandle save_var_arr, DLArrayHandle running_mean_arr,
-        DLArrayHandle running_var_arr, DLStreamHandle stream_handle);
+        const DLArrayHandle bn_bias, DLArrayHandle output_Y, float momentum,
+        float eps, DLArrayHandle save_mean_arr, DLArrayHandle save_var_arr,
+        DLArrayHandle running_mean_arr, DLArrayHandle running_var_arr,
+        DLStreamHandle stream_handle);
 
     int CuDNN_DLGpuBatch_Normalization_gradient(
         const DLArrayHandle gradient_Y, const DLArrayHandle input_X,

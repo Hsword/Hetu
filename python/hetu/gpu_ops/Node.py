@@ -70,6 +70,10 @@ class Op(object):
         """Allow print to display node name."""
         return self.name
 
+    def __repr__(self):
+        """Allow representation to display node name."""
+        return self.name
+
     def compute(self, input_vals, output_val, stream_handle=None):
         """Given values of input nodes, compute the output value.
         Parameters
