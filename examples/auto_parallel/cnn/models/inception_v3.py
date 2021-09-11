@@ -28,7 +28,7 @@ def InceptionV3():
             htl.AvgPool2d(kernel_size=3, stride=1, padding=1),
             conv_bn_relu(in_channels, pool_features, kernel_size=1),
         )
-        return htl.ConcatLayers([b1, b2, b3, b4], axis=1)
+        return htl.ConcatenateLayers([b1, b2, b3, b4], axis=1)
 
     def inception_block_b(in_channels):
         b1 = conv_bn_relu(in_channels, 384, kernel_size=3, stride=2)
@@ -38,7 +38,7 @@ def InceptionV3():
             conv_bn_relu(96, 96, kernel_size=3, stride=2),
         )
         b3 = htl.MaxPool2d(kernel_size=3, stride=2)
-        return htl.ConcatLayers([b1, b2, b3], axis=1)
+        return htl.ConcatenateLayers([b1, b2, b3], axis=1)
 
     def inception_block_c(in_channels, channels7):
         b1 = conv_bn_relu(in_channels, 192, kernel_size=1)
@@ -62,7 +62,7 @@ def InceptionV3():
             htl.AvgPool2d(kernel_size=3, stride=1, padding=1),
             conv_bn_relu(in_channels, 192, kernel_size=1),
         )
-        return htl.ConcatLayers([b1, b2, b3, b4], axis=1)
+        return htl.ConcatenateLayers([b1, b2, b3, b4], axis=1)
 
     def inception_block_d(in_channels):
         b1 = htl.Sequence(
@@ -76,13 +76,13 @@ def InceptionV3():
             conv_bn_relu(192, 192, kernel_size=3, stride=2),
         )
         b3 = htl.MaxPool2d(kernel_size=3, stride=2)
-        return htl.ConcatLayers([b1, b2, b3], axis=1)
+        return htl.ConcatenateLayers([b1, b2, b3], axis=1)
 
     def inception_block_e(in_channels):
         b1 = conv_bn_relu(in_channels, 320, kernel_size=1)
         b2 = htl.Sequence(
             conv_bn_relu(in_channels, 384, kernel_size=1),
-            htl.ConcatLayers([
+            htl.ConcatenateLayers([
                 conv_bn_relu(384, 384, kernel_size=(1, 3), padding=(0, 1)),
                 conv_bn_relu(384, 384, kernel_size=(3, 1), padding=(1, 0)),
             ], axis=1),
@@ -90,7 +90,7 @@ def InceptionV3():
         b3 = htl.Sequence(
             conv_bn_relu(in_channels, 448, kernel_size=1),
             conv_bn_relu(448, 384, kernel_size=3, padding=1),
-            htl.ConcatLayers([
+            htl.ConcatenateLayers([
                 conv_bn_relu(384, 384, kernel_size=(1, 3), padding=(0, 1)),
                 conv_bn_relu(384, 384, kernel_size=(3, 1), padding=(1, 0)),
             ], axis=1),
@@ -99,7 +99,7 @@ def InceptionV3():
             htl.AvgPool2d(kernel_size=3, stride=1, padding=1),
             conv_bn_relu(in_channels, 192, kernel_size=1),
         )
-        return htl.ConcatLayers([b1, b2, b3, b4], axis=1)
+        return htl.ConcatenateLayers([b1, b2, b3, b4], axis=1)
 
     def inception_block_aux(in_channels, num_classes):
         return htl.Sequence(

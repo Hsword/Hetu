@@ -1,4 +1,4 @@
-from .concat import Concat, ConcatLayers
+from .concatenate import Concatenate, ConcatenateLayers
 from .conv import Conv2d
 from .dropout import DropOut
 from .identity import Identity
