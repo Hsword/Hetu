@@ -20,6 +20,8 @@ This directory contains executor and operators for computation and communication
 | BroadcastShapeOp | ✔ | ✖ | ✔ | / |
 | ConcatOp | ✔ | ✔ | ✔ | / |
 | Concat_gradientOP | ✔ | ✔ | ✔ | / |
+| ConcatenateOp | ✔ | ✖ | ✔ | / |
+| Concatenate_gradientOP | ✔ | ✖ | ✔ | / |
 | Conv2dOp | ✔ | ✔ | ✔ | / |
 | Conv2d_Gradient_of_DataOp | ✔ | ✔ | ✔ | / |
 | Conv2d_Gradient_of_FilterOp | ✔ | ✔ | ✔ | / |
@@ -69,6 +71,7 @@ This directory contains executor and operators for computation and communication
 | SplitOp | ✔ | ✖ | ✔ | / |
 | SplitGradientOp | ✔ | ✖ | ✔ | / |
 | SqrtOp | ✔ | ✔ | ✔ | / |
+| SumOp | ✔ | ✖ | ✔ | / |
 | ReciprocalSqrtOp | ✔ | ✔ | ✔ | / |
 | TanhOp | ✔ | ✔ | ✔ | / |
 | TransposeOp | ✔ | ✔ | ✔ | / |

@@ -6,6 +6,7 @@ from .AvgPoolLink import *
 from .BroadcastLink import *
 from .BinaryCrossEntropyLink import *
 from .ConcatLink import *
+from .ConcatenateLink import *
 from .Conv2dBroadcastLink import *
 from .Conv2dLink import *
 from .Conv2dReduceSumLink import *
@@ -65,6 +66,8 @@ __all__ = [
     'broadcast_to',
     'concat',
     'concat_gradient',
+    'concatenate',
+    'concatenate_gradient',
     'conv2d_broadcast_to',
     'conv2d',
     'conv2d_gradient_of_data',

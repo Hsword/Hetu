@@ -437,6 +437,13 @@ HETUSYS_EXTERN_C {
                              DLArrayHandle input_gradient, int axis, int id,
                              DLStreamHandle stream_handle);
 
+    int DLGpuConcatenate(const DLArrayHandle input, DLArrayHandle output,
+                         int axis, int offset, DLStreamHandle stream_handle);
+
+    int DLGpuConcatenate_gradient(const DLArrayHandle o_grad,
+                                  DLArrayHandle i_grad, int axis, int offset,
+                                  DLStreamHandle stream_handle);
+
     int DLGpuTranspose(const DLArrayHandle input, DLArrayHandle output,
                        int *perm, DLStreamHandle stream_handle);
     int DLGpuTransposeSimple(const DLArrayHandle input, DLArrayHandle output,
