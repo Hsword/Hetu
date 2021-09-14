@@ -10,7 +10,7 @@ from .Variable import PlaceholderOp  # add for optimizer
 from ..dataloader import DataloaderOp, GNNDataLoaderOp
 from .AllReduceCommunicate import AllReduceCommunicateOp
 from .ParameterServerCommunicate import ParameterServerCommunicateOp, ParameterServerSparsePullOp, parameterServerSparsePull_op
-from .AddElewise import add_op
+from .Sum import sum_op
 from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp
 from ..communicator.mpi_nccl_comm import GroupStart, GroupEnd
 from .EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient
@@ -20,9 +20,9 @@ from ..stream import create_stream_handle, Event
 from ..context import get_current_context, get_launch_config_by_traverse_nodes, assign_context_by_traverse_nodes, DeviceGroup
 from .PipelineSend import PipelineSendOp
 from .PipelineReceive import PipelineReceiveOp
-from .AddElewise import AddOp
+from .Sum import SumOp
 from .Split import SplitOp
-from .Concat import ConcatOp
+from .Concatenate import ConcatenateOp
 from .Dropout import DropoutOp
 from .LayerNorm import Layer_NormalizationOp
 from .OnesLike import OnesLikeOp
@@ -146,6 +146,7 @@ class HetuConfig(object):
         'pipedream',
         'dynamic_memory',
         'layer_indices',
+        'dist_strategy',
     ]
 
     def __init__(
@@ -166,6 +167,7 @@ class HetuConfig(object):
         gpipe=False,
         pipedream=False,
         dynamic_memory=False,
+        dist_strategy=None,
     ):
         '''
         context: default device context
@@ -185,7 +187,10 @@ class HetuConfig(object):
         self.dynamic_memory = dynamic_memory
 
         # check context
-        if ctx is None:
+        self.dist_strategy = dist_strategy
+        if self.dist_strategy is not None:
+            ctx = self.dist_strategy.set_raw_ctxs(eval_node_list)
+        elif ctx is None:
             ctx = get_current_context()
         assert ctx, 'Default context should be determined.'
 
@@ -1716,10 +1721,10 @@ def sum_node_list(node_list, ctx):
     node_list = [n for n in node_list if n is not None]
     if node_list == []:
         return None
-    sum_node = node_list[0]
-    for n in node_list[1:]:
-        sum_node = add_op(sum_node, n, ctx=ctx)
-    return sum_node
+    elif len(node_list) == 1:
+        return node_list[0]
+    else:
+        return sum_op(node_list, ctx=ctx)
 
 
 def pipedream_scheduler(rank, nrank):
@@ -1765,7 +1770,7 @@ def reorder_for_group(topo_order, layer_indices):
             labels[node] = 1
         elif isinstance(node, (PipelineSendOp, PipelineReceiveOp)):
             labels[node] = 2
-        elif cur_with_pipeline and isinstance(node, (AddOp, ConcatOp)):
+        elif cur_with_pipeline and isinstance(node, (SumOp, ConcatenateOp)):
             labels[node] = 3
         else:
             labels[node] = 0

@@ -26,7 +26,10 @@ heturun -c config4.yml python test_mlp_mp_pp.py --split 2      --log results/res
 heturun -c config4.yml python test_mlp_mp_pp.py --split 3      --log results/res15.npy
 heturun -c config4.yml python test_mlp_mp_pp.py --split 4      --log results/res16.npy
 
-python validate_results.py 17
+heturun -c config4.yml python test_mlp_mp.py --split 5      --log results/res17.npy
+heturun -c config4.yml python test_mlp_mp_pp.py --split 5      --log results/res18.npy
+
+python validate_results.py 19
 
 
 heturun -c config1.yml python test_mlp_base.py --more --save --log results/base.npy

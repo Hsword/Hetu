@@ -31,9 +31,10 @@ if __name__ == "__main__":
     parser.add_argument('--complex', action='store_true')
     parser.add_argument('--log', default=None)
     args = parser.parse_args()
-    assert args.split in ('left', 'right', 'middle', '0', '1', '2', '3', '4')
+    assert args.split in ('left', 'right', 'middle',
+                          '0', '1', '2', '3', '4', '5')
     assert args.split2 in (None, 'left', 'right',
-                           'middle', '0', '1', '2', '3', '4')
+                           'middle', '0', '1', '2', '3', '4', '5')
     args.complex = not args.split in ('left', 'right', 'middle')
     args.complex2 = not args.split2 in ('left', 'right', 'middle')
 
@@ -87,6 +88,9 @@ if __name__ == "__main__":
         elif args.split == '4':
             activation = ht.dispatch(activation, (1, 1))
             weight = ht.dispatch(weight, (1, 4))
+        elif args.split == '5':
+            activation = ht.dispatch(activation, (1, 4))
+            weight = ht.dispatch(weight, (4, 1))
         activation = ht.matmul_op(activation, weight)
 
     if args.split2:
@@ -120,6 +124,9 @@ if __name__ == "__main__":
             elif args.split2 == '4':
                 activation = ht.dispatch(activation, (1, 1))
                 weight = ht.dispatch(weight, (1, 4))
+            elif args.split == '5':
+                activation = ht.dispatch(activation, (1, 4))
+                weight = ht.dispatch(weight, (4, 1))
             activation = ht.matmul_op(activation, weight)
 
     with ht.context(ht.gpu(3)):

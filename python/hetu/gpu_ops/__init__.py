@@ -9,6 +9,7 @@ from .BatchNorm import batch_normalization_op, batch_normalization_gradient_op, 
 from .Broadcast import broadcastto_op
 from .BinaryCrossEntropy import binarycrossentropy_op
 from .Concat import concat_op, concat_gradient_op
+from .Concatenate import concatenate_op, concatenate_gradient_op
 from .Conv2d import conv2d_op, conv2d_gradient_of_data_op, conv2d_gradient_of_filter_op
 from .Conv2dBroadcast import conv2d_broadcastto_op
 from .Conv2dReduceSum import conv2d_reducesum_op
@@ -34,6 +35,7 @@ from .SoftmaxCrossEntropy import softmaxcrossentropy_op
 from .SoftmaxCrossEntropySparse import softmaxcrossentropy_sparse_op
 from .Split import split_op, split_gradient_op
 from .Sqrt import sqrt_op, rsqrt_op
+from .Sum import sum_op
 from .Tanh import tanh_op
 from .Transpose import transpose_op
 from .Variable import Variable, placeholder_op
@@ -82,6 +84,8 @@ __all__ = [
     'broadcastto_op',
     'concat_op',
     'concat_gradient_op',
+    'concatenate_op',
+    'concatenate_gradient_op',
     'conv2d_op',
     'conv2d_gradient_of_data_op',
     'conv2d_gradient_of_filter_op',
@@ -121,6 +125,7 @@ __all__ = [
     'split_op',
     'split_gradient_op',
     'sqrt_op',
+    'sum_op',
     'scheduler_init',
     'scheduler_finish',
     'server_init',

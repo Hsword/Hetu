@@ -461,9 +461,9 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
     from .gpu_ops.PipelineReceive import pipeline_receive_op
     from .gpu_ops.Variable import PlaceholderOp
     from .gpu_ops.Dispatch import DispatchOp, DispatchGradientOp
-    from .gpu_ops.Concat import concat_op
+    from .gpu_ops.Concatenate import concatenate_op
     from .gpu_ops.Split import split_op
-    from .gpu_ops.AddElewise import add_op
+    from .gpu_ops.Sum import sum_op
     from .gpu_ops.executor import new_group_comm
 
     def receiving(key, from_ctx):
@@ -516,18 +516,21 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                         result = receiving(prev_input, devices[device_index])
                         device_index += 1
                     else:
-                        result = make_comb(depth + 1)
                         cur_dim = cur_order[depth]
                         if cur_dim < 0:
-                            for _ in range(1, cur_duplicate):
-                                result = add_op(result, make_comb(
-                                    depth + 1), ctx=ctx)
-                                layer_indices[result] = layer_id
+                            if cur_duplicate == 1:
+                                result = make_comb(depth + 1)
+                            else:
+                                result = sum_op([make_comb(depth + 1)
+                                                 for _ in range(cur_duplicate)], ctx=ctx)
+                            layer_indices[result] = layer_id
                         else:
-                            for _ in range(1, cur_state[cur_dim]):
-                                result = concat_op(result, make_comb(
-                                    depth + 1), axis=cur_dim, ctx=ctx)
-                                layer_indices[result] = layer_id
+                            if cur_state[cur_dim] == 1:
+                                result = make_comb(depth + 1)
+                            else:
+                                result = concatenate_op(
+                                    [make_comb(depth + 1) for _ in range(cur_state[cur_dim])], axis=cur_dim, ctx=ctx)
+                            layer_indices[result] = layer_id
                     return result
                 devices = prev_input.raw_ctx.workers[dev_pos]
                 cur_state, cur_duplicate, cur_order = node_cur_state_map[prev_input].get_all(
@@ -556,11 +559,12 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                     else:
                         cur_dim = prev_order[depth]
                         if cur_dim < 0:
-                            res = cross_receive(depth+1)
-                            for _ in range(1, prev_duplicate):
-                                res = add_op(
-                                    res, cross_receive(depth+1), ctx=ctx)
-                                layer_indices[res] = layer_id
+                            if prev_duplicate == 1:
+                                res = cross_receive(depth+1)
+                            else:
+                                res = sum_op([cross_receive(depth+1)
+                                              for _ in range(prev_duplicate)], ctx=ctx)
+                            layer_indices[res] = layer_id
                         else:
                             tar_st = target_state.get(cur_dim, 1)
                             cur_st = cur_state_index.get(cur_dim, 0)
@@ -569,11 +573,12 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                                 multiple = prev_state[cur_dim] // tar_st
                                 device_index += cur_st * \
                                     multiple * loop_sizes[depth]
-                                res = cross_receive(depth+1)
-                                for _ in range(1, multiple):
-                                    res = concat_op(
-                                        res, cross_receive(depth+1), axis=cur_dim, ctx=ctx)
-                                    layer_indices[res] = layer_id
+                                if multiple == 1:
+                                    res = cross_receive(depth+1)
+                                else:
+                                    res = concatenate_op(
+                                        [cross_receive(depth+1) for _ in range(multiple)], axis=cur_dim, ctx=ctx)
+                                layer_indices[res] = layer_id
                                 device_index += (tar_st - 1 - cur_st) * \
                                     multiple * loop_sizes[depth]
                             elif tar_st % prev_state[cur_dim] == 0:
@@ -785,8 +790,11 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                         if allreduce_devices is not None:
                             allreduce_devices = allreduce_devices.get_sorted()
                             if allreduce_devices not in comm_groups:
-                                comm_groups[allreduce_devices] = new_group_comm(
-                                    allreduce_devices)
+                                if len(allreduce_devices) == mpi_comm.nrank:
+                                    comm_groups[allreduce_devices] = mpi_comm
+                                else:
+                                    comm_groups[allreduce_devices] = new_group_comm(
+                                        allreduce_devices)
                             param_allreduce_group[param] = comm_groups[allreduce_devices]
         elif isinstance(node, DispatchOp):
             real_node = node.inputs[0]

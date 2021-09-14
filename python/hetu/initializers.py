@@ -91,13 +91,13 @@ class UniformInit(BaseInit):
         super().init_on_ps(comm, nid, param_type, 1, self.low, self.high, seed, opt)
 
 
-class GeneralizedXavierUniformInit(UniformInit):
+class GeneralXavierUniformInit(UniformInit):
     def __init__(self, gain, mode, shape):
         assert mode in ('fan_in', 'fan_out',
                         'avg'), 'Mode %s not valid.' % mode
         assert gain > 0, 'Gain value %s not valid.' % str(gain)
         assert len(
-            shape) >= 2, 'Generalized xavier requires shape to be at least 2D.'
+            shape) >= 2, 'General xavier requires shape to be at least 2D.'
         hw_scale = 1 if len(shape) == 2 else np.prod(shape[2:])
         fan_in = hw_scale * shape[1]
         fan_out = hw_scale * shape[0]
@@ -111,17 +111,17 @@ class GeneralizedXavierUniformInit(UniformInit):
         super().__init__(-limit, limit, shape)
 
 
-class XavierUniformInit(GeneralizedXavierUniformInit):
+class XavierUniformInit(GeneralXavierUniformInit):
     def __init__(self, shape):
         super().__init__(3.0, 'avg', shape)
 
 
-class HeUniformInit(GeneralizedXavierUniformInit):
+class HeUniformInit(GeneralXavierUniformInit):
     def __init__(self, shape):
         super().__init__(6.0, 'fan_in', shape)
 
 
-class LecunUniformInit(GeneralizedXavierUniformInit):
+class LecunUniformInit(GeneralXavierUniformInit):
     def __init__(self, shape):
         super().__init__(3.0, 'fan_in', shape)
 
@@ -149,12 +149,12 @@ class NormalInit(BaseInit):
         super().init_on_ps(comm, nid, param_type, 2, self.mean, self.stddev, seed, opt)
 
 
-class GeneralizedXavierNormalInit(NormalInit):
+class GeneralXavierNormalInit(NormalInit):
     def __init__(self, gain, mode, shape):
         assert mode in ('fan_in', 'fan_out', 'avg'), 'Mode not allowed.'
         assert gain > 0, 'Gain value not allowed.'
         assert len(
-            shape) >= 2, 'Generalized xavier requires shape to be at least 2D.'
+            shape) >= 2, 'General xavier requires shape to be at least 2D.'
         hw_scale = 1 if len(shape) == 2 else np.prod(shape[2:])
         fan_in = hw_scale * shape[1]
         fan_out = hw_scale * shape[0]
@@ -168,17 +168,17 @@ class GeneralizedXavierNormalInit(NormalInit):
         super().__init__(0, scale, shape)
 
 
-class XavierNormalInit(GeneralizedXavierNormalInit):
+class XavierNormalInit(GeneralXavierNormalInit):
     def __init__(self, shape):
         super().__init__(1.0, 'avg', shape)
 
 
-class HeNormalInit(GeneralizedXavierNormalInit):
+class HeNormalInit(GeneralXavierNormalInit):
     def __init__(self, shape):
         super().__init__(2.0, 'fan_in', shape)
 
 
-class LecunNormalInit(GeneralizedXavierNormalInit):
+class LecunNormalInit(GeneralXavierNormalInit):
     def __init__(self, shape):
         super().__init__(1.0, 'fan_in', shape)
 
@@ -253,6 +253,20 @@ def random_uniform(shape, minval=-1.0, maxval=1.0, name=None, trainable=True, ct
     return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
 
 
+def general_xavier_normal(shape, gain, mode, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'general_xavier_normal_initializer'
+    init = GeneralXavierNormalInit(gain, mode, shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
+
+def general_xavier_uniform(shape, gain, mode, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'general_xavier_uniform_initializer'
+    init = GeneralXavierUniformInit(gain, mode, shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
+
 def xavier_normal(shape, name=None, trainable=True, ctx=None):
     if name is None:
         name = 'xavier_normal_initializer'
@@ -293,3 +307,67 @@ def lecun_uniform(shape, name=None, trainable=True, ctx=None):
         name = 'lecun_uniform_initializer'
     init = LecunUniformInit(shape)
     return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
+
+# here we provide generators
+
+def _generate(init_func, **init_kargs):
+    def _generator_helper(shape, name=None, trainable=True, ctx=None):
+        return init_func(shape=shape, name=name, trainable=trainable, ctx=ctx, **init_kargs)
+    return _generator_helper
+
+
+def GenZeros():
+    return _generate(zeros)
+
+
+def GenOnes():
+    return _generate(ones)
+
+
+def GenConstant(fill_value=0.0):
+    return _generate(constant, fill_value=fill_value)
+
+
+def GenTruncatedNormal(mean=0.0, stddev=1.0):
+    return _generate(truncated_normal, mean=mean, stddev=stddev)
+
+
+def GenNormal(mean=0.0, stddev=1.0):
+    return _generate(random_normal, mean=mean, stddev=stddev)
+
+
+def GenUniform(minval=-1.0, maxval=1.0):
+    return _generate(random_uniform, minval=minval, maxval=maxval)
+
+
+def GenGeneralXavierNormal(gain, mode):
+    return _generate(general_xavier_normal, gain=gain, mode=mode)
+
+
+def GenGeneralXavierUniform(gain, mode):
+    return _generate(general_xavier_uniform, gain=gain, mode=mode)
+
+
+def GenXavierNormal():
+    return _generate(xavier_normal)
+
+
+def GenXavierUniform():
+    return _generate(xavier_uniform)
+
+
+def GenHeNormal():
+    return _generate(he_normal)
+
+
+def GenHeUniform():
+    return _generate(he_uniform)
+
+
+def GenLecunNormal():
+    return _generate(lecun_normal)
+
+
+def GenLecunUniform():
+    return _generate(lecun_uniform)
