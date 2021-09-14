@@ -22,10 +22,7 @@ class PipelineSendOp(Op):
         if group_call:
             GroupStart()
 
-        self.comm.dlarraySend(input_vals[0],
-                              ncclDataType_t.ncclFloat32,
-                              self.const_attr,
-                              self.comm_stream)
+        self.comm.dlarraySend(input_vals[0], ncclDataType_t.ncclFloat32, self.const_attr, stream_handle)
 
     def gradient(self, output_grad):
         return []
