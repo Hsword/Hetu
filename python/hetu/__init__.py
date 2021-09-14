@@ -6,6 +6,7 @@ from .ndarray import cpu, gpu, rcpu, rgpu, array, sparse_array, empty, is_gpu_ct
 from . import optimizer as optim
 from . import lr_scheduler as lr
 from . import initializers as init
+from . import distribute as dist
 from . import data
 from . import layers
 from .tokenizers import *

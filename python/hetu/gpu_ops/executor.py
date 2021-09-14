@@ -145,6 +145,7 @@ class HetuConfig(object):
         'pipedream',
         'dynamic_memory',
         'layer_indices',
+        'dist_strategy',
     ]
 
     def __init__(
@@ -165,6 +166,7 @@ class HetuConfig(object):
         gpipe=False,
         pipedream=False,
         dynamic_memory=False,
+        dist_strategy=None,
     ):
         '''
         context: default device context
@@ -184,7 +186,10 @@ class HetuConfig(object):
         self.dynamic_memory = dynamic_memory
 
         # check context
-        if ctx is None:
+        self.dist_strategy = dist_strategy
+        if self.dist_strategy is not None:
+            ctx = self.dist_strategy.set_raw_ctxs(eval_node_list)
+        elif ctx is None:
             ctx = get_current_context()
         assert ctx, 'Default context should be determined.'
 

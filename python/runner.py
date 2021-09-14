@@ -7,6 +7,7 @@ import subprocess
 import paramiko
 import socket
 import psutil
+import contextlib
 import hetu as ht
 
 _procs = []
@@ -33,45 +34,46 @@ def start_server():
     ht.server_finish()
 
 
+@ contextlib.contextmanager
+def ssh_connect(host, identify_file):
+    try:
+        ssh_directory = os.path.expanduser('~/.ssh') if identify_file == '' else os.path.dirname(
+            os.path.abspath(os.path.expanduser(identify_file)))
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        private = paramiko.RSAKey.from_private_key_file(
+            os.path.join(ssh_directory, 'id_rsa'))
+        config = paramiko.config.SSHConfig.from_path(
+            os.path.join(ssh_directory, 'config'))
+        conf = config.lookup(host)
+        ssh.connect(hostname=conf['hostname'], port=conf['port'],
+                    username=conf['user'], pkey=private)
+        yield ssh
+    finally:
+        ssh.close()
+
+
 def start_remote_server(host, local_server_num, identify_file):
-    ssh_directory = os.path.expanduser('~/.ssh') if identify_file == '' else os.path.dirname(
-        os.path.abspath(os.path.expanduser(identify_file)))
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    private = paramiko.RSAKey.from_private_key_file(
-        os.path.join(ssh_directory, 'id_rsa'))
-    config = paramiko.config.SSHConfig.from_path(
-        os.path.join(ssh_directory, 'config'))
-    conf = config.lookup(host)
-    ssh.connect(hostname=conf['hostname'], port=conf['port'],
-                username=conf['user'], pkey=private)
-    sftp = ssh.open_sftp()
-    sftp.put('/tmp/temp_hetu_config.yml',
-             '/tmp/temp_hetu_config.yml', confirm=True)
-    sftp.close()
-    stdin, stdout, stderr = ssh.exec_command(
-        'python -m hetu.launcher /tmp/temp_hetu_config.yml -n %d' % local_server_num)
-    stdout = stdout.read().decode()
-    stderr = stderr.read().decode()
-    if stdout:
-        print('From remote %s stdout:\n %s' % (host, stdout.strip()))
-    if stderr:
-        print('From remote %s stderr:\n %s' % (host, stderr.strip()))
-    ssh.close()
+    with ssh_connect(host, identify_file) as ssh:
+        sftp = ssh.open_sftp()
+        sftp.put('/tmp/hetu_ps_config.yml',
+                 '/tmp/hetu_ps_config.yml', confirm=True)
+        sftp.close()
+        stdin, stdout, stderr = ssh.exec_command(
+            'python -m hetu.launcher /tmp/hetu_ps_config.yml -n %d' % local_server_num)
+        stdout = stdout.read().decode()
+        stderr = stderr.read().decode()
+        if stdout:
+            print('From remote %s stdout:\n %s' % (host, stdout.strip()))
+        if stderr:
+            print('From remote %s stderr:\n %s' % (host, stderr.strip()))
 
 
-def get_available_port(localhost):
-    ports = set()
-    for conn in psutil.net_connections():
-        la = conn.laddr
-        ra = conn.raddr
-        if len(la) == 2 and la.ip in (localhost, '127.0.0.1'):
-            ports.add(la.port)
-        if len(ra) == 2 and ra.ip in (localhost, '127.0.0.1'):
-            ports.add(ra.port)
-    for p in range(13100, 13200):
-        if p not in ports:
-            return p
+def send_config(host, identify_file):
+    with ssh_connect(host, identify_file) as ssh:
+        sftp = ssh.open_sftp()
+        sftp.put('/tmp/hetu_config.yml', '/tmp/hetu_config.yml', confirm=True)
+        sftp.close()
 
 
 def get_nic_names(local_address, remote_hostnames, identify_file):
@@ -159,66 +161,33 @@ def main():
     parser.add_argument('command', nargs=argparse.REMAINDER,
                         help='Command to be executed.')
     args = parser.parse_args()
-    if args.config is None:
-        assert args.workers > 0, \
-            'Please specify the configuration file or set the number of local workers.'
-        settings = {'nodes': [{
-            'host': 'localhost',
-            'servers': args.servers,
-            'workers': args.workers,
-            'chief': True,
-        }]}
-    else:
-        settings = yaml.load(open(args.config).read(), Loader=yaml.FullLoader)
-    attributes = set(['host', 'servers', 'workers', 'chief'])
-    hosts = []
-    servers, workers = {}, {}
-    chief = None
-    chief_address = socket.gethostbyname(socket.gethostname())
-    port = get_available_port(chief_address)
-    for node in settings['nodes']:
-        assert set(node.keys(
-        )) <= attributes, 'Attributes of nodes invalid, %s / %s.' % (set(node.keys()), attributes)
-        hosts.append(node['host'])
-        if node.get('servers', 0):
-            servers[node['host']] = node['servers']
-        if node.get('workers', 0):
-            workers[node['host']] = node['workers']
-        if node.get('chief', False):
-            assert chief is None, 'There should be only one chief.'
-            chief = node['host']
-    assert chief, 'There should be one chief.'
-    num_servers = sum(servers.values())
-    num_workers = sum(workers.values())
-    enable_PS = (num_servers > 0)
-    print('Cluster: {')
-    print('  Chief: %s,' % chief)
-    print('  Servers(%d): %s,' % (num_servers, servers))
-    print('  Workers(%d): %s,' % (num_workers, workers))
-    print('}')
-    if enable_PS:
-        os.environ['DMLC_PS_ROOT_URI'] = chief_address
-        os.environ['DMLC_PS_ROOT_PORT'] = str(port)
-        os.environ['DMLC_PS_VAN_TYPE'] = 'p3'
-        os.environ['DMLC_NUM_SERVER'] = str(num_servers)
-        os.environ['DMLC_NUM_WORKER'] = str(num_workers)
+    settings = ht.dist.DistConfig(args.config, args.servers, args.workers)
+    print(settings)
+    if settings.enable_PS:
+        ps_config = settings.make_ps_config()
+        for k, v in ps_config.items():
+            os.environ[k] = str(v)
+    settings.save('/tmp/hetu_config.yml')
+    for host in settings.hosts:
+        if host != settings.chief:
+            send_config(host, args.identify)
 
     global executor_shell
-    if len(hosts) == 1:
+    if len(settings.hosts) == 1:
         # single machine
         # TODO: add hostdress validation check
-        if enable_PS:
+        if settings.enable_PS:
             proc = multiprocessing.Process(target=start_sched)
             _procs.append(proc)
-            for i in range(num_servers):
+            for i in range(settings.num_servers):
                 proc = multiprocessing.Process(target=start_server)
                 _procs.append(proc)
         for proc in _procs:
             proc.start()
         mpi_command = 'mpirun --allow-run-as-root --tag-output -np %d %s' % (
-            num_workers, ' '.join(args.command))
+            settings.num_workers, ' '.join(args.command))
         env = dict(os.environ)
-        if enable_PS:
+        if settings.enable_PS:
             env["DMLC_ROLE"] = "worker"
         executor_shell = subprocess.Popen(
             mpi_command, shell=True, env=env, stdout=None, stderr=None)
@@ -232,35 +201,34 @@ def main():
         #! nic methods cannot support different nic name on different machines
         # nics = get_nic_names(chief_address, set(hosts) - {chief}, args.identify)
         # joined_nics = ','.join(nics)
-        subnet = get_subnet(chief_address, set(hosts) - {chief}, args.identify)
-        if enable_PS:
-            with open('/tmp/temp_hetu_config.yml', 'w') as fw:
-                yaml.dump({'shared': {'DMLC_PS_ROOT_URI': chief_address, 'DMLC_PS_ROOT_PORT': port,
-                                      'DMLC_NUM_WORKER': num_workers, 'DMLC_NUM_SERVER': num_servers, 'DMLC_PS_VAN_TYPE': 'p3'}}, fw)
+        subnet = get_subnet(settings.chief_address, set(
+            settings.hosts) - {settings.chief}, args.identify)
+        if settings.enable_PS:
+            with open('/tmp/hetu_ps_config.yml', 'w') as fw:
+                yaml.dump({'shared': ps_config}, fw)
             proc = multiprocessing.Process(target=start_sched)
             _procs.append(proc)
-        for node in hosts:
-            if node == chief:
-                for i in range(servers.get(node, 0)):
+        for node in settings.hosts:
+            if node == settings.chief:
+                for i in range(settings.servers.get(node, 0)):
                     proc = multiprocessing.Process(target=start_server)
                     _procs.append(proc)
             else:
-                if servers.get(node, 0):
+                if settings.servers.get(node, 0):
                     proc = multiprocessing.Process(target=start_remote_server, args=[
-                                                   node, servers[node], args.identify])
+                                                   node, settings.servers[node], args.identify])
                     _procs.append(proc)
         for proc in _procs:
             proc.start()
         basic_args = '--allow-run-as-root --tag-output'
         hosts_in_command = ','.join(
-            ['%s:%d' % (node, nworkers) for node, nworkers in workers.items()])
+            ['%s:%d' % (node, nworkers) for node, nworkers in settings.workers.items()])
         mpi_ssh_args = '' if args.identify == '' else '-bootstrap=ssh -bootstrap-exec-args -i %s' % args.identify
         tcp_intf_arg = '-mca btl_tcp_if_include %s' % subnet
         # tcp_intf_arg = '-mca btl_tcp_if_include %s' % joined_nics
         # nccl_socket_intf_arg = '-x NCCL_SOCKET_IFNAME=%s' % joined_nics
-        env_list = '-x DMLC_PS_ROOT_URI=%s -x DMLC_PS_ROOT_PORT=%s -x DMLC_PS_VAN_TYPE=p3 -x DMLC_NUM_SERVER=%s -x DMLC_NUM_WORKER=%s -x DMLC_ROLE=worker' %\
-            (chief_address, str(port), str(num_servers),
-             str(num_workers)) if enable_PS else ''
+        env_list = ' '.join(['-x %s=%s' % (k, str(v)) for k, v in ps_config.items()] + [
+                            '-x DMLC_ROLE=worker']) if settings.enable_PS else ''
         mpi_command = (
             'mpirun {basic_args} '
             '--host {hosts} '
