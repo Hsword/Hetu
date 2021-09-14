@@ -1,5 +1,10 @@
+from .base import BaseLayer
 import hetu as ht
 
 
-def DropOut(p=0.5):
-    return lambda x: ht.dropout_op(x, 1-p)
+class DropOut(BaseLayer):
+    def __init__(self, p=0.5):
+        self.p = p
+
+    def __call__(self, x):
+        return ht.dropout_op(x, 1-self.p)

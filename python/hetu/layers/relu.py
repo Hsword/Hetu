@@ -1,5 +1,7 @@
+from .base import BaseLayer
 import hetu as ht
 
 
-def Relu():
-    return lambda x: ht.relu_op(x)
+class Relu(BaseLayer):
+    def __call__(self, x):
+        return ht.relu_op(x)

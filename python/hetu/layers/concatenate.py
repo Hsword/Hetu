@@ -1,19 +1,25 @@
+from .base import BaseLayer
 import hetu as ht
 
 
-def Concatenate(axis):
-    def concatenate_helper(*args):
+class Concatenate(BaseLayer):
+    def __init__(self, axis):
+        self.axis = axis
+
+    def __call__(self, *args):
         if len(args) == 1:
             return args[0]
         else:
-            return ht.concatenate_op(args, axis=axis)
-    return concatenate_helper
+            return ht.concatenate_op(args, axis=self.axis)
 
 
-def ConcatenateLayers(layers, axis=0):
-    def concatenate_layers(x):
-        if len(layers) == 1:
-            return layers[0](x)
+class ConcatenateLayers(BaseLayer):
+    def __init__(self, layers, axis=0):
+        self.layers = layers
+        self.axis = axis
+
+    def __call__(self, x):
+        if len(self.layers) == 1:
+            return self.layers[0](x)
         else:
-            return ht.concatenate_op([layer(x) for layer in layers], axis=axis)
-    return concatenate_layers
+            return ht.concatenate_op([layer(x) for layer in self.layers], axis=self.axis)

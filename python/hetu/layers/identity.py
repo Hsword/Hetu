@@ -1,3 +1,6 @@
+from .base import BaseLayer
 
-def Identity():
-    return lambda x: x
+
+class Identity(BaseLayer):
+    def __call__(self, x):
+        return x
