@@ -144,6 +144,8 @@ class HetuConfig(object):
         'placeholder_to_arr_map',
         'gpipe',
         'pipedream',
+        'pipeline_rank',
+        'pipeline_nrank',
         'dynamic_memory',
         'layer_indices',
         'dist_strategy',
@@ -233,6 +235,7 @@ class HetuConfig(object):
             ps_rank = int(self.ps_comm.rank())
             ps_nrank = int(
                 os.environ['DMLC_NUM_WORKER']) if 'DMLC_NUM_WORKER' in os.environ else 1
+            topo_sort_register_ps(eval_node_list, self.ps_comm, self.comm_mode, self.seed, cstable_policy)
         if self.comm_mode == "Hybrid" or self.comm_mode == "AllReduce":
             self.nccl_comm = wrapped_mpi_nccl_init(devices=local_gpu_devices)
         elif context_launch:
@@ -263,6 +266,7 @@ class HetuConfig(object):
         if context_launch:
             # comm_mode is None <=> only 1 model parallel instance
             self.context = ndarray.gpu(device_id)
+            self.pipeline_rank , self.pipeline_nrank = get_pipeline_stage_info(eval_node_list, self.context)
             self.p2p_stream = create_stream_handle(
                 self.context) if init_p2p_stream else None
             self.my_eval_nodes, self.param_allreduce_group, self.layer_indices = assign_context_by_traverse_nodes(
@@ -726,7 +730,7 @@ class SubExecutor4Pipedream(object):
                 pivot_idx = i
                 break
 
-        if config.local_rank == config.nrank - 1:
+        if config.pipeline_rank == config.pipeline_nrank - 1:
             # node before oneslike belong to forward
             self.forward_topo_order = self.topo_order[:pivot_idx]
             self.backward_topo_order = self.topo_order[pivot_idx:]
@@ -739,16 +743,14 @@ class SubExecutor4Pipedream(object):
             move send op to the tail so that we can wrap send/recv pairs
             with nccl groupcall to avoid deadlock
             """
-            saved_send = None
             for n in tp:
                 if isinstance(n, PipelineSendOp):
-                    saved_send = n
+                    tp.remove(n)
+                    tp.append(n)
                     break
-            tp.remove(saved_send)
-            tp.append(saved_send)
 
-        if config.local_rank != 0:
-            move_send_op(self.backward_topo_order)
+        move_send_op(self.backward_topo_order)
+
         """
         print("gpu {}'s topo: ".format(config.local_rank),
               [x.desc for x in self.topo_order])
@@ -829,9 +831,11 @@ class SubExecutor4Pipedream(object):
             mp = self.batch_to_tensor_maps[batch_id]
 
             if isinstance(node, PlaceholderOp):
-                if self.config.placeholder_to_arr_map[node] is not None:
-                    orig = self.config.placeholder_to_arr_map[node]
-                    copied = None
+                orig = self.config.placeholder_to_arr_map[node]
+                if node.raw_ctx.servers:
+                    # use parameter servers, in this case weights are treated like activations (use H2D)
+                    mp[node] = orig
+                else:
                     if isinstance(orig, np.ndarray):
                         copied = orig.copy()
                     elif isinstance(orig, ndarray.NDArray):
@@ -841,8 +845,6 @@ class SubExecutor4Pipedream(object):
                     else:
                         raise ValueError
                     mp[node] = copied
-                elif node not in mp:
-                    mp[node] = None
             elif not isinstance(node, DataloaderOp) and not isinstance(node, GNNDataLoaderOp):
                 # add for OptimizerOp and ParameterServerOp
                 if shape is None:
@@ -861,7 +863,7 @@ class SubExecutor4Pipedream(object):
             Thus, we need to copy latest model weight.
         """
         # the last worker has only one copy of weight, no need to copy
-        if self.config.rank == self.config.nrank - 1:
+        if self.config.pipeline_rank == self.config.pipeline_nrank - 1:
             return
         oldest = min(self.batch_to_tensor_maps.keys())
         for node in self.config.placeholder_to_arr_map:
@@ -875,8 +877,8 @@ class SubExecutor4Pipedream(object):
 
 
     def run(self, eval_node_list, feed_dict_list, convert_to_numpy_ret_vals, batch_num):
-        rank = self.config.rank
-        nrank = self.config.nrank
+        rank = self.config.pipeline_rank
+        nrank = self.config.pipeline_nrank
 
         last_vacant_batch = -1
         in_flight_batches = []
@@ -947,10 +949,11 @@ class SubExecutor4Pipedream(object):
                     continue
 
                 node_val = self.batch_to_tensor_maps[batch_id][node]
-
                 input_vals = []
                 for n in node.inputs:
                     input_vals.append(self.batch_to_tensor_maps[batch_id][n])
+                    if n.event:
+                        n.event.sync()
 
                 if isinstance(node, PipelineSendOp):
                     """
@@ -985,6 +988,17 @@ class SubExecutor4Pipedream(object):
                             group_call = True
                     node.compute(input_vals, node_val, self.comp_stream, group_call=group_call)
 
+                elif isinstance(node, DataH2DOp):
+                    node.compute(input_vals, node_val, self.h2d_stream)
+
+                elif isinstance(node, (DataD2HOp, DataD2HSparseOp)):
+                    node.compute(input_vals, node_val, self.d2h_stream)
+
+                elif isinstance(node, (ParameterServerCommunicateOp, ParameterServerSparsePullOp)):
+                    # Here we use d2h stream in ps op, since the stream is used for d2h data transfer.
+                    # Please take care at this part.
+                    node.compute(input_vals, node_val, self.d2h_stream)
+
                 elif isinstance(node, (DropoutOp, Batch_NormalizationOp, Layer_NormalizationOp)):
                     node.compute(input_vals, node_val,
                                  self.comp_stream, inference=self.inference)
@@ -995,6 +1009,9 @@ class SubExecutor4Pipedream(object):
 
                 else:
                     node.compute(input_vals, node_val, self.comp_stream)
+                    if isinstance(node.event, Event):
+                        # for d2h op / eval nodes / nodes before [allreduce or ps nodes or pipelinesend nodes]
+                        node.event.record(self.comp_stream)
 
             self.comp_stream.sync()
 
@@ -1041,7 +1058,7 @@ class SubExecutor(object):
             assert self.inference
             self.eval_node_list = []
             # Remove the last pipeline send on worker 1...n-1 ( not needed in inference stage) and the optimizer
-            remove_send = 1 if config.rank > 0 else 0
+            remove_send = 1 if config.pipeline_rank > 0 else 0
             for node in config.my_eval_nodes[::-1]:
                 if remove_send and isinstance(node, PipelineSendOp):
                     remove_send = 0
@@ -1614,6 +1631,64 @@ def gradients(output_node, node_list, insert_grad=None):
 ##################
 # Helper Methods #
 ##################
+
+
+# this function synchronously initialize meta information and do the initialization on ps,
+# Will modify PS worker state, PS server parmeter initialization
+# Won't modify config, computation graph and executor state
+def topo_sort_register_ps(node_list, ps_comm, comm_mode, seed, cstable_policy):
+    visited = set()
+    for node in node_list:
+        if isinstance(node, OptimizerOp):
+            opt = node.optimizer.get_config()
+
+    def _topo_sort_register_ps(node):
+        if node in visited:
+            return
+        visited.add(node)
+        if isinstance(node, PlaceholderOp) and node.trainable and (comm_mode == "PS" or node.is_embed):
+            node_type = int(node.is_embed)
+            if node_type and cstable_policy is not None:
+                node_type = 2
+            node.initializer.init_on_ps(ps_comm, node.id, node_type, seed=seed + node.id, opt=opt)
+        for n in node.inputs:
+            _topo_sort_register_ps(n)
+
+    for node in node_list:
+        _topo_sort_register_ps(node)
+
+def get_pipeline_stage_info(node_list, ctx):
+    stage_index = {}
+
+    def _is_pipeline_articulation(n0, n1):
+        w0 = n0.raw_ctx._workers
+        w1 = n1.raw_ctx._workers
+        return len(w0) and len(w1) and w0 != w1
+
+    def _traverse(node):
+        if node not in stage_index:
+            stage_index[node] = 0
+        for n in node.inputs:
+            _traverse(n)
+            if _is_pipeline_articulation(node, n):
+                stage_index[node] = max(stage_index[n] + 1, stage_index[node])
+            else:
+                stage_index[node] = max(stage_index[n], stage_index[node])
+
+    for node in node_list:
+        _traverse(node)
+
+    # for a n stage pipeline, we have 2 * ( n - 1) pipeline articulation and 1 optimizer,
+    # thus max(stage_index.values()) = 2n -1
+    total_stage = ( max(stage_index.values()) + 1 ) // 2
+    # find out my stage index, which is the biggest stage number in the forward pass
+    my_stage = set()
+    for node, stage in stage_index.items():
+        if ctx in node.raw_ctx._workers and stage < total_stage:
+            my_stage.add(stage)
+    my_stage = max(my_stage)
+    assert my_stage >= 0
+    return my_stage, total_stage
 
 
 def topo_sort_with_hook(node_list, config):

@@ -289,6 +289,8 @@ public:
         OptType otype = (OptType)get<8>(request);
         SArray<float> lrs = get<9>(request);
 
+        if (!try_init_with_no_conflict(k)) return;
+
         Param<float> *newParam = nullptr;
         switch (param_type) {
         case kParam:
@@ -300,7 +302,8 @@ public:
         case kCacheTable:
             newParam = new CacheTable<float>(len, width, otype, lrs);
         }
-        auto iter = store.emplaceIfAbsent(k, newParam);
+        auto iter = store.find(k);
+        iter->second = tmap::mapped_type(newParam);
 
         CHECK_EQ(len * width, iter->second->size())
             << k << " " << len << " " << width << " " << iter->second->size()
@@ -395,6 +398,17 @@ public:
     }
 
 private:
+    bool try_init_with_no_conflict(Key key) {
+        static std::mutex init_mtx;
+        std::lock_guard<std::mutex> lock(init_mtx);
+        if (store.find(key) != store.end())
+            return false;
+        else {
+            store[key] = tmap::mapped_type();
+            return true;
+        }
+    }
+
     typedef threadsafe_unordered_map<Key, std::shared_ptr<Param<float>>> tmap;
     tmap store;
     const tmap &const_store =

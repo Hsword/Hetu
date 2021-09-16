@@ -153,8 +153,6 @@ class ParameterServerCommunicateOp(Op):
             # only worker 0 will do the initialization on server,
             # this function synchronously initialize meta information and do the initialization,
             # ALREADY has barrier!
-            self.parameter.initializer.init_on_ps(
-                self.comm, self.ps_id, 2, seed=config.seed + self.ps_id.value, opt=self.optimizer)
             self.cache = CacheSparseTable(
                 limit, node_shape[0], node_shape[1], self.parameter.id, config.cstable_policy, config.cache_bound)
             self.parameter.cache = self.cache
@@ -176,11 +174,6 @@ class ParameterServerCommunicateOp(Op):
             self.push_val = ndarray.empty(node_shape, ctx=ndarray.cpu(0))
             if config.d2h_stream:
                 self.psevent = stream.create_event_handle(self.ctx)
-        # only worker 0 will do the initialization on server,
-        # this function synchronously initialize meta information and do the initialization,
-        # ALREADY has barrier!
-        self.parameter.initializer.init_on_ps(self.comm, self.ps_id, int(
-            self.parameter.is_embed), seed=config.seed + self.ps_id.value, opt=self.optimizer)
         if self_sparse:
             if config.prefetch:
                 self.dl_name = config.train_name
