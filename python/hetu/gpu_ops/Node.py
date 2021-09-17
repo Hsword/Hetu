@@ -177,6 +177,13 @@ class Op(object):
             nst.copy_from(status, deduce_order)
 
     def get_default_state(self, status, enforce_order):
+        if status.valid_state() and not status.valid_all():
+            splits = len(status.state)
+            has_dup = status.duplicate > 1
+            if splits == 1 and not has_dup:
+                status.set_order(tuple(status.state.keys()))
+            elif splits == 0 and has_dup:
+                status.set_order((-1,))
         if enforce_order:
             order = tuple(sorted(status.state.keys()))
             if status.duplicate > 1:
