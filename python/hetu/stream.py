@@ -56,6 +56,12 @@ class Event(ctypes.Structure):
     def record(self, stream_handle):
         check_call(_LIB.DLEventRecord(stream_handle.handle, self.handle))
 
+    def time_since(self, event):
+        result = ctypes.c_float()
+        check_call(_LIB.DLEventElapsedTime(
+            event.handle, self.handle, ctypes.byref(result)))
+        return result.value
+
 
 def create_event_handle(ctx):
     assert ndarray.is_gpu_ctx(ctx)
