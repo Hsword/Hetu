@@ -24,7 +24,8 @@ class Linear(BaseLayer):
         x = ht.matmul_op(x, weight_var)
         if self.bias:
             bias_var = ht.init.zeros(
-                shape=(self.out_features,), name=self.name+'_bias')
+                shape=(1, self.out_features), name=self.name+'_bias')
+            bias_var = ht.broadcastto_op(bias_var, x)
             x = x + bias_var
         if self.activation is not None:
             x = self.activation(x)

@@ -359,7 +359,8 @@ class Executor(object):
                 return SubExecutor4Pipedream
             return SubExecutor
 
-        self.subexecutor = {k: get_sub_executor(k)(k, v, config) for k, v in eval_node_dict.items()}
+        self.subexecutor = {k: get_sub_executor(k)(
+            k, v, config) for k, v in eval_node_dict.items()}
 
         self.topo_order = find_topo_sort(config.my_eval_nodes)
         self.param_nodes = [node for node in self.topo_order if isinstance(
@@ -368,6 +369,10 @@ class Executor(object):
         self.ps_comm = self.config.ps_comm
         self.local_rank = self.config.local_rank
         self.rank = self.config.rank
+
+    def profile(self, feed_shapes, log_file, profiler='cpu', name='default'):
+        self.subexecutor[name].profile(
+            feed_shapes, log_file, profiler=profiler)
 
     def run(self, name='default', eval_node_list={}, feed_dict={}, convert_to_numpy_ret_vals=False, **kwargs):
         return self.subexecutor[name].run(eval_node_list, feed_dict, convert_to_numpy_ret_vals, **kwargs)
@@ -476,7 +481,8 @@ class SubExecutor4Gpipe(object):
         self.name = name
         self.eval_node_list = config.my_eval_nodes
         self.config = config
-        self.inference = not any([isinstance(node, OptimizerOp) for node in eval_node_list])
+        self.inference = not any([isinstance(node, OptimizerOp)
+                                  for node in eval_node_list])
         self.global_eval_nodes = eval_node_list
 
         self.topo_order = find_topo_sort(self.eval_node_list)
@@ -620,7 +626,8 @@ class SubExecutor4Gpipe(object):
                     continue
                 local_shape = tuple(value.shape)
                 local_realloc = node not in cur_node_to_arr_map
-                assert self.node_to_shape_map.get(node, local_shape) == local_shape
+                assert self.node_to_shape_map.get(
+                    node, local_shape) == local_shape
                 if node.on_cpu:
                     assert isinstance(value, (np.ndarray, spmatrix, ndarray.NDArray)), \
                         "feed_dict value type not supported"
@@ -634,7 +641,8 @@ class SubExecutor4Gpipe(object):
                 else:
                     if isinstance(value, np.ndarray):
                         if local_realloc:
-                            cur_node_to_arr_map[node] = ndarray.array(value, ctx=node.ctx)
+                            cur_node_to_arr_map[node] = ndarray.array(
+                                value, ctx=node.ctx)
                         else:
                             cur_node_to_arr_map[node][:] = value
                     elif isinstance(value, spmatrix):
@@ -647,7 +655,8 @@ class SubExecutor4Gpipe(object):
                             cur_node_to_arr_map[node] = value
                         else:
                             if local_realloc:
-                                cur_node_to_arr_map[node] = ndarray.empty(local_shape, ctx=node.ctx)
+                                cur_node_to_arr_map[node] = ndarray.empty(
+                                    local_shape, ctx=node.ctx)
                             else:
                                 cur_node_to_arr_map[node][:] = value
                     elif isinstance(value, ndarray.ND_Sparse_Array):
@@ -672,7 +681,8 @@ class SubExecutor4Gpipe(object):
         saved_opt = None
         # computing
         for cur_topo in [self.forward_topo_order, self.backward_topo_order]:
-            node_maps = self.node_to_arr_maps if self.forward_topo_order else self.node_to_arr_maps[::-1]
+            node_maps = self.node_to_arr_maps if self.forward_topo_order else self.node_to_arr_maps[
+                ::-1]
             for cur_node_to_arr_map in node_maps:
                 for node in self.computing_nodes:
                     if node not in cur_topo:
@@ -686,7 +696,8 @@ class SubExecutor4Gpipe(object):
                     node_val = cur_node_to_arr_map[node]
 
                     if isinstance(node, (DropoutOp, Batch_NormalizationOp, Layer_NormalizationOp)):
-                        node.compute(input_vals, node_val, self.comp_stream, inference=self.inference)
+                        node.compute(input_vals, node_val,
+                                     self.comp_stream, inference=self.inference)
                     else:
                         node.compute(input_vals, node_val, self.comp_stream)
 
@@ -714,7 +725,8 @@ class SubExecutor4Pipedream(object):
     def __init__(self, name, eval_node_list, config):
         self.name = name
         self.config = config
-        self.inference = not any([isinstance(node, OptimizerOp) for node in eval_node_list])
+        self.inference = not any([isinstance(node, OptimizerOp)
+                                  for node in eval_node_list])
         self.eval_node_list = config.my_eval_nodes
         self.global_eval_nodes = eval_node_list
         self.node_to_shape_map = {}
@@ -873,7 +885,6 @@ class SubExecutor4Pipedream(object):
                 # so we set let placeholder_to_arr_map point to it
                 self.config.placeholder_to_arr_map[node] = dst_tensor
 
-
     def run(self, eval_node_list, feed_dict_list, convert_to_numpy_ret_vals, batch_num):
         rank = self.config.rank
         nrank = self.config.nrank
@@ -916,7 +927,8 @@ class SubExecutor4Pipedream(object):
                         self.batch_to_tensor_maps[batch_id] = dict()
                 else:
                     # change ownership of old array and reuse
-                    self.batch_to_tensor_maps[batch_id] = self.batch_to_tensor_maps.pop(last_vacant_batch)
+                    self.batch_to_tensor_maps[batch_id] = self.batch_to_tensor_maps.pop(
+                        last_vacant_batch)
                     last_vacant_batch = -1
 
                 feed_shapes = {}
@@ -926,9 +938,11 @@ class SubExecutor4Pipedream(object):
                 # get dataloader values
                 for node in self.dataloader_nodes:
                     local_shape = node.get_cur_shape(self.name)
-                    local_realloc = local_shape != self.node_to_shape_map.get(node, None)
+                    local_realloc = local_shape != self.node_to_shape_map.get(
+                        node, None)
                     need_reallocation = need_reallocation or local_realloc
-                    self.batch_to_tensor_maps[batch_id][node] = node.get_arr(self.name)
+                    self.batch_to_tensor_maps[batch_id][node] = node.get_arr(
+                        self.name)
                     feed_shapes[node] = local_shape
 
                 # reallocation, infer shapes and allocate memory
@@ -972,7 +986,8 @@ class SubExecutor4Pipedream(object):
                     if rank not in (0, nrank - 1):
                         if cur_schedule == 1 or batch_id >= start_group_call_idx:
                             group_call = True
-                    node.compute(input_vals, node_val, self.comp_stream, group_call=group_call)
+                    node.compute(input_vals, node_val,
+                                 self.comp_stream, group_call=group_call)
 
                 elif isinstance(node, PipelineReceiveOp):
                     group_call = False
@@ -983,7 +998,8 @@ class SubExecutor4Pipedream(object):
                     if rank not in (0, nrank - 1):
                         if cur_schedule == 1 or batch_id > start_group_call_idx:
                             group_call = True
-                    node.compute(input_vals, node_val, self.comp_stream, group_call=group_call)
+                    node.compute(input_vals, node_val,
+                                 self.comp_stream, group_call=group_call)
 
                 elif isinstance(node, (DropoutOp, Batch_NormalizationOp, Layer_NormalizationOp)):
                     node.compute(input_vals, node_val,
@@ -991,7 +1007,8 @@ class SubExecutor4Pipedream(object):
 
                 elif isinstance(node, OptimizerOp):
                     self.copy_latest_weight()
-                    node.compute(input_vals, node_val, self.comp_stream, self.batch_to_tensor_maps[batch_id])
+                    node.compute(input_vals, node_val, self.comp_stream,
+                                 self.batch_to_tensor_maps[batch_id])
 
                 else:
                     node.compute(input_vals, node_val, self.comp_stream)
@@ -1004,7 +1021,8 @@ class SubExecutor4Pipedream(object):
                 for n in self.global_eval_nodes:
                     if n in self.batch_to_tensor_maps[batch_id]:
                         r = self.batch_to_tensor_maps[batch_id][n]
-                        tmp_results.append(r.asnumpy() if r is not None else None)
+                        tmp_results.append(
+                            r.asnumpy() if r is not None else None)
                 results_list.append(tmp_results)
 
             # after update, mark the vacant maps
@@ -1047,6 +1065,11 @@ class SubExecutor(object):
                     remove_send = 0
                 elif not isinstance(node, OptimizerOp):
                     self.eval_node_list.append(node)
+            self.global_eval_nodes = eval_node_list
+        elif config.p2p_stream:
+            self.run_results_indices = [eval_node_list.index(
+                node) if node in eval_node_list else -1 for node in config.my_eval_nodes]
+            self.eval_node_list = config.my_eval_nodes
             self.global_eval_nodes = eval_node_list
 
         if inference == False:
@@ -1114,6 +1137,37 @@ class SubExecutor(object):
             self.batch_num) == 0 else self.batch_num.pop()
         self.init_need_allocation = (self.need_feed_nodes == []) and (
             self.dataloader_nodes == [])
+
+    def profile(self, feed_shapes, log_file, profiler='cpu'):
+        # !!! we should profile before using distributed settings
+        # !!! so here we don't consider multiple devices
+        # !!! no self.use_p2p, no node reshape, no pipeline configuration
+        # !!! not support sparse input now
+        # !!! not support dynamic memory now
+        assert profiler in ('cpu', 'gpu')
+        assert len(feed_shapes) == len(self.need_feed_nodes) + \
+            len(self.dataloader_nodes)
+
+        need_reallocation = self.init_need_allocation
+
+        for node, shape in feed_shapes.items():
+            assert node in self.need_feed_nodes or node in self.dataloader_nodes
+            local_realloc = shape != self.node_to_shape_map.get(node, None)
+            need_reallocation = need_reallocation or local_realloc
+            if local_realloc:
+                self.node_to_arr_map[node] = ndarray.empty(
+                    shape, ctx=node.ctx)
+
+        if need_reallocation:
+            self.init_need_allocation = False
+            self.infer_shape(feed_shapes)
+            self.memory_plan()
+
+        from ..profiler import HetuProfiler
+        if not hasattr(self, 'profiler'):
+            self.profiler = HetuProfiler(
+                self.computing_nodes, feed_shapes, self.node_to_arr_map, ctx=self.config.context)
+        self.profiler.profile_n_log(log_file, profiler=profiler)
 
     def update_executor(self, eval_node_list):
         self.eval_node_list = eval_node_list
@@ -1549,10 +1603,15 @@ class SubExecutor(object):
                     results[i] = results[i].asnumpy()
 
         # remap to original order in model parallel
-        if self.use_p2p:
-            results = filter(lambda x : x[0] in self.global_eval_nodes,
-                zip(self.eval_node_list, results))
+        if self.config.gpipe or self.config.pipedream:
+            results = filter(lambda x: x[0] in self.global_eval_nodes,
+                             zip(self.eval_node_list, results))
             results = [x[1] for x in results]
+        elif self.use_p2p:
+            new_results = [None for _ in self.global_eval_nodes]
+            for i, j in enumerate(self.run_results_indices):
+                new_results[j] = results[i]
+            results = new_results
 
         return results
 

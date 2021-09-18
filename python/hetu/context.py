@@ -313,6 +313,8 @@ def get_launch_config_by_traverse_nodes(node_list, default_ctx):
 
 
 def traverse_dfs(node, node_strategy, devices, nrank):
+    from .gpu_ops.Dispatch import DispatchOp, DispatchGradientOp
+    from .optimizer import OptimizerOp
     if node in node_strategy:
         return
     strategy = None
@@ -321,11 +323,12 @@ def traverse_dfs(node, node_strategy, devices, nrank):
     elif node.raw_ctx is not None and node.raw_ctx.worker_num > 1:
         strategy = 'AllReduce'
     node_strategy[node] = strategy
-    for ctx in node.raw_ctx:
-        if isinstance(ctx, tuple):
-            devices.update(ctx)
-        else:
-            devices.add(ctx)
+    if not isinstance(node, (DispatchOp, DispatchGradientOp, OptimizerOp)):
+        for ctx in node.raw_ctx:
+            if isinstance(ctx, tuple):
+                devices.update(ctx)
+            else:
+                devices.add(ctx)
     local_nrank = nrank if node.raw_ctx is None else node.raw_ctx.worker_num
     assert local_nrank in (
         0, nrank), 'Number of workers not consist: (%d, %d).' % (local_nrank, nrank)
@@ -386,17 +389,23 @@ def infer_states(node_list):
         else:
             input_statuses = []
             if node.raw_ctx.is_mp():
+                if infer_order:
+                    nonlocal chance
                 if isinstance(node, PlaceholderOp):
                     # in this case the node is initialized in mp
+                    if infer_order and chance and not node_tar_state_map[node].valid_all():
+                        node.get_default_state(
+                            node_tar_state_map[node], enforce_order=True)
+                        chance = False
                     node_cur_state_map[node].copy_from(
                         node_tar_state_map[node], infer_order)
+                    node_tar_state_map[node].copy_from(
+                        node_cur_state_map[node], infer_order)
                 else:
-                    if infer_order:
-                        nonlocal chance
-                        if chance and not node_cur_state_map[node].valid_all():
-                            node.get_default_state(
-                                node_cur_state_map[node], enforce_order=True)
-                            chance = False
+                    if infer_order and chance and not node_cur_state_map[node].valid_all():
+                        node.get_default_state(
+                            node_cur_state_map[node], enforce_order=True)
+                        chance = False
                     input_statuses = []
                     for n in node.inputs:
                         if isinstance(n, (DispatchOp, DispatchGradientOp)):

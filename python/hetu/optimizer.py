@@ -77,6 +77,7 @@ class Optimizer(object):
         An optimizer node.
 
         """
+        self.loss = loss
         if not var_list:
             var_list = self.get_var_list(loss)
         self.params = var_list
@@ -146,6 +147,10 @@ class OptimizerOp(Op):
                     config.layer_indices[cur_node] = config.layer_indices[node] + 1
             new_inputs.append(cur_node)
         self.inputs = new_inputs
+
+    def re_minimize(self):
+        new_grads = ht.gradients(self.optimizer.loss, self.optimizer.params)
+        self.inputs = new_grads
 
 
 class SGDOptimizer(Optimizer):

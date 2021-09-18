@@ -109,3 +109,10 @@ int DLEventSync(DLEventHandle handle) {
     CUDA_CALL(cudaEventSynchronize(*(cudaEvent_t *)handle->handle));
     return 0;
 }
+
+int DLEventElapsedTime(DLEventHandle start, DLEventHandle ending,
+                       float *duration) {
+    CUDA_CALL(cudaEventElapsedTime(duration, *(cudaEvent_t *)start->handle,
+                                   *(cudaEvent_t *)ending->handle));
+    return 0;
+}

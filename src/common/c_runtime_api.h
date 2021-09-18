@@ -34,6 +34,8 @@ HETUSYS_EXTERN_C {
     int DLEventDestroy(DLEventHandle handle);
     int DLEventRecord(DLStreamHandle stream_andle, DLEventHandle event_handle);
     int DLEventSync(DLEventHandle handle);
+    int DLEventElapsedTime(DLEventHandle start, DLEventHandle ending,
+                           float *duration);
 
     // Array related apis for quick proptying
     /*!
