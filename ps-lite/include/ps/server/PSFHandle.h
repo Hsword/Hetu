@@ -12,20 +12,13 @@
 #include <fstream>
 
 namespace ps {
-/**
- * \brief used in ML part for sparse/dense pull, push.
- *        keys is used for the key of one partition.
- *        lens is used as the offset of the keys.
- *        vals is vals.
- *        One key (two keys for binary op) per request in Hetu.
- *        Is it ok in a lock-free manner? By @Zhipeng
- */
 
-class KVServerMatrixHandle {
+template<>
+class PSHandler<PsfGroup::kParameterServer> : public PSHandler<PsfGroup::kBaseGroup> {
 public:
-    KVServerMatrixHandle() {
+    PSHandler<PsfGroup::kParameterServer>() {
     }
-    KVServerMatrixHandle(const KVServerMatrixHandle &handle) {
+    PSHandler<PsfGroup::kParameterServer>(const PSHandler<PsfGroup::kParameterServer> &handle) {
     }
 
     void serve(const PSFData<DensePull>::Request &request,

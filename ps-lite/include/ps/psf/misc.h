@@ -13,6 +13,7 @@ enum InitType {
 
 template <>
 struct PSFData<ParamInit> {
+    static constexpr PsfGroup group = PsfGroup::kParameterServer;
     using Request = tuple<Key,                // key
                           int,                // param_type
                           size_t,             // len
@@ -31,6 +32,7 @@ struct PSFData<ParamInit> {
 
 template <>
 struct PSFData<ParamClear> {
+    static constexpr PsfGroup group = PsfGroup::kParameterServer;
     using Request = tuple<Key // key
                           >;
     using Response = tuple<>;
@@ -40,6 +42,7 @@ struct PSFData<ParamClear> {
 
 template <>
 struct PSFData<ParamSave> {
+    static constexpr PsfGroup group = PsfGroup::kParameterServer;
     using Request = tuple<Key,
                           SArray<char>, // address
                           bool          // different from load
@@ -51,6 +54,7 @@ struct PSFData<ParamSave> {
 
 template <>
 struct PSFData<ParamLoad> {
+    static constexpr PsfGroup group = PsfGroup::kParameterServer;
     using Request = tuple<Key,
                           SArray<char> // address
                           >;

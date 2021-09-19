@@ -2,7 +2,7 @@
 
 namespace ps {
 
-void KVServerMatrixHandle::serve(
+void PSHandler<PsfGroup::kParameterServer>::serve(
     const PSFData<kPushEmbedding>::Request &request,
     PSFData<kPushEmbedding>::Response &response) {
     Key k = get<0>(request);
@@ -27,7 +27,7 @@ void KVServerMatrixHandle::serve(
     }
 }
 
-void KVServerMatrixHandle::serve(
+void PSHandler<PsfGroup::kParameterServer>::serve(
     const PSFData<kSyncEmbedding>::Request &request,
     PSFData<kSyncEmbedding>::Response &response) {
     Key k = get<0>(request);
@@ -63,7 +63,7 @@ void KVServerMatrixHandle::serve(
     }
 }
 
-void KVServerMatrixHandle::serve(
+void PSHandler<PsfGroup::kParameterServer>::serve(
     const PSFData<kPushSyncEmbedding>::Request &request,
     PSFData<kPushSyncEmbedding>::Response &response) {
     PSFData<kPushEmbedding>::Request push_req(

@@ -11,6 +11,24 @@ using std::function;
 
 namespace ps {
 
+// PS Functions are declared within groups
+// Each function group will act independently, meaning that one call in group A will not affect the state in B
+enum class PsfGroup {
+    kBaseGroup,
+    kParameterServer,
+    kSSPControl,
+    kNumGroup
+};
+
+template<PsfGroup> class PSHandler;
+
+// This is the base class for other PSHandler
+template<>
+class PSHandler<PsfGroup::kBaseGroup> {
+public:
+    virtual ~PSHandler<PsfGroup::kBaseGroup>() {};
+};
+
 enum PsfType {
     /* Dense ops */
     DensePush,
@@ -30,7 +48,10 @@ enum PsfType {
     kSyncEmbedding,
     kPushEmbedding,
     kPushSyncEmbedding,
+    /* SSP support */
     kNumPSfunction,
+    kSSPInit,
+    kSSPSync,
 };
 
 template <PsfType>
@@ -61,3 +82,4 @@ getCallBack(Args &&... args) {
 #include "sparse.h"
 #include "misc.h"
 #include "cachetable.h"
+#include "ssp.h"
