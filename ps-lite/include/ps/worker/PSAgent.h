@@ -483,6 +483,21 @@ public:
         _kvworker.recordLoads();
     }
 
+    void SSPSync(Key key, ssp_version_t version) {
+        PSFData<kSSPSync>::Request request(key, Postoffice::Get()->my_rank(), version);
+        bool success = false;
+        auto cb = getCallBack<kSSPSync>(std::ref(success));
+        while (!success) {
+            _kvworker.Wait(_kvworker.Request<kSSPSync>(request, cb));
+        }
+    }
+
+    void SSPInit(Key key, size_t group_size, ssp_version_t tolerance) {
+        PSFData<kSSPInit>::Request request(key, Postoffice::Get()->my_rank(), group_size, tolerance);
+        auto cb = getCallBack<kSSPInit>();
+        _kvworker.Wait(_kvworker.Request<kSSPInit>(request, cb));
+    }
+
     /*
         A simple key mapping for multiple server case
     */

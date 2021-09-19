@@ -124,6 +124,13 @@ void getLoads() {
     PSAgent::Get()->getLoads();
 }
 
+void ssp_init(Key key, size_t group_size, ssp_version_t tolerance) {
+    PSAgent::Get()->SSPInit(key, group_size, tolerance);
+}
+void ssp_sync(Key key, ssp_version_t version) {
+    PSAgent::Get()->SSPSync(key, version);
+}
+
 void StartServer() {
     auto server = new KVServer(0);
     RegisterExitCallback([server]() { delete server; });

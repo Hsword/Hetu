@@ -49,9 +49,9 @@ enum PsfType {
     kPushEmbedding,
     kPushSyncEmbedding,
     /* SSP support */
-    kNumPSfunction,
     kSSPInit,
     kSSPSync,
+    kNumPSfunction,
 };
 
 template <PsfType>
