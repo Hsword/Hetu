@@ -29,7 +29,7 @@ Here we explain some of the flags you may use in test files:
 * config: to specify the configuration file in settings.
 * val: whether using validation.
 * cache: whether using cache in PS/Hybrid mode.
-* bsp: whether using bsp (default asp) in PS/Hybrid mode. (In Hybrid, AllReduce can enforce dense parameters to use bsp, so there will be no stragglers.)
+* bsp: whether using bsp (default asp) in PS/Hybrid mode. (In Hybrid, AllReduce can enforce dense parameters to use bsp, so there will be no stragglers.) bsp 0, asp -1, ssp > 0
 * all: whether to use all criteo data.
 * bound: per embedding entry staleness in cache setting, default to be 100.
 
@@ -84,7 +84,7 @@ python run_hetu.py --model wdl_criteo (--all) (--val)
 ```
 
 ### PS mode execution
-Run ps locally, here we can also run on multiple nodes. 
+Run ps locally, here we can also run on multiple nodes.
 ```bash
 # launch scheduler and server, -n means number of servers, --sched means using scheduler
 python -m hetu.launcher {config} -n 1 --sched

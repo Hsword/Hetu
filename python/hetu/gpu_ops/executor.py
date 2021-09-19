@@ -161,7 +161,7 @@ class HetuConfig(object):
         comm_mode=None,
         use_sparse_pull=True,
         cstable_policy=None,
-        bsp=False,
+        bsp=-1,
         prefetch=True,
         enable_lazy=True,
         cache_bound=100,
@@ -279,6 +279,7 @@ class HetuConfig(object):
                 if self.comm_mode == 'PS':
                     self.comm_mode = 'Hybrid'
         else:
+            self.pipeline_rank , self.pipeline_nrank = 0, 1
             self.context = ctx
 
         on_gpu = ndarray.is_gpu_ctx(self.context)

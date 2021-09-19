@@ -205,8 +205,8 @@ if __name__ == '__main__':
                         help="whether to use all data")
     parser.add_argument("--comm", default=None,
                         help="whether to use distributed setting, can be None, AllReduce, PS, Hybrid")
-    parser.add_argument("--bsp", action="store_true",
-                        help="whether to use bsp instead of asp")
+    parser.add_argument("--bsp", type=int, default=-1,
+                        help="bsp 0, asp -1, ssp > 0")
     parser.add_argument("--cache", default=None, help="cache policy")
     parser.add_argument("--bound", default=100, help="cache bound")
     parser.add_argument("--config", type=str, default=osp.join(osp.dirname(

@@ -39,6 +39,13 @@ class ParameterServerCommunicateOp(Op):
         self._mult_lr(input_vals[0], stream_handle)
         self._update_event(self._push_pull(input_vals[0], stream_handle))
 
+    def _compute_ssp_prefetch(self, input_vals, output_val, stream_handle=None):
+        self._mult_lr(input_vals[0], stream_handle)
+        self._wait(self._push(input_vals[0], stream_handle))
+        self.comm.ssp_sync(self.ps_id, self.ssp_version)
+        self._update_event(self._pull())
+        self.ssp_version += 1
+
     def _compute_bsp_prefetch(self, input_vals, output_val, stream_handle=None):
         self._mult_lr(input_vals[0], stream_handle)
         self._wait(self._push(input_vals[0], stream_handle))
@@ -139,7 +146,7 @@ class ParameterServerCommunicateOp(Op):
             self._wait = self._wait_cache
             self._update_event = self._update_event_cache
             self._mult_lr = self._mult_lr_sparse_cpu
-            if config.bsp and config.prefetch:
+            if config.bsp == 0 and config.prefetch:
                 self._push = self._push_cache
                 self._pull = self._pull_cache
                 self.compute = self._compute_bsp_prefetch
@@ -216,8 +223,12 @@ class ParameterServerCommunicateOp(Op):
             self._push = self._push_dense_gpu
             self._pull = self._pull_dense
             self._push_pull = self._push_pull_dense_gpu
-        if config.bsp and (config.prefetch or not self_sparse):
+        if config.bsp == 0 and (config.prefetch or not self_sparse):
             self.compute = self._compute_bsp_prefetch
+        elif config.bsp > 0 and (config.prefetch or not self_sparse):
+            self.compute = self._compute_ssp_prefetch
+            self.ssp_version = 0
+            self.comm.ssp_init(self.ps_id, config.nrank // config.pipeline_nrank, config.bsp)
         elif config.prefetch or not self_sparse:
             self.compute = self._compute_asp_prefetch
         else:
