@@ -53,7 +53,7 @@ if __name__ == "__main__":
         loss = ht.reduce_mean_op(loss, [0])
         opt = ht.optim.SGDOptimizer(learning_rate=args.learning_rate)
         train_op = opt.minimize(loss)
-        executor = ht.Executor({"train" : [loss, train_op], "validate" : [loss]}, seed=0, pipedream=True)
+        executor = ht.Executor({"train" : [loss, train_op], "validate" : [loss]}, seed=0, pipeline="pipedream")
 
     def validate():
         val_batch_num = steps = valid_set_x.shape[0] // args.batch_size

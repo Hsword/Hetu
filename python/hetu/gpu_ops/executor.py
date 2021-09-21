@@ -142,10 +142,10 @@ class HetuConfig(object):
         'my_eval_nodes',
         'param_allreduce_group',
         'placeholder_to_arr_map',
-        'gpipe',
-        'pipedream',
+        'pipeline',
         'pipeline_rank',
         'pipeline_nrank',
+        'pipeline_dp_rank',
         'dynamic_memory',
         'layer_indices',
         'dist_strategy',
@@ -166,8 +166,7 @@ class HetuConfig(object):
         enable_lazy=True,
         cache_bound=100,
         log_path=None,
-        gpipe=False,
-        pipedream=False,
+        pipeline=None,
         dynamic_memory=False,
         dist_strategy=None,
     ):
@@ -179,8 +178,8 @@ class HetuConfig(object):
             AllRedeuce -> MPI AllReduce
             Hybrid     -> Parameter Server for Sparse Parameter and MPI AllReduce for Dense Parameter
         '''
-        self.gpipe = gpipe
-        self.pipedream = pipedream
+        assert pipeline in ("", "gpipe", "pipedream", "hetpipe")
+        self.pipeline = pipeline
 
         self.eval_node_list = eval_node_list
         self.train_name = train_name
@@ -266,7 +265,7 @@ class HetuConfig(object):
         if context_launch:
             # comm_mode is None <=> only 1 model parallel instance
             self.context = ndarray.gpu(device_id)
-            self.pipeline_rank , self.pipeline_nrank = get_pipeline_stage_info(eval_node_list, self.context)
+            self.pipeline_rank, self.pipeline_nrank, self.pipeline_dp_rank = get_pipeline_stage_info(eval_node_list, self.context)
             self.p2p_stream = create_stream_handle(
                 self.context) if init_p2p_stream else None
             self.my_eval_nodes, self.param_allreduce_group, self.layer_indices = assign_context_by_traverse_nodes(
@@ -279,7 +278,7 @@ class HetuConfig(object):
                 if self.comm_mode == 'PS':
                     self.comm_mode = 'Hybrid'
         else:
-            self.pipeline_rank , self.pipeline_nrank = 0, 1
+            self.pipeline_rank , self.pipeline_nrank, self.pipeline_dp_rank = 0, 1, self.rank
             self.context = ctx
 
         on_gpu = ndarray.is_gpu_ctx(self.context)
@@ -358,9 +357,9 @@ class Executor(object):
         self.config = config
 
         def get_sub_executor(k):
-            if config.gpipe and k == "train":
+            if config.pipeline == "gpipe" and k == "train":
                 return SubExecutor4Gpipe
-            elif config.pipedream and k == "train":
+            elif (config.pipeline == "pipedream" or config.pipeline == "hetpipe") and k == "train":
                 return SubExecutor4Pipedream
             return SubExecutor
 
@@ -1055,7 +1054,7 @@ class SubExecutor(object):
                              for node in eval_node_list])
         self.inference = inference
 
-        if config.gpipe or config.pipedream:
+        if config.pipeline:
             assert self.inference
             self.eval_node_list = []
             # Remove the last pipeline send on worker 1...n-1 ( not needed in inference stage) and the optimizer
@@ -1434,7 +1433,7 @@ class SubExecutor(object):
             feed_shapes[node] = local_shape
 
         # in pipedream, we should retrieve the latest model parameter.
-        if self.config.pipedream:
+        if self.config.pipeline == "pipedream":
             self.node_to_arr_map.update(self.config.placeholder_to_arr_map)
 
         # reallocation, infer shapes and allocate memory
@@ -1684,12 +1683,16 @@ def get_pipeline_stage_info(node_list, ctx):
     total_stage = ( max(stage_index.values()) + 1 ) // 2
     # find out my stage index, which is the biggest stage number in the forward pass
     my_stage = set()
+    # dp rank (data parallel rank) is used to let dataloader know which part of data it should load
+    dp_rank = set()
     for node, stage in stage_index.items():
         if ctx in node.raw_ctx._workers and stage < total_stage:
             my_stage.add(stage)
+            dp_rank.add(node.raw_ctx._workers.index(ctx))
     my_stage = max(my_stage)
     assert my_stage >= 0
-    return my_stage, total_stage
+    assert len(dp_rank) == 1
+    return my_stage, total_stage, dp_rank.pop()
 
 
 def topo_sort_with_hook(node_list, config):
