@@ -65,6 +65,9 @@ struct PSFData;
     * See examples in dense.h sparse.h ...
 */
 
+template<>
+struct PSFData<kNumPSfunction> {};
+
 /*
   getCallBack, use this to bind _callback to the get the real callback which can
   be stored example: getCallBack<DensePull>(target);
@@ -76,7 +79,17 @@ getCallBack(Args &&... args) {
                      std::forward<Args>(args)...);
 }
 
+const char* getPSFunctionName(const PsfType &ftype);
+
 } // namespace ps
+
+
+// add hash function so that it can be used in unordered_map
+namespace std {
+  template <> struct hash<ps::PsfType> {
+    size_t operator() (const ps::PsfType &ftype) const { return static_cast<size_t>(ftype); }
+  };
+}
 
 #include "dense.h"
 #include "sparse.h"

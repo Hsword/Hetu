@@ -9,6 +9,7 @@ typedef unsigned long long ssp_version_t;
 template <>
 struct PSFData<kSSPInit> {
     static constexpr PsfGroup group = PsfGroup::kSSPControl;
+    static constexpr const char* name = "SSPInit";
     using Request = tuple<
         Key, // SSP group key
         int, // worker rank
@@ -23,6 +24,7 @@ struct PSFData<kSSPInit> {
 template <>
 struct PSFData<kSSPSync> {
     static constexpr PsfGroup group = PsfGroup::kSSPControl;
+    static constexpr const char* name = "SSPSync";
     using Request = tuple<
         Key, // SSP group key
         int, // worker rank

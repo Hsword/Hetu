@@ -7,6 +7,7 @@ namespace ps {
 template <>
 struct PSFData<DensePull> {
     static constexpr PsfGroup group = PsfGroup::kParameterServer;
+    static constexpr const char* name = "DensePull";
     using Request = tuple<Key,   // key
                           size_t // len
                           >;
@@ -22,6 +23,7 @@ struct PSFData<DensePull> {
 template <>
 struct PSFData<DensePush> {
     static constexpr PsfGroup group = PsfGroup::kParameterServer;
+    static constexpr const char* name = "DensePush";
     using Request = tuple<Key,          // key
                           size_t,       // len
                           SArray<float> // data
@@ -34,6 +36,7 @@ struct PSFData<DensePush> {
 template <>
 struct PSFData<DDPushPull> {
     static constexpr PsfGroup group = PsfGroup::kParameterServer;
+    static constexpr const char* name = "DDPushPull";
     using Request = PSFData<DensePush>::Request;
     using Response = PSFData<DensePull>::Response;
 
