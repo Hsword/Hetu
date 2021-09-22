@@ -223,9 +223,7 @@ class ParameterServerCommunicateOp(Op):
             self._push = self._push_dense_gpu
             self._pull = self._pull_dense
             self._push_pull = self._push_pull_dense_gpu
-        if config.bsp == 0 and (config.prefetch or not self_sparse):
-            self.compute = self._compute_bsp_prefetch
-        elif config.bsp > 0 and (config.prefetch or not self_sparse):
+        if config.bsp >= 0 and (config.prefetch or not self_sparse):
             self.compute = self._compute_ssp_prefetch
             self.ssp_version = 0
             self.comm.ssp_init(self.ps_id, config.nrank // config.pipeline_nrank, config.bsp)
