@@ -87,21 +87,10 @@ class DistConfig(object):
 class Strategy(object):
     def __init__(self):
         # TODO: modify executor's logic to use communicators
-        pass
+        self.settings = DistConfig('/tmp/hetu_config.yml')
 
     def set_raw_ctxs(self):
         raise NotImplementedError
-
-    def iter_nodes(self, eval_node_list):
-        visited = set()
-        appending = list(eval_node_list)
-        while appending:
-            node = appending.pop(0)
-            if node in visited:
-                continue
-            appending.extend(list(node.inputs))
-            visited.add(node)
-            yield node
 
     def get_forward_eval_nodes(self, eval_node_list):
         from .optimizer import OptimizerOp
@@ -119,7 +108,6 @@ class Strategy(object):
 class DataParallel(Strategy):
     def __init__(self, aggregate=None):
         super().__init__()
-        self.settings = DistConfig('/tmp/hetu_config.yml')
         if aggregate is None:
             aggregate = 'ps' if self.settings.enable_PS else 'allreduce'
         aggregate = aggregate.lower()
@@ -137,12 +125,19 @@ class DataParallel(Strategy):
         self.raw_ctx = DeviceGroup(ctxs)
 
     def set_raw_ctxs(self, eval_node_list):
-        for node in self.iter_nodes(eval_node_list):
+        def dfs(node):
+            if node in visited:
+                return
+            visited.add(node)
+            for n in node.inputs:
+                dfs(n)
             if isinstance(node, PlaceholderOp) and node.trainable and not node.is_embed:
                 node.raw_ctx = self.raw_ctx
             else:
                 node.raw_ctx = self.embedding_raw_ctx
-
+        visited = set()
+        for node in eval_node_list:
+            dfs(node)
         return self.raw_ctx
 
 
@@ -150,7 +145,6 @@ class ModelParallel4CNN(Strategy):
     def __init__(self):
         super().__init__()
         # only for CNN and FC layers
-        self.settings = DistConfig('/tmp/hetu_config.yml')
         ctxs = ()
         for host, num_worker in self.settings.workers.items():
             ctxs += tuple(host + ':gpu:' + str(i)
@@ -168,21 +162,21 @@ class ModelParallel4CNN(Strategy):
         from .gpu_ops.SoftmaxCrossEntropySparse import SoftmaxCrossEntropySparseOp
         from .gpu_ops.Broadcast import BroadcastToOp
 
-        def set_raw_context(node, ctx):
+        def dfs(node, ctx):
             if node in visited:
                 return
             visited.add(node)
             if isinstance(node, (SoftmaxCrossEntropyOp, SoftmaxCrossEntropySparseOp)):
-                set_raw_context(node.inputs[0], self.raw_ctx)
-                set_raw_context(node.inputs[1], self.rank0_ctx)
+                dfs(node.inputs[0], self.raw_ctx)
+                dfs(node.inputs[1], self.rank0_ctx)
                 node.inputs[0] = ht.dispatch(node.inputs[0])
             elif isinstance(node, BroadcastToOp) and isinstance(node.inputs[0], PlaceholderOp):
-                set_raw_context(node.inputs[0], ctx)
+                dfs(node.inputs[0], ctx)
                 node.inputs[0] = ht.dispatch(
                     node.inputs[0], {1: self.num_ctxs})
             else:
                 for n in node.inputs:
-                    set_raw_context(n, ctx)
+                    dfs(n, ctx)
                 if isinstance(node, (Conv2dOp, MatMulOp)):
                     split_dim = {Conv2dOp: 0, MatMulOp: 1}[type(node)]
                     new_node_A = ht.dispatch(node.inputs[0])
@@ -191,22 +185,12 @@ class ModelParallel4CNN(Strategy):
                     node.inputs = [new_node_A, new_node_B]
             node.raw_ctx = ctx
 
-        def naive_set_raw_context(node):
-            if node in visited:
-                return
-            visited.add(node)
-            for n in node.inputs:
-                naive_set_raw_context(n)
-            if node.raw_ctx is None:
-                node.raw_ctx = self.rank0_ctx
-
         eval_nodes, opt = self.get_forward_eval_nodes(eval_node_list)
         assert opt is not None
         visited = set()
-        set_raw_context(eval_nodes[0], self.rank0_ctx)
-        opt.re_minimize()
-        visited = set()
-        naive_set_raw_context(opt)
+        dfs(eval_nodes[0], self.rank0_ctx)
+        with ht.context(self.rank0_ctx):
+            opt.re_minimize()
 
         return self.raw_ctx
 
@@ -217,7 +201,6 @@ class OneWeirdTrick4CNN(Strategy):
     def __init__(self):
         super().__init__()
         # only for CNN and FC layers
-        self.settings = DistConfig('/tmp/hetu_config.yml')
         ctxs = ()
         for host, num_worker in self.settings.workers.items():
             ctxs += tuple(host + ':gpu:' + str(i)
@@ -236,27 +219,27 @@ class OneWeirdTrick4CNN(Strategy):
         from .gpu_ops.Broadcast import BroadcastToOp
         from .dataloader import DataloaderOp
 
-        def set_raw_context(node, ctx):
+        def dfs(node, ctx):
             if node in visited:
                 return
             visited.add(node)
             if isinstance(node, (SoftmaxCrossEntropyOp, SoftmaxCrossEntropySparseOp)):
-                set_raw_context(node.inputs[0], self.raw_ctx)
-                set_raw_context(node.inputs[1], self.rank0_ctx)
+                dfs(node.inputs[0], self.raw_ctx)
+                dfs(node.inputs[1], self.rank0_ctx)
                 node.inputs[0] = ht.dispatch(node.inputs[0])
             elif isinstance(node, BroadcastToOp) and isinstance(node.inputs[0], PlaceholderOp) and isinstance(node.inputs[1], MatMulOp):
-                set_raw_context(node.inputs[0], ctx)
+                dfs(node.inputs[0], ctx)
                 node.inputs[0] = ht.dispatch(
                     node.inputs[0], {1: self.num_ctxs})
             elif isinstance(node, Conv2dOp) and isinstance(node.inputs[0], (DataloaderOp, PlaceholderOp)):
-                set_raw_context(node.inputs[0], self.raw_ctx)
-                set_raw_context(node.inputs[1], self.raw_ctx)
+                dfs(node.inputs[0], self.raw_ctx)
+                dfs(node.inputs[1], self.raw_ctx)
                 node.inputs[0] = ht.dispatch(
                     node.inputs[0], {0: self.num_ctxs})
                 node.inputs[1] = ht.dispatch(node.inputs[1])
             else:
                 for n in node.inputs:
-                    set_raw_context(n, ctx)
+                    dfs(n, ctx)
                 if isinstance(node, MatMulOp):
                     new_node_A = ht.dispatch(node.inputs[0])
                     new_node_B = ht.dispatch(
@@ -268,21 +251,11 @@ class OneWeirdTrick4CNN(Strategy):
                     node.inputs[0] = ht.dispatch(node.inputs[0])
             node.raw_ctx = ctx
 
-        def naive_set_raw_context(node):
-            if node in visited:
-                return
-            visited.add(node)
-            for n in node.inputs:
-                naive_set_raw_context(n)
-            if node.raw_ctx is None:
-                node.raw_ctx = self.rank0_ctx
-
         eval_nodes, opt = self.get_forward_eval_nodes(eval_node_list)
         assert opt is not None
         visited = set()
-        set_raw_context(eval_nodes[0], self.rank0_ctx)
-        opt.re_minimize()
-        visited = set()
-        naive_set_raw_context(opt)
+        dfs(eval_nodes[0], self.rank0_ctx)
+        with ht.context(self.rank0_ctx):
+            opt.re_minimize()
 
         return self.raw_ctx

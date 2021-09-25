@@ -848,8 +848,6 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 # we assume that in pipeline + data parallel mode,
                 # devices number of each stage is equal
                 # the device in correspondent place will communicate with each other
-                assert node.raw_ctx.worker_num == n.raw_ctx.worker_num, \
-                    'In pipeline + data parallel, devices number of each stage should be equal!'
 
                 if isinstance(n, (DispatchOp, DispatchGradientOp)):
                     # here in every context each device appear only once
@@ -869,6 +867,8 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                             node.inputs[i] = receive_model_parallel(
                                 real_input, node)
                 else:
+                    assert node.raw_ctx.worker_num == n.raw_ctx.worker_num, \
+                        'In pipeline + data parallel, devices number of each stage should be equal!'
                     assert mp_index == mp_index_map[n]
                     if mp_index < 0:
                         # handle receiving
