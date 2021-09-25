@@ -451,6 +451,21 @@ class Executor(object):
             node.event.sync()
         self.ps_comm.getLoads()
 
+    def reduceMean(self, arr, root=0):
+        # only used for loss and accuracy, etc.
+        # the communicator is formed by the context of loss
+        if 'loss' in self.config.param_allreduce_group:
+            comm = self.config.param_allreduce_group['loss']
+            if comm.local_rank == -1:
+                # in case local context is not in communicator
+                return arr
+            local_array = ndarray.array(arr, ndarray.cpu())
+            comm.dlarrayNcclReduce(local_array, local_array, root)
+            comm.stream.sync()
+            return local_array.asnumpy() / comm.nrank
+        else:
+            return arr
+
     def __del__(self):
         if self.config.comp_stream is not None:
             self.config.comp_stream.sync()

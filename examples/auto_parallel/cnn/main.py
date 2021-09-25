@@ -104,6 +104,7 @@ if __name__ == "__main__":
         'owt': ht.dist.OneWeirdTrick4CNN(),
     }[args.strategy]
     executor = ht.Executor(eval_nodes, dist_strategy=strategy)
+    printing = executor.rank in (0, None)
 
     # training
     running_time = 0
@@ -123,11 +124,12 @@ if __name__ == "__main__":
                 target = targets[cnt]
             loss_val, predict_y, _ = executor.run(
                 'train', feed_dict={x: image, y_: target}, convert_to_numpy_ret_vals=True)
-            if executor.rank == 0:
+            if loss_val is not None:
                 loss_all += loss_val[0]
                 acc_all += np.sum(np.equal(target, np.argmax(predict_y, 1)))
             cnt += 1
-        if executor.rank == 0:
+        loss_all, acc_all = list(executor.reduceMean([loss_all, acc_all]))
+        if printing:
             loss_all /= args.log_iterations
             acc_all /= args.log_iterations
             print('Train loss = %f' % loss_all)
@@ -135,7 +137,7 @@ if __name__ == "__main__":
         if args.timing:
             end = time()
             during_time = end - start
-            if executor.rank == 0:
+            if printing:
                 print("Running time of current epoch = %fs" % (during_time))
             if i != 0:
                 running_time += during_time
@@ -148,18 +150,18 @@ if __name__ == "__main__":
                 target = target.numpy()
                 loss_val, valid_y_predicted = executor.run(
                     'validate', feed_dict={x: image, y_: target}, convert_to_numpy_ret_vals=True)
-                if executor.rank == 0:
+                if printing:
                     val_loss_all += loss_val[0]
                     acc_all += np.sum(np.equal(target,
                                                np.argmax(predict_y, 1)))
                 batch_num += 1
-            if executor.rank == 0:
+            if printing:
                 val_loss_all /= batch_num
                 val_acc_all /= batch_num
                 print("Validation loss = %f" % val_loss_all)
                 print("Validation accuracy = %f" % val_acc_all)
     if args.timing:
-        if executor.rank == 0:
+        if printing:
             print("*"*50)
             print("Running time of total %d iterations = %fs" %
                   (args.log_num * args.log_iterations, running_time))

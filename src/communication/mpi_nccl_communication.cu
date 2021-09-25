@@ -137,6 +137,14 @@ void _ncclAllReduce(const void *sendbuff, void *recvbuff, int size,
                             _get_proper_redop(op), comm, stream));
 }
 
+void _ncclReduce(const void *sendbuff, void *recvbuff, size_t count,
+                 int datatype, int op, int root, ncclComm_t comm,
+                 cudaStream_t stream) {
+    NCCLCHECK(ncclReduce(sendbuff, recvbuff, count,
+                         _get_proper_datatype(datatype), _get_proper_redop(op),
+                         root, comm, stream));
+}
+
 void _ncclBroadcast(const void *sendbuff, void *recvbuff, int size,
                     int datatype, int root, ncclComm_t comm,
                     cudaStream_t stream) {
@@ -174,6 +182,20 @@ void dlarrayAllReduce(DLArray *input_array, DLArray *output_array, int datatype,
     cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
     _ncclAllReduce(input_data_buffer, output_data_buffer, size, datatype, op,
                    comm, stream);
+}
+
+void dlarrayReduce(DLArray *input_array, DLArray *output_array, int datatype,
+                   int op, int root, ncclComm_t comm,
+                   DLStreamHandle stream_handle) {
+    int size = 1;
+    for (int i = 0; i < input_array->ndim; i++) {
+        size = size * input_array->shape[i];
+    }
+    float *input_data_buffer = (float *)(input_array->data);
+    float *output_data_buffer = (float *)(output_array->data);
+    cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
+    _ncclReduce(input_data_buffer, output_data_buffer, size, datatype, op, root,
+                comm, stream);
 }
 
 void dlarrayBroadcast(DLArray *input_array, DLArray *output_array, int datatype,

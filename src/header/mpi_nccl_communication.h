@@ -56,6 +56,9 @@ void GroupStart();
 void GroupEnd();
 void dlarrayAllReduce(DLArray *input_array, DLArray *output_array, int datatype,
                       int op, ncclComm_t comm, DLStreamHandle stream_handle);
+void dlarrayReduce(DLArray *input_array, DLArray *output_array, int datatype,
+                   int op, int root, ncclComm_t comm,
+                   DLStreamHandle stream_handle);
 void dlarrayBroadcast(DLArray *input_array, DLArray *output_array, int datatype,
                       int root, ncclComm_t comm, DLStreamHandle stream_handle);
 void dlarrayAllGather(DLArray *array, DLArray *output_array, int datatype,

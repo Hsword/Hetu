@@ -805,6 +805,19 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                                     comm_groups[allreduce_devices] = new_group_comm(
                                         allreduce_devices)
                             param_allreduce_group[param] = comm_groups[allreduce_devices]
+            # here we establish a group comm for loss
+            # in case users wants to reduce loss and accuracy to one worker
+            loss_node = node.optimizer.loss
+            assert mp_index_map[loss_node] < 0, 'Currently loss cannot occur in model parallel.'
+            if loss_node.raw_ctx.worker_num > 1:
+                allreduce_devices = loss_node.raw_ctx.get_sorted()
+                if allreduce_devices not in comm_groups:
+                    if len(allreduce_devices) == mpi_comm.nrank:
+                        comm_groups[allreduce_devices] = mpi_comm
+                    else:
+                        comm_groups[allreduce_devices] = new_group_comm(
+                            allreduce_devices)
+                param_allreduce_group['loss'] = comm_groups[allreduce_devices]
         elif isinstance(node, DispatchOp):
             real_node = node.inputs[0]
             assign_ctx(real_node)

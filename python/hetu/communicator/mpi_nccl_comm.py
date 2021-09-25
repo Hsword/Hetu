@@ -16,14 +16,18 @@ def _load_nccl_lib():
     lib = CDLL(path_to_so_file, RTLD_LOCAL)
     return lib
 
+
 lib_mpi_nccl = _load_nccl_lib()
 # lib_mpi_nccl = CDLL("./lib_mpi_nccl_runtime_api.so", RTLD_LOCAL)
+
 
 def GroupStart():
     lib_mpi_nccl.GroupStart()
 
+
 def GroupEnd():
     lib_mpi_nccl.GroupEnd()
+
 
 class ncclDataType_t(Enum):
     ncclInt8 = 0
@@ -269,6 +273,10 @@ class NCCL_Communicator():
     def dlarrayNcclAllReduce(self, input_arr, output_arr, datatype, reduceop, executor_stream=None):
         lib_mpi_nccl.dlarrayAllReduce(input_arr.handle, output_arr.handle, c_int(datatype.value), c_int(
             reduceop.value), self.ncclcomm, executor_stream.handle if executor_stream else self.stream.handle)
+
+    def dlarrayNcclReduce(self, input_arr, output_arr, root, datatype=ncclDataType_t.ncclFloat32, reduceop=ncclRedOp_t.ncclSum, executor_stream=None):
+        lib_mpi_nccl.dlarrayReduce(input_arr.handle, output_arr.handle, c_int(datatype.value), c_int(
+            reduceop.value), c_int(root), self.ncclcomm, executor_stream.handle if executor_stream else self.stream.handle)
 
     def dlarrayBroadcast(self, input_arr, output_arr, datatype, root, executor_stream=None):
         lib_mpi_nccl.dlarrayBroadcast(input_arr.handle, output_arr.handle, c_int(datatype.value), c_int(
