@@ -3,6 +3,7 @@ import numpy as np
 from .. import ndarray
 from .. import stream
 from ..context import get_current_context, DeviceGroup
+from copy import copy, deepcopy
 G_NODE_ID = 0
 
 
@@ -73,6 +74,20 @@ class Op(object):
     def __repr__(self):
         """Allow representation to display node name."""
         return self.name
+
+    def __deepcopy__(self, memo):
+        # this function should be used before graph splits and hooks (in distributed strategies)
+        # use copy for DeviceGroup and NDArray (shared data); use deepcopy for nodes and optimizer
+        if id(self) not in memo:
+            new_op = copy(self)
+            memo[id(self)] = new_op
+            for k, v in self.__dict__.items():
+                if k in ('inputs', 'grad_nodes'):
+                    new_op.__dict__[k] = [
+                        deepcopy(n, memo) for n in v]
+                elif k in ('grad_node', 'forward_node', 'optimizer'):
+                    new_op.__dict__[k] = deepcopy(v, memo)
+        return memo[id(self)]
 
     def compute(self, input_vals, output_val, stream_handle=None):
         """Given values of input nodes, compute the output value.
