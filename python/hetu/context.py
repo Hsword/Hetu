@@ -337,6 +337,8 @@ def traverse_dfs(node, node_strategy, devices, nrank):
 
 
 def infer_states(node_list):
+    # transfer a graph with Dispatch(Gradient)Ops to state maps
+    # in this function we remove Dispatch(Gradient)Ops
     from .dataloader import DataloaderOp
     from .optimizer import OptimizerOp
     from .gpu_ops.Dispatch import DispatchOp, DispatchGradientOp
@@ -425,6 +427,15 @@ def infer_states(node_list):
             if node_cur_state_map[node].valid(infer_order):
                 valid_nodes.add(node)
 
+    def remove_dispatch(node):
+        if node in visited:
+            return
+        visited[node] = True
+        for i, n in enumerate(node.inputs):
+            remove_dispatch(n)
+            if isinstance(n, (DispatchOp, DispatchGradientOp)):
+                node.inputs[i] = n.inputs[0]
+
     visited = {}
     node_cur_state_map = {}  # save nodes' current state
     node_tar_state_map = {}  # save nodes' target state
@@ -460,6 +471,11 @@ def infer_states(node_list):
             chance = True
         last_cnt = valid_cnt
 
+    # remove Dispatch(Gradient)Ops
+    visited = {}
+    for node in node_list:
+        remove_dispatch(node)
+
     return node_cur_state_map, node_tar_state_map
 
 
@@ -469,7 +485,6 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
     from .gpu_ops.PipelineSend import pipeline_send_op
     from .gpu_ops.PipelineReceive import pipeline_receive_op
     from .gpu_ops.Variable import PlaceholderOp
-    from .gpu_ops.Dispatch import DispatchOp, DispatchGradientOp
     from .gpu_ops.Concatenate import concatenate_op
     from .gpu_ops.Split import split_op
     from .gpu_ops.Sum import sum_op
@@ -750,19 +765,17 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 ori_grad = node.inputs[ind]
                 if mp_index_map.get(param, -1) >= 0:
                     # consider the situation that parameter is on model parallel devices
-                    real_grad = ori_grad.inputs[0]
-                    assert real_grad.raw_ctx == param.raw_ctx
-                    grads.append(real_grad)
+                    assert ori_grad.raw_ctx == param.raw_ctx
+                    grads.append(ori_grad)
                 else:
                     if param in trainable_params:
-                        new_grad = receive_model_parallel(ori_grad.inputs[0], param) if isinstance(
-                            ori_grad, (DispatchOp, DispatchGradientOp)) else ori_grad
+                        new_grad = receive_model_parallel(
+                            ori_grad, param) if ori_grad in node_tar_state_map else ori_grad
                         grads.append(new_grad)
-                    elif isinstance(ori_grad, (DispatchOp, DispatchGradientOp)):
-                        real_input = ori_grad.inputs[0]
-                        my_pos = dp_index_map[real_input]
+                    elif ori_grad in node_tar_state_map:
+                        my_pos = dp_index_map[ori_grad]
                         if my_pos >= 0:
-                            send_model_parallel(ori_grad.inputs[0], param)
+                            send_model_parallel(ori_grad, param)
                 layer_id += 2
             if trainable_params:
                 # indices = [original_params.index(param) for param in trainable_params]
@@ -818,13 +831,6 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                         comm_groups[allreduce_devices] = new_group_comm(
                             allreduce_devices)
                 param_allreduce_group['loss'] = comm_groups[allreduce_devices]
-        elif isinstance(node, DispatchOp):
-            real_node = node.inputs[0]
-            assign_ctx(real_node)
-        elif isinstance(node, DispatchGradientOp):
-            real_node = node.inputs[0]
-            assign_ctx(real_node)
-            assign_ctx(node.inputs[1])
         else:
             # now we only support SAME model parallel in data parallel
             # and 1 context can only appear once
@@ -847,12 +853,11 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                         dp_index_map[n] = -1
                     continue
                 assign_ctx(n)
-                if isinstance(n, (DispatchOp, DispatchGradientOp)):
-                    real_node = n.inputs[0]
-                    if isinstance(real_node, PlaceholderOp) and mp_index_map[real_node] >= 0:
-                        node_status = node_tar_state_map[real_node]
-                        real_node.reshape_in_mp(node_status.map_dev_to_index(
-                            mp_index_map[real_node]), node_status.state)
+                if n in node_tar_state_map:
+                    if isinstance(n, PlaceholderOp) and mp_index_map[n] >= 0:
+                        node_status = node_tar_state_map[n]
+                        n.reshape_in_mp(node_status.map_dev_to_index(
+                            mp_index_map[n]), node_status.state)
             for i, n in enumerate(node.inputs):
                 if isinstance(n, DataloaderOp):
                     if dp_index >= 0 and n in node_list and n not in my_eval_nodes:
@@ -862,23 +867,20 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
                 # devices number of each stage is equal
                 # the device in correspondent place will communicate with each other
 
-                if isinstance(n, (DispatchOp, DispatchGradientOp)):
+                if n in node_tar_state_map:
                     # here in every context each device appear only once
                     # TODO: consider whether or not release the constraint above?
-                    real_input = n.inputs[0]
-                    if dp_index >= 0 and dp_index_map[real_input] < 0:
-                        node.inputs[i] = receive_model_parallel(
-                            real_input, node)
-                    elif dp_index < 0 and dp_index_map[real_input] >= 0:
-                        send_model_parallel(real_input, node)
-                    elif dp_index >= 0 and dp_index_map[real_input] >= 0:
-                        if isinstance(real_input, PlaceholderOp):
-                            assert real_input.raw_ctx == node.raw_ctx
-                            node.inputs[i] = real_input
+                    if dp_index >= 0 and dp_index_map[n] < 0:
+                        node.inputs[i] = receive_model_parallel(n, node)
+                    elif dp_index < 0 and dp_index_map[n] >= 0:
+                        send_model_parallel(n, node)
+                    elif dp_index >= 0 and dp_index_map[n] >= 0:
+                        if isinstance(n, PlaceholderOp):
+                            assert n.raw_ctx == node.raw_ctx
+                            node.inputs[i] = n
                         else:
-                            send_model_parallel(real_input, node)
-                            node.inputs[i] = receive_model_parallel(
-                                real_input, node)
+                            send_model_parallel(n, node)
+                            node.inputs[i] = receive_model_parallel(n, node)
                 else:
                     assert node.raw_ctx.worker_num == n.raw_ctx.worker_num, \
                         'In pipeline + data parallel, devices number of each stage should be equal!'
