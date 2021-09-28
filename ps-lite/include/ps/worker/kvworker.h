@@ -19,12 +19,6 @@ struct KVWorkerRegisterHelper;
 class KVWorker : private KVApp {
 public:
     Partitioner *par;
-    std::string PsfTypeString[15] = {
-        "DensePush",      "DensePull",          "DDPushPull",
-        "SparsePush",     "SparsePull",         "SDPushPull",
-        "SSPushPull",     "ParamInit",          "ParamClear",
-        "ParamSave",      "ParamLoad",          "kSyncEmbedding",
-        "kPushEmbedding", "kPushSyncEmbedding", "kNumPSfunction"};
     /**
      * \brief constructor
      *
@@ -49,7 +43,7 @@ public:
 
     void recordLoads() {
         for (auto iter = loads.begin(); iter != loads.end(); ++iter) {
-            logOut << PsfTypeString[iter->first] << ": " << (iter->second).first
+            logOut << getPSFunctionName(iter->first) << ": " << (iter->second).first
                    << ' ' << (iter->second).second << std::endl;
         }
         logOut << std::endl;
@@ -92,7 +86,7 @@ public:
         tupleEncode(request, msg.data);
         if (logOut.is_open()) {
             for (auto x : msg.data) {
-                loads[int(ftype)].first += x.size();
+                loads[ftype].first += x.size();
             }
         }
         msg.meta.app_id = obj_->app_id();
@@ -111,7 +105,7 @@ private:
         typename PSFData<ftype>::Response response;
         if (logOut.is_open()) {
             for (auto x : msg.data) {
-                loads[int(ftype)].second += x.size();
+                loads[ftype].second += x.size();
             }
         }
         tupleDecode(response, msg.data);
@@ -120,7 +114,7 @@ private:
     }
     template <PsfType, typename>
     friend struct KVAppRegisterHelper;
-    std::unordered_map<int, std::pair<long long, long long>> loads;
+    std::unordered_map<PsfType, std::pair<long long, long long>> loads;
     std::ofstream logOut;
 };
 

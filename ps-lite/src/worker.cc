@@ -8,11 +8,9 @@ void Worker::parameter_init(int node_name, ParamType ptype, size_t len,
                             double init_b, unsigned long long seed,
                             OptType otype, SArray<float> lrs) {
     PSAgent::Get()->registerTensor(node_name, ptype, len, width);
-    if (MyRank() == 0) {
-        PSAgent::Get()->ParameterInit(node_name, init_type, init_a, init_b,
-                                      seed, otype, lrs);
-        PSAgent::Get()->wait(node_name);
-    }
+    PSAgent::Get()->ParameterInit(node_name, init_type, init_a, init_b,
+                                    seed, otype, lrs);
+    PSAgent::Get()->wait(node_name);
     Postoffice::Get()->Barrier(0, kWorkerGroup);
 }
 

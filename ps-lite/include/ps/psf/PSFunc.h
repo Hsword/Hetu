@@ -11,6 +11,24 @@ using std::function;
 
 namespace ps {
 
+// PS Functions are declared within groups
+// Each function group will act independently, meaning that one call in group A will not affect the state in B
+enum class PsfGroup {
+    kBaseGroup,
+    kParameterServer,
+    kSSPControl,
+    kNumGroup
+};
+
+template<PsfGroup> class PSHandler;
+
+// This is the base class for other PSHandler
+template<>
+class PSHandler<PsfGroup::kBaseGroup> {
+public:
+    virtual ~PSHandler<PsfGroup::kBaseGroup>() {};
+};
+
 enum PsfType {
     /* Dense ops */
     DensePush,
@@ -30,6 +48,9 @@ enum PsfType {
     kSyncEmbedding,
     kPushEmbedding,
     kPushSyncEmbedding,
+    /* SSP support */
+    kSSPInit,
+    kSSPSync,
     kNumPSfunction,
 };
 
@@ -44,6 +65,9 @@ struct PSFData;
     * See examples in dense.h sparse.h ...
 */
 
+template<>
+struct PSFData<kNumPSfunction> {};
+
 /*
   getCallBack, use this to bind _callback to the get the real callback which can
   be stored example: getCallBack<DensePull>(target);
@@ -55,9 +79,20 @@ getCallBack(Args &&... args) {
                      std::forward<Args>(args)...);
 }
 
+const char* getPSFunctionName(const PsfType &ftype);
+
 } // namespace ps
+
+
+// add hash function so that it can be used in unordered_map
+namespace std {
+  template <> struct hash<ps::PsfType> {
+    size_t operator() (const ps::PsfType &ftype) const { return static_cast<size_t>(ftype); }
+  };
+}
 
 #include "dense.h"
 #include "sparse.h"
 #include "misc.h"
 #include "cachetable.h"
+#include "ssp.h"

@@ -18,7 +18,6 @@ class PipelineSendOp(Op):
 
     def compute(self, input_vals, output_val, stream_handle=None, group_call=False):
         assert not self.on_cpu, "PipelineSendOp only support P2P communication between gpus"
-        # we dont need sync and event for send
         if group_call:
             GroupStart()
 
@@ -51,6 +50,7 @@ class PipelineSendOp(Op):
         # blocked until previous computations are finished
         if self.on_gpu and self.inputs[0].event is None:
             self.inputs[0].event = create_event_handle(self.ctx)
+        self.event = create_event_handle(self.ctx)
 
 
 def pipeline_send_op(node, destination, comm, stream=None, ctx=None):

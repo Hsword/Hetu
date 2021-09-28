@@ -26,7 +26,7 @@ class EmbeddingLookUp(Op):
 
     def _compute_sparsepull_from_ps(self, input_vals, output_val, stream_handle=None):
         self.event.sync()
-        if self.bsp:
+        if self.bsp == 0:
             self.comm.BarrierWorker()
         self.comm.SparsePull(
             self.ps_id, input_vals[1].handle, output_val.handle)
@@ -34,7 +34,7 @@ class EmbeddingLookUp(Op):
 
     def _compute_sparsepull_from_cache(self, input_vals, output_val, stream_handle=None):
         self.event.sync()
-        if self.bsp:
+        if self.bsp == 0:
             self.comm.BarrierWorker()
         ts = self.inputs[0].cache.embedding_lookup(input_vals[1], output_val)
         self.event.update_ts(ts)
