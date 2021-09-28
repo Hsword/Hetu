@@ -499,11 +499,6 @@ class SubExecutor(object):
                 elif not isinstance(node, OptimizerOp):
                     self.eval_node_list.append(node)
             self.global_eval_nodes = eval_node_list
-        elif config.p2p_stream:
-            self.run_results_indices = [eval_node_list.index(
-                node) if node in eval_node_list else -1 for node in config.my_eval_nodes]
-            self.eval_node_list = config.my_eval_nodes
-            self.global_eval_nodes = eval_node_list
 
         if inference == False:
             self.topo_order = find_topo_sort(self.eval_node_list)
@@ -936,8 +931,7 @@ class SubExecutor(object):
             if len(grouping_nodes) > 1:
                 GroupEnd()
             for node in grouping_nodes:
-                if isinstance(node, PipelineReceiveOp):
-                    node.event.record(p2p_stream)
+                node.event.record(p2p_stream)
             grouping_nodes.clear()
         for node in self.computing_nodes:
             if self.dynamic_memory:
@@ -1036,15 +1030,10 @@ class SubExecutor(object):
                     results[i] = results[i].asnumpy()
 
         # remap to original order in model parallel
-        if self.config.gpipe or self.config.pipedream:
+        if self.config.pipeline:
             results = filter(lambda x: x[0] in self.global_eval_nodes,
                              zip(self.eval_node_list, results))
             results = [x[1] for x in results]
-        elif self.use_p2p:
-            new_results = [None for _ in self.global_eval_nodes]
-            for i, j in enumerate(self.run_results_indices):
-                new_results[j] = results[i]
-            results = new_results
 
         return results
 

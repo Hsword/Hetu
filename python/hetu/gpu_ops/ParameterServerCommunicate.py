@@ -21,8 +21,7 @@ class ParameterServerCommunicateOp(Op):
         # the optimizer only support fixed learning rate, no scheduler supported.
         # TODO: implement optimizer on Servers(already implemented, not in use) and Caches(not implemented yet)
         # TODO: implement learning rate scheduler
-        self.learning_rate = -optimizer[1][0] / \
-            int(os.environ['DMLC_NUM_WORKER'])
+        self.learning_rate = -optimizer[1][0]
         self.ps_id = ctypes.c_int(self.parameter.id)
         self.psevent = None
 
