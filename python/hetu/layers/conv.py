@@ -31,6 +31,7 @@ class Conv2d(BaseLayer):
         if self.bias:
             bias_var = ht.init.zeros(
                 shape=(1, self.out_channels, 1, 1), name=self.name+'_bias')
+            bias_var = ht.broadcastto_op(bias_var, x)
             x = x + bias_var
         if self.activation is not None:
             x = self.activation(x)

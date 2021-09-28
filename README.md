@@ -113,9 +113,10 @@ If you are enterprise users and find Hetu is useful in your work, please let us 
 The entire codebase is under [license](LICENSE)
 
 ## Papers
-  1. Xupeng Miao, Linxiao Ma, Zhi Yang, Yingxia Shao, Bin Cui, Lele Yu, Jiawei Jiang. [CuWide: Towards Efficient Flow-based Training for Sparse Wide Models on GPUs.](https://ieeexplore.ieee.org/document/9261124). TKDE 2021, ICDE 2021
-  2. Xupeng Miao, Xiaonan Nie, Yingxia Shao, Zhi Yang, Jiawei Jiang, Lingxiao Ma, Bin Cui. [Heterogeneity-Aware Distributed Machine Learning Training via Partial Reduce](https://doi.org/10.1145/3448016.3452773) SIGMOD 2021
-  3. coming soon
+  1. Xupeng Miao, Linxiao Ma, Zhi Yang, Yingxia Shao, Bin Cui, Lele Yu, Jiawei Jiang. [CuWide: Towards Efficient Flow-based Training for Sparse Wide Models on GPUs](https://ieeexplore.ieee.org/document/9261124). TKDE 2021, ICDE 2021
+  2. Xupeng Miao, Xiaonan Nie, Yingxia Shao, Zhi Yang, Jiawei Jiang, Lingxiao Ma, Bin Cui. [Heterogeneity-Aware Distributed Machine Learning Training via Partial Reduce](https://doi.org/10.1145/3448016.3452773). SIGMOD 2021
+  3. Xupeng Miao, Hailin Zhang, Yining Shi, Xiaonan Nie, Zhi Yang, Yangyu Tao, Bin Cui. HET: Scaling out Huge Embedding Model Training via Cache-enabled Distributed Framework. VLDB 2021
+  4. coming soon
 
 ## Acknowledgements
 

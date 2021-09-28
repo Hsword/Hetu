@@ -363,7 +363,8 @@ class Executor(object):
                 return SubExecutor4Pipedream
             return SubExecutor
 
-        self.subexecutor = {k: get_sub_executor(k)(k, v, config) for k, v in eval_node_dict.items()}
+        self.subexecutor = {k: get_sub_executor(k)(
+            k, v, config) for k, v in eval_node_dict.items()}
 
         self.topo_order = find_topo_sort(config.my_eval_nodes)
         self.param_nodes = [node for node in self.topo_order if isinstance(
@@ -372,6 +373,10 @@ class Executor(object):
         self.ps_comm = self.config.ps_comm
         self.local_rank = self.config.local_rank
         self.rank = self.config.rank
+
+    def profile(self, feed_shapes, log_file, profiler='cpu', name='default'):
+        self.subexecutor[name].profile(
+            feed_shapes, log_file, profiler=profiler)
 
     def run(self, name='default', eval_node_list={}, feed_dict={}, convert_to_numpy_ret_vals=False, **kwargs):
         return self.subexecutor[name].run(eval_node_list, feed_dict, convert_to_numpy_ret_vals, **kwargs)
@@ -494,6 +499,11 @@ class SubExecutor(object):
                 elif not isinstance(node, OptimizerOp):
                     self.eval_node_list.append(node)
             self.global_eval_nodes = eval_node_list
+        elif config.p2p_stream:
+            self.run_results_indices = [eval_node_list.index(
+                node) if node in eval_node_list else -1 for node in config.my_eval_nodes]
+            self.eval_node_list = config.my_eval_nodes
+            self.global_eval_nodes = eval_node_list
 
         if inference == False:
             self.topo_order = find_topo_sort(self.eval_node_list)
@@ -560,6 +570,37 @@ class SubExecutor(object):
             self.batch_num) == 0 else self.batch_num.pop()
         self.init_need_allocation = (self.need_feed_nodes == []) and (
             self.dataloader_nodes == [])
+
+    def profile(self, feed_shapes, log_file, profiler='cpu'):
+        # !!! we should profile before using distributed settings
+        # !!! so here we don't consider multiple devices
+        # !!! no self.use_p2p, no node reshape, no pipeline configuration
+        # !!! not support sparse input now
+        # !!! not support dynamic memory now
+        assert profiler in ('cpu', 'gpu')
+        assert len(feed_shapes) == len(self.need_feed_nodes) + \
+            len(self.dataloader_nodes)
+
+        need_reallocation = self.init_need_allocation
+
+        for node, shape in feed_shapes.items():
+            assert node in self.need_feed_nodes or node in self.dataloader_nodes
+            local_realloc = shape != self.node_to_shape_map.get(node, None)
+            need_reallocation = need_reallocation or local_realloc
+            if local_realloc:
+                self.node_to_arr_map[node] = ndarray.empty(
+                    shape, ctx=node.ctx)
+
+        if need_reallocation:
+            self.init_need_allocation = False
+            self.infer_shape(feed_shapes)
+            self.memory_plan()
+
+        from ..profiler import HetuProfiler
+        if not hasattr(self, 'profiler'):
+            self.profiler = HetuProfiler(
+                self.computing_nodes, feed_shapes, self.node_to_arr_map, ctx=self.config.context)
+        self.profiler.profile_n_log(log_file, profiler=profiler)
 
     def update_executor(self, eval_node_list):
         self.eval_node_list = eval_node_list
@@ -995,10 +1036,15 @@ class SubExecutor(object):
                     results[i] = results[i].asnumpy()
 
         # remap to original order in model parallel
-        if self.use_p2p:
-            results = filter(lambda x : x[0] in self.global_eval_nodes,
-                zip(self.eval_node_list, results))
+        if self.config.gpipe or self.config.pipedream:
+            results = filter(lambda x: x[0] in self.global_eval_nodes,
+                             zip(self.eval_node_list, results))
             results = [x[1] for x in results]
+        elif self.use_p2p:
+            new_results = [None for _ in self.global_eval_nodes]
+            for i, j in enumerate(self.run_results_indices):
+                new_results[j] = results[i]
+            results = new_results
 
         return results
 
