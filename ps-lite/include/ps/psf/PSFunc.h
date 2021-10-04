@@ -17,6 +17,7 @@ enum class PsfGroup {
     kBaseGroup,
     kParameterServer,
     kSSPControl,
+    kPReduceScheduler,
     kNumGroup
 };
 
@@ -51,6 +52,8 @@ enum PsfType {
     /* SSP support */
     kSSPInit,
     kSSPSync,
+    /* Partial Reduce support */
+    kPReduceGetPartner,
     kNumPSfunction,
 };
 
@@ -96,3 +99,4 @@ namespace std {
 #include "misc.h"
 #include "cachetable.h"
 #include "ssp.h"
+#include "preduce.h"

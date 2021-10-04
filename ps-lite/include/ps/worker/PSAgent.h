@@ -498,6 +498,12 @@ public:
         _kvworker.Wait(_kvworker.Request<kSSPInit>(request, cb));
     }
 
+    void PReduceGetPartner(Key key, int rank, size_t required_worker_num, float wait_time, int* result) {
+        PSFData<kPReduceGetPartner>::Request request(key, rank, required_worker_num, wait_time);
+        auto cb = getCallBack<kPReduceGetPartner>(result);
+        _kvworker.Wait(_kvworker.Request<kPReduceGetPartner>(request, cb));
+    }
+
     /*
         A simple key mapping for multiple server case
     */
