@@ -567,6 +567,12 @@ HETUSYS_EXTERN_C {
     int DLGpuOneHot(const DLArrayHandle input, DLArrayHandle output,
                     DLStreamHandle stream_handle);
 
+    int DLGpuLinear(const DLArrayHandle matA, bool transposeA,
+                    const DLArrayHandle matB, bool transposeB,
+                    const DLArrayHandle bias,
+                    DLArrayHandle matC,
+                    DLStreamHandle stream_handle);
+
     // Initializers
     int DLGpuNormalInit(DLArrayHandle arr, const float mean, const float stddev,
                         unsigned long long seed, DLStreamHandle stream_handle);
