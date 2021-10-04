@@ -77,7 +77,19 @@ class ReduceMeanOp(Op):
             order = input_statuses[0].order
             if order is not None:
                 order = list(order)
-                assert all([x not in order for x in self.axes])
+                dup_occur = 0
+                prev_dup = False
+                duplicate_candidate = self.axes + [-1]
+                for i, o in enumerate(order[::-1]):
+                    if o in duplicate_candidate:
+                        if not prev_dup:
+                            dup_occur += 1
+                        prev_dup = True
+                        if o != -1:
+                            order.pop(i)
+                    else:
+                        prev_dup = False
+                assert dup_occur <= 1, 'Duplicate dimension and reduce dimensions must be consecutive!'
                 for i in range(len(order)):
                     order[i] -= sum([x < order[i]
                                      for j, x in enumerate(self.axes) if not self.keepdims[j]])
@@ -86,14 +98,16 @@ class ReduceMeanOp(Op):
             state, duplicate = input_statuses[0].get()
             if state is not None:
                 state = dict(state)
-                assert all([x not in state for x in self.axes])
+                for k in self.axes:
+                    if k in state:
+                        duplicate *= state.pop(k)
                 for k in sorted(state.keys()):
                     new_k = k - \
                         sum([x < k for j, x in enumerate(
                             self.axes) if not self.keepdims[j]])
                     if new_k != k:
                         state[new_k] = state.pop(k)
-            status.set_state(state, duplicate)
+                status.set_state(state, duplicate)
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
         assert len(input_statuses) == len(self.inputs)
@@ -101,29 +115,6 @@ class ReduceMeanOp(Op):
             self.grad_node.ori_status = input_statuses[0]
             self.grad_node.tar_status = status
             self.grad_set = True
-        if deduce_order:
-            order = status.order
-            if order is not None:
-                order = list(order)
-                for ax, kd in sorted(zip(self.axes, self.keepdims)):
-                    if not kd:
-                        for i in range(len(order)):
-                            if order[i] >= ax:
-                                order[i] += 1
-                input_statuses[0].set_order(tuple(order))
-        else:
-            state, duplicate = status.get()
-            if state is not None:
-                state = dict(state)
-                state_keys = {i: i for i in state}
-                for ax, kd in sorted(zip(self.axes, self.keepdims)):
-                    if not kd:
-                        for i, v in enumerate(state_keys):
-                            if v >= ax:
-                                state_keys[i] += 1
-                for k in sorted(state_keys.keys())[::-1]:
-                    state[state_keys[k]] = state.pop(k)
-            input_statuses[0].set_state(state, duplicate)
 
 
 def reduce_mean_op(node, axes, keepdims=False, ctx=None):
