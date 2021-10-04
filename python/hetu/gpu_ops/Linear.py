@@ -149,6 +149,8 @@ class LinearOp(Op):
                 res_duplicate = state.get(0, 1)
                 input_statuses[1].set_state(res_state, res_duplicate)
                 new_state = state.copy()
+                if 0 in new_state:
+                    duplicate *= new_state[0]
                 if 1 in new_state:
                     new_state[0] = new_state.pop(1)
                 else:

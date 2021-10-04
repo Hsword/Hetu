@@ -50,6 +50,7 @@ from .ReduceSum import reduce_sum_op
 from .ReduceMean import reduce_mean_op
 from .OneHot import one_hot_op
 from .Linear import linear_op
+from .Conv2dAddBias import conv2d_add_bias_op
 from .AllReduceCommunicate import allreduceCommunicate_op, groupallreduceCommunicate_op
 from .ParameterServerCommunicate import parameterServerCommunicate_op, parameterServerSparsePull_op
 from .DataTransfer import datah2d_op, datad2h_op
@@ -150,6 +151,7 @@ __all__ = [
     'reduce_mean_op',
     'one_hot_op',
     'linear_op',
+    'conv2d_add_bias_op',
     'allreduceCommunicate_op',
     'parameterServerCommunicate_op',
     'datah2d_op',
