@@ -1,4 +1,5 @@
 #include "ps/server/preduce_handler.h"
+#include <algorithm>
 
 namespace ps {
 
@@ -35,7 +36,10 @@ void PSHandler<PsfGroup::kPReduceScheduler>::serve(
                obj->cv.wait_until(lock, obj->wake_time) == std::cv_status::no_timeout) {}
     }
     // the first worker awake set the critical count
-    if (!obj->critical_count) obj->critical_count = obj->ready_workers.size();
+    if (!obj->critical_count) {
+        obj->critical_count = obj->ready_workers.size();
+        std::sort(obj->ready_workers.begin(), obj->ready_workers.end());
+    }
 
     // write return value
     assert(obj->ready_workers.size() > 0);
