@@ -5,8 +5,6 @@ import numpy as np
 import argparse
 from time import time
 import torch
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 
 
 if __name__ == "__main__":
@@ -48,6 +46,8 @@ if __name__ == "__main__":
 
     if args.imagenet:
         # use imagenet
+        import torchvision.transforms as transforms
+        import torchvision.datasets as datasets
         traindir = os.path.join('/home/public/zhl/imagenet', 'train')
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
@@ -68,6 +68,8 @@ if __name__ == "__main__":
             args.batch_size,)).astype(np.float32) for _ in range(args.log_iterations)]
 
     if args.validate:
+        import torchvision.transforms as transforms
+        import torchvision.datasets as datasets
         valdir = os.path.join('/home/public/zhl/imagenet', 'val')
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])

@@ -26,13 +26,14 @@ class Conv2d(BaseLayer):
     def __call__(self, x):
         weight_var = self.initializer(shape=(self.out_channels, self.in_channels, self.height, self.width),
                                       name=self.name+'_weight')
-        x = ht.conv2d_op(x, weight_var, stride=self.stride,
-                         padding=self.padding)
         if self.bias:
             bias_var = ht.init.zeros(
-                shape=(1, self.out_channels, 1, 1), name=self.name+'_bias')
-            bias_var = ht.broadcastto_op(bias_var, x)
-            x = x + bias_var
+                shape=(self.out_channels,), name=self.name+'_bias')
+            x = ht.conv2d_add_bias_op(
+                x, weight_var, bias_var, stride=self.stride, padding=self.padding)
+        else:
+            x = ht.conv2d_op(x, weight_var, stride=self.stride,
+                             padding=self.padding)
         if self.activation is not None:
             x = self.activation(x)
         return x

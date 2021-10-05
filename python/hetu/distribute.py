@@ -157,10 +157,11 @@ class ModelParallel4CNN(Strategy):
 
     def set_raw_ctxs(self, eval_node_list):
         from .gpu_ops.Conv2d import Conv2dOp
+        from .gpu_ops.Conv2dAddBias import Conv2dAddBiasOp
         from .gpu_ops.MatrixMult import MatMulOp
+        from .gpu_ops.Linear import LinearOp
         from .gpu_ops.SoftmaxCrossEntropy import SoftmaxCrossEntropyOp
         from .gpu_ops.SoftmaxCrossEntropySparse import SoftmaxCrossEntropySparseOp
-        from .gpu_ops.Broadcast import BroadcastToOp
 
         def dfs(node, ctx):
             if node in visited:
@@ -170,19 +171,21 @@ class ModelParallel4CNN(Strategy):
                 dfs(node.inputs[0], self.raw_ctx)
                 dfs(node.inputs[1], self.rank0_ctx)
                 node.inputs[0] = ht.dispatch(node.inputs[0])
-            elif isinstance(node, BroadcastToOp) and isinstance(node.inputs[0], PlaceholderOp):
-                dfs(node.inputs[0], ctx)
-                node.inputs[0] = ht.dispatch(
-                    node.inputs[0], {1: self.num_ctxs})
             else:
                 for n in node.inputs:
                     dfs(n, ctx)
-                if isinstance(node, (Conv2dOp, MatMulOp)):
-                    split_dim = {Conv2dOp: 0, MatMulOp: 1}[type(node)]
+                if isinstance(node, (Conv2dOp, MatMulOp, Conv2dAddBiasOp, LinearOp)):
+                    split_dim = {Conv2dOp: 0, Conv2dAddBiasOp: 0,
+                                 MatMulOp: 1, LinearOp: 1}[type(node)]
                     new_node_A = ht.dispatch(node.inputs[0])
                     new_node_B = ht.dispatch(
                         node.inputs[1], {split_dim: self.num_ctxs})
-                    node.inputs = [new_node_A, new_node_B]
+                    if isinstance(node, (Conv2dOp, MatMulOp)):
+                        node.inputs = [new_node_A, new_node_B]
+                    else:
+                        new_node_C = ht.dispatch(
+                            node.inputs[2], {0: self.num_ctxs})
+                        node.inputs = [new_node_A, new_node_B, new_node_C]
             node.raw_ctx = ctx
 
         eval_nodes, opt = self.get_forward_eval_nodes(eval_node_list)
@@ -213,10 +216,11 @@ class OneWeirdTrick4CNN(Strategy):
 
     def set_raw_ctxs(self, eval_node_list):
         from .gpu_ops.Conv2d import Conv2dOp
+        from .gpu_ops.Conv2dAddBias import Conv2dAddBiasOp
         from .gpu_ops.MatrixMult import MatMulOp
+        from .gpu_ops.Linear import LinearOp
         from .gpu_ops.SoftmaxCrossEntropy import SoftmaxCrossEntropyOp
         from .gpu_ops.SoftmaxCrossEntropySparse import SoftmaxCrossEntropySparseOp
-        from .gpu_ops.Broadcast import BroadcastToOp
         from .dataloader import DataloaderOp
 
         def dfs(node, ctx):
@@ -227,28 +231,32 @@ class OneWeirdTrick4CNN(Strategy):
                 dfs(node.inputs[0], self.raw_ctx)
                 dfs(node.inputs[1], self.rank0_ctx)
                 node.inputs[0] = ht.dispatch(node.inputs[0])
-            elif isinstance(node, BroadcastToOp) and isinstance(node.inputs[0], PlaceholderOp) and isinstance(node.inputs[1], MatMulOp):
-                dfs(node.inputs[0], ctx)
-                node.inputs[0] = ht.dispatch(
-                    node.inputs[0], {1: self.num_ctxs})
-            elif isinstance(node, Conv2dOp) and isinstance(node.inputs[0], (DataloaderOp, PlaceholderOp)):
+            elif isinstance(node, (Conv2dOp, Conv2dAddBiasOp)) and isinstance(node.inputs[0], (DataloaderOp, PlaceholderOp)):
                 dfs(node.inputs[0], self.raw_ctx)
                 dfs(node.inputs[1], self.raw_ctx)
+                if isinstance(node, Conv2dAddBiasOp):
+                    dfs(node.inputs[2], self.raw_ctx)
+                    node.inputs[2] = ht.dispatch(node.inputs[2])
                 node.inputs[0] = ht.dispatch(
                     node.inputs[0], {0: self.num_ctxs})
                 node.inputs[1] = ht.dispatch(node.inputs[1])
             else:
                 for n in node.inputs:
                     dfs(n, ctx)
-                if isinstance(node, MatMulOp):
+                if isinstance(node, (MatMulOp, LinearOp)):
                     new_node_A = ht.dispatch(node.inputs[0])
                     new_node_B = ht.dispatch(
                         node.inputs[1], {1: self.num_ctxs})
-                    node.inputs = [new_node_A, new_node_B]
-                elif isinstance(node, Conv2dOp):
+                    if isinstance(node, MatMulOp):
+                        node.inputs = [new_node_A, new_node_B]
+                    else:
+                        new_node_C = ht.dispatch(
+                            node.inputs[2], {0: self.num_ctxs})
+                        node.inputs = [new_node_A, new_node_B, new_node_C]
+                elif isinstance(node, (Conv2dOp, Conv2dAddBiasOp)):
                     node.inputs[1] = ht.dispatch(node.inputs[1])
-                elif isinstance(node, BroadcastToOp):
-                    node.inputs[0] = ht.dispatch(node.inputs[0])
+                    if isinstance(node, Conv2dAddBiasOp):
+                        node.inputs[2] = ht.dispatch(node.inputs[2])
             node.raw_ctx = ctx
 
         eval_nodes, opt = self.get_forward_eval_nodes(eval_node_list)
