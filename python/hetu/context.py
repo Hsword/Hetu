@@ -433,6 +433,82 @@ def parse_graph_with_dispatch(node_list):
     return node_cur_state_map, node_tar_state_map
 
 
+def complete_state_map_with_partial_information(forward_node_list, node_list, node_cur_state_map, bf_map):
+    # given current state of the node,
+    # add target state to the forward graph
+    from .dataloader import DataloaderOp
+    from .optimizer import OptimizerOp
+    from .gpu_ops.Variable import PlaceholderOp
+
+    def determine_state(node):
+        if node in visited:
+            return
+        visited.add(node)
+        if not isinstance(node, DataloaderOp):
+            single = not node.raw_ctx.is_mp()
+            if node not in node_cur_state_map:
+                node_cur_state_map[node] = NodeStatus(
+                    dev_num=node.raw_ctx.mp_device_num)
+                node.get_default_state(
+                    node_cur_state_map[node], enforce_order=False)
+            else:
+                # already specified
+                for n in node.inputs:
+                    new_state = NodeStatus(dev_num=node.raw_ctx.mp_device_num)
+                    if single:
+                        new_state.set_one()
+                    if not new_state.valid_all():
+                        invalid_states.append(new_state)
+                    if isinstance(n, PlaceholderOp) and n not in node_cur_state_map:
+                        assert n.raw_ctx == node.raw_ctx
+                        node_cur_state_map[n] = new_state
+                    else:
+                        node_tar_state_map[n][node] = new_state
+            if single:
+                node_cur_state_map[node].set_one()
+            if not node_cur_state_map[node].valid_all():
+                invalid_states.append(node_cur_state_map[node])
+        for n in node.inputs:
+            determine_state(n)
+
+    def dfs(node):
+        if node in visited:
+            return
+        visited.add(node)
+        if not isinstance(node, OptimizerOp):
+            single = not node.raw_ctx.is_mp()
+            node_cur_state_map[node] = NodeStatus(
+                dev_num=node.raw_ctx.mp_device_num)
+            node.get_default_state(
+                node_cur_state_map[node], enforce_order=False)
+            if single:
+                node_cur_state_map[node].set_one()
+            if not node_cur_state_map[node].valid_all():
+                invalid_states.append(node_cur_state_map[node])
+        if node in bf_map:
+            _, fnode = bf_map[node]
+        for n in node.inputs:
+            dfs(n)
+            if n in bf_map:
+                forward_n, forward_node = bf_map[n]
+                if forward_node in node_tar_state_map[forward_n]:
+                    node_tar_state_map[n][node] = node_cur_state_map[forward_n]
+            elif node in bf_map and fnode in node_tar_state_map[n]:
+                node_tar_state_map[n][node] = node_tar_state_map[n][fnode]
+
+    visited = set()
+    invalid_states = []
+    node_tar_state_map = defaultdict(dict)
+    for node in forward_node_list:
+        determine_state(node)
+    for node in node_list:
+        dfs(node)
+
+    node_cur_state_map, node_tar_state_map = infer_states(
+        node_list, node_cur_state_map, node_tar_state_map, invalid_states)
+    return node_cur_state_map, node_tar_state_map
+
+
 def infer_states(node_list, node_cur_state_map, node_tar_state_map, invalid_states):
     # propagate states forward and backward
     from .dataloader import DataloaderOp
@@ -502,7 +578,7 @@ def infer_states(node_list, node_cur_state_map, node_tar_state_map, invalid_stat
     return node_cur_state_map, node_tar_state_map
 
 
-def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
+def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream, node_cur_state_map, node_tar_state_map):
     from .dataloader import DataloaderOp
     from .optimizer import OptimizerOp
     from .gpu_ops.PipelineSend import pipeline_send_op
@@ -972,8 +1048,6 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream):
     layer_indices = {}
     layer_id = 0
     my_eval_nodes = []
-    node_cur_state_map, node_tar_state_map = parse_graph_with_dispatch(
-        node_list)
 
     for node in node_list:
         assign_ctx(node)

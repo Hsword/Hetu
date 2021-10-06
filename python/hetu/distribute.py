@@ -3,7 +3,7 @@ import yaml
 import socket
 import psutil
 
-from .context import DeviceGroup
+from .context import DeviceGroup, NodeStatus
 from .gpu_ops.Variable import PlaceholderOp
 
 
@@ -88,8 +88,14 @@ class Strategy(object):
     def __init__(self):
         # TODO: modify executor's logic to use communicators
         self.settings = DistConfig('/tmp/hetu_config.yml')
+        self.use_dispatch = True
 
-    def set_raw_ctxs(self):
+    def set_raw_ctxs(self, eval_node_list):
+        # called if use_dispatch is True
+        raise NotImplementedError
+
+    def set_raw_ctxs_n_states(self, eval_node_list):
+        # called if use_dispatch is False
         raise NotImplementedError
 
     def get_forward_eval_nodes(self, eval_node_list):
@@ -154,8 +160,10 @@ class ModelParallel4CNN(Strategy):
         self.num_ctxs = len(ctxs)
         self.rank0_ctx = DeviceGroup(rank0)
         self.raw_ctx = DeviceGroup(ctxs)
+        self.use_dispatch = False
 
     def set_raw_ctxs(self, eval_node_list):
+        # deprecated
         from .gpu_ops.Conv2d import Conv2dOp
         from .gpu_ops.Conv2dAddBias import Conv2dAddBiasOp
         from .gpu_ops.MatrixMult import MatMulOp
@@ -197,6 +205,51 @@ class ModelParallel4CNN(Strategy):
 
         return self.raw_ctx
 
+    def set_raw_ctxs_n_states(self, eval_node_list):
+        from .gpu_ops.Conv2d import Conv2dOp
+        from .gpu_ops.Conv2dAddBias import Conv2dAddBiasOp
+        from .gpu_ops.MatrixMult import MatMulOp
+        from .gpu_ops.Linear import LinearOp
+        from .gpu_ops.SoftmaxCrossEntropy import SoftmaxCrossEntropyOp
+        from .gpu_ops.SoftmaxCrossEntropySparse import SoftmaxCrossEntropySparseOp
+        from .context import complete_state_map_with_partial_information
+
+        def dfs(node, ctx):
+            if node in visited:
+                return
+            visited.add(node)
+            node.raw_ctx = ctx
+            if isinstance(node, (SoftmaxCrossEntropyOp, SoftmaxCrossEntropySparseOp)):
+                dfs(node.inputs[0], self.raw_ctx)
+                dfs(node.inputs[1], self.rank0_ctx)
+                node_cur_state_map[node] = NodeStatus({}, dev_num=1)
+            else:
+                for n in node.inputs:
+                    dfs(n, ctx)
+                if isinstance(node, (Conv2dOp, MatMulOp, Conv2dAddBiasOp, LinearOp)):
+                    node_cur_state_map[node] = NodeStatus(
+                        {1: self.num_ctxs}, dev_num=node.raw_ctx.mp_device_num)
+
+        eval_nodes, opt = self.get_forward_eval_nodes(eval_node_list)
+        assert opt is not None
+        visited = set()
+        node_cur_state_map = {}
+        # add partial information for forward nodes
+        dfs(eval_nodes[0], self.rank0_ctx)
+
+        # set context for backward nodes using forward nodes
+        for2back = opt.optimizer.forward2backward
+        for grad in for2back.pop(None):
+            grad.raw_ctx = self.rank0_ctx
+        for node, grads in for2back.items():
+            for grad in grads:
+                grad.raw_ctx = node.raw_ctx
+
+        # infer states using partial information
+        node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
+            eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
+        return self.raw_ctx, node_cur_state_map, node_tar_state_map
+
 
 class OneWeirdTrick4CNN(Strategy):
     # split batch dimension in conv layers
@@ -213,8 +266,10 @@ class OneWeirdTrick4CNN(Strategy):
         self.num_ctxs = len(ctxs)
         self.rank0_ctx = DeviceGroup(rank0)
         self.raw_ctx = DeviceGroup(ctxs)
+        self.use_dispatch = False
 
     def set_raw_ctxs(self, eval_node_list):
+        # deprecated
         from .gpu_ops.Conv2d import Conv2dOp
         from .gpu_ops.Conv2dAddBias import Conv2dAddBiasOp
         from .gpu_ops.MatrixMult import MatMulOp
@@ -267,3 +322,51 @@ class OneWeirdTrick4CNN(Strategy):
             opt.re_minimize()
 
         return self.raw_ctx
+
+    def set_raw_ctxs_n_states(self, eval_node_list):
+        from .gpu_ops.Conv2d import Conv2dOp
+        from .gpu_ops.Conv2dAddBias import Conv2dAddBiasOp
+        from .gpu_ops.MatrixMult import MatMulOp
+        from .gpu_ops.Linear import LinearOp
+        from .gpu_ops.SoftmaxCrossEntropy import SoftmaxCrossEntropyOp
+        from .gpu_ops.SoftmaxCrossEntropySparse import SoftmaxCrossEntropySparseOp
+        from .context import complete_state_map_with_partial_information
+
+        def dfs(node, ctx):
+            if node in visited:
+                return
+            visited.add(node)
+            node.raw_ctx = ctx
+            if isinstance(node, (SoftmaxCrossEntropyOp, SoftmaxCrossEntropySparseOp)):
+                dfs(node.inputs[0], self.raw_ctx)
+                dfs(node.inputs[1], self.rank0_ctx)
+                node_cur_state_map[node] = NodeStatus({}, dev_num=1)
+            else:
+                for n in node.inputs:
+                    dfs(n, ctx)
+                if isinstance(node, (Conv2dOp, Conv2dAddBiasOp)):
+                    node_cur_state_map[node] = NodeStatus(
+                        {0: self.num_ctxs}, dev_num=node.raw_ctx.mp_device_num)
+                elif isinstance(node, (MatMulOp, LinearOp)):
+                    node_cur_state_map[node] = NodeStatus(
+                        {1: self.num_ctxs}, dev_num=node.raw_ctx.mp_device_num)
+
+        eval_nodes, opt = self.get_forward_eval_nodes(eval_node_list)
+        assert opt is not None
+        visited = set()
+        node_cur_state_map = {}
+        # add partial information for forward nodes
+        dfs(eval_nodes[0], self.rank0_ctx)
+
+        # set context for backward nodes using forward nodes
+        for2back = opt.optimizer.forward2backward
+        for grad in for2back.pop(None):
+            grad.raw_ctx = self.rank0_ctx
+        for node, grads in for2back.items():
+            for grad in grads:
+                grad.raw_ctx = node.raw_ctx
+
+        # infer states using partial information
+        node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
+            eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
+        return self.raw_ctx, node_cur_state_map, node_tar_state_map

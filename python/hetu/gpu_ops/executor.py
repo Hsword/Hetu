@@ -188,8 +188,13 @@ class HetuConfig(object):
 
         # check context
         self.dist_strategy = dist_strategy
+        node_cur_state_map, node_tar_state_map = None, None
         if self.dist_strategy is not None:
-            ctx = self.dist_strategy.set_raw_ctxs(eval_node_list)
+            if self.dist_strategy.use_dispatch:
+                ctx = self.dist_strategy.set_raw_ctxs(eval_node_list)
+            else:
+                ctx, node_cur_state_map, node_tar_state_map = self.dist_strategy.set_raw_ctxs_n_states(
+                    eval_node_list)
         elif ctx is None:
             ctx = get_current_context()
         assert ctx, 'Default context should be determined.'
@@ -265,8 +270,12 @@ class HetuConfig(object):
             self.context = ndarray.gpu(device_id)
             self.p2p_stream = create_stream_handle(
                 self.context) if init_p2p_stream else None
+            if node_cur_state_map is None:
+                from ..context import parse_graph_with_dispatch
+                node_cur_state_map, node_tar_state_map = parse_graph_with_dispatch(
+                    eval_node_list)
             self.my_eval_nodes, self.param_allreduce_group, self.layer_indices = assign_context_by_traverse_nodes(
-                eval_node_list, self.context, self.nccl_comm, self.p2p_stream)
+                eval_node_list, self.context, self.nccl_comm, self.p2p_stream, node_cur_state_map, node_tar_state_map)
             for param in self.param_allreduce_group:
                 self.node_strategy[param] = 'AllReduce'
             if self.param_allreduce_group != {}:
@@ -1631,7 +1640,7 @@ class SubExecutor(object):
         return results
 
 
-def gradients(output_node, node_list, insert_grad=None):
+def gradients(output_node, node_list, insert_grad=None, return_all=False):
     """Take gradient of output node with respect to each node in node_list.
 
     Parameters
@@ -1645,17 +1654,22 @@ def gradients(output_node, node_list, insert_grad=None):
     A list of gradient values, one for each node in node_list respectively.
 
     """
-    if isinstance(output_node, list):
-        node_to_output_grads_list = {
-            output_node[i]: [OnesLike.oneslike_op(output_node[i])] if insert_grad is None
-            else [insert_grad[i]] for i in range(len(output_node))
-        }
-    else:
-        node_to_output_grads_list = {
-            output_node: [OnesLike.oneslike_op(output_node)] if insert_grad is None else [
-                insert_grad]
-        }
+    from .ReduceMean import ReduceMeanOp
+    from .BatchNorm import Batch_NormalizationOp
+    from .LayerNorm import Layer_NormalizationOp
+    # TODO: add support for Csrmm, Division, MatrixDot, Sigmoid, Sqrt, Tanh, Where
+    backward2forward = {}  # key: backward node; value: tuple of forward nodes
+    forward2backward = {}  # key: forward node; value: list of generated backward nodes
+    if not isinstance(output_node, list):
         output_node = [output_node]
+    if insert_grad is None:
+        insert_grad = [OnesLike.oneslike_op(
+            outnode) for outnode in output_node]
+    elif not isinstance(insert_grad, list):
+        insert_grad = [insert_grad]
+    forward2backward[None] = insert_grad
+    node_to_output_grads_list = {node: [grad]
+                                 for node, grad in zip(output_node, insert_grad)}
     node_to_output_grad = {}
     # Traverse forward graph in reverse topological order
     reverse_topo_order = reversed(find_topo_sort(output_node))
@@ -1675,15 +1689,27 @@ def gradients(output_node, node_list, insert_grad=None):
             continue
         node_to_output_grad[node] = output_grad
         input_grads_list = node.gradient(output_grad)
+        if input_grads_list is not None:
+            forward2backward[node] = [
+                n for n in input_grads_list if n is not None]
+            if isinstance(node, (ReduceMeanOp, Batch_NormalizationOp, Layer_NormalizationOp)):
+                forward2backward[node].append(input_grads_list[0].inputs[0])
+            if len(node_to_output_grads_list[node]) > 1:
+                # sum op
+                forward2backward[node].append(output_grad)
         for i in range(len(node.inputs)):
             if node.inputs[i] not in node_to_output_grads_list:
                 node_to_output_grads_list[node.inputs[i]] = []
             # Calculate partial adjoint for input nodes.
             node_to_output_grads_list[node.inputs[i]].append(
                 input_grads_list[i])
+            backward2forward[input_grads_list[i]] = (node.inputs[i], node)
 
     grad_node_list = [node_to_output_grad[node] for node in node_list]
-    return grad_node_list
+    if return_all:
+        return grad_node_list, backward2forward, forward2backward
+    else:
+        return grad_node_list
 
 ##################
 # Helper Methods #
