@@ -24,6 +24,7 @@ from .EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient
 from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp
 from ..gpu_links import matrix_elementwise_add, matrix_elementwise_multiply_by_const
 from .executor import find_topo_sort
+from ..preduce import PartialReduce
 
 
 import ctypes
@@ -98,6 +99,7 @@ class SubExecutor4Pipedream(object):
                     break
 
         move_send_op(self.backward_topo_order)
+        self.topo_order = self.forward_topo_order + self.backward_topo_order
 
         """
         print("gpu {}'s topo: ".format(config.local_rank),
@@ -146,6 +148,10 @@ class SubExecutor4Pipedream(object):
                 self.computing_nodes.append(node)
         self.batch_num = 0
         self.init_need_allocation = False
+        for node in self.topo_order:
+            if isinstance(node, OptimizerOp):
+                self.opt = node
+        assert self.opt
         if self.config.pipeline == "hetpipe":
             self.grad_accum_map = {} # map weight node to gradients
             self.h2d_map = {} # map weight to d2h node
@@ -153,9 +159,10 @@ class SubExecutor4Pipedream(object):
             for node in self.topo_order:
                 if isinstance(node, DataH2DOp) and isinstance(node.inputs[0], PlaceholderOp) and node.inputs[0].trainable:
                     self.h2d_map[node.inputs[0]] = node
-                elif isinstance(node, OptimizerOp):
-                    self.opt = node.optimizer
-            assert self.opt
+        elif config.use_preduce:
+            self.preduce = PartialReduce(config.pipeline_rank)
+            self.preduce_partner = None
+            self.all_reduce_param_map = dict(zip(self.opt.inputs, self.opt.optimizer.params))
 
     def infer_shape(self, feed_shapes):
         """Given shapes of feed_dict nodes, infer shape for all nodes in graph.
@@ -217,27 +224,24 @@ class SubExecutor4Pipedream(object):
                 else:
                     mp[node] = ndarray.empty(shape, ctx=node.ctx)
 
-    def copy_latest_weight(self, local_update=False):
+    def copy_latest_weight(self, node):
         """
             In pipedream, the weight used in forward pass are used again in the backward pass.
             However, gradients should be applied to the latest model.
             Thus, we need to copy latest model weight.
         """
         if self.use_ps:
-            pass
-        # the last worker has only one copy of weight, no need to copy
-        else:
-            if self.config.pipeline_rank == self.config.pipeline_nrank - 1:
-                return
+            return
+        if node.trainable:
             oldest = min(self.batch_to_tensor_maps.keys())
-            for node in self.config.placeholder_to_arr_map:
-                if isinstance(node, PlaceholderOp) and node.trainable:
-                    dst_tensor = self.batch_to_tensor_maps[oldest][node]
-                    src_tensor = self.config.placeholder_to_arr_map[node]
-                    dst_tensor._async_copyfrom(src_tensor, self.comp_stream)
-                    # after optimizer update, this dst tensor will become the latest model weight
-                    # so we set let placeholder_to_arr_map point to it
-                    self.config.placeholder_to_arr_map[node] = dst_tensor
+            dst_tensor = self.batch_to_tensor_maps[oldest][node]
+            src_tensor = self.config.placeholder_to_arr_map[node]
+            # the last worker has only one copy of weight, no need to copy
+            if src_tensor is not dst_tensor:
+                dst_tensor._async_copyfrom(src_tensor, self.comp_stream)
+            # after optimizer update, this dst tensor will become the latest model weight
+            # so we set let placeholder_to_arr_map point to it
+            self.config.placeholder_to_arr_map[node] = dst_tensor
 
     def update_gradient_local(self, ps_node, init_value, need_sync):
         node_id = ps_node.ps_id
@@ -257,9 +261,12 @@ class SubExecutor4Pipedream(object):
             if cur_batch_id != last_fwd_batch_id:
                 current_weight._async_copyfrom(latest_weight, self.comp_stream)
 
-            matrix_elementwise_multiply_by_const(grad_tensor, -self.opt.learning_rate, grad_tensor, self.comp_stream)
-            matrix_elementwise_add(current_weight, grad_tensor, current_weight, stream=self.comp_stream)
+            self.run_optimizer(current_weight, grad_tensor)
             self.skip_h2d.add(h2d_node)
+
+    def run_optimizer(self, weight_tensor, grad_tensor):
+        matrix_elementwise_multiply_by_const(grad_tensor, -self.opt.optimizer.learning_rate, grad_tensor, self.comp_stream)
+        matrix_elementwise_add(weight_tensor, grad_tensor, weight_tensor, stream=self.comp_stream)
 
     def run(self, eval_node_list, feed_dict_list, convert_to_numpy_ret_vals, batch_num):
         rank = self.config.pipeline_rank
@@ -382,11 +389,26 @@ class SubExecutor4Pipedream(object):
                 elif isinstance(node, (DataD2HOp, DataD2HSparseOp)):
                     node.compute(input_vals, node_val, self.d2h_stream)
 
+                elif isinstance(node, AllReduceCommunicateOp):
+                    if self.config.use_preduce:
+                        if not self.preduce_partner:
+                            self.preduce_partner = self.preduce.get_partner(
+                                max_worker=self.config.nrank//self.config.pipeline_nrank)
+                        weight_node = self.all_reduce_param_map[node]
+                        self.copy_latest_weight(weight_node)
+                        weight_tensor = self.config.placeholder_to_arr_map[weight_node]
+                        self.run_optimizer(weight_tensor, input_vals[0])
+                        self.comp_stream.sync()
+                        self.preduce.preduce(weight_tensor, self.preduce_partner, stream=self.nccl_stream)
+                        node.event.record(self.nccl_stream)
+                    else:
+                        node.compute(input_vals, node_val, self.nccl_stream)
+
                 elif isinstance(node, (ParameterServerCommunicateOp, ParameterServerSparsePullOp)):
                     if self.config.pipeline == "hetpipe":
-                        need_sync = (batch_id % self.config.pipeline_nrank == self.config.pipeline_nrank - 1) or \
+                        need_sync = (batch_id % self.config.pipeline_nrank == 0) or \
                             (batch_id == batch_num)
-                        self.update_gradient_local(node, init_value=(batch_id % self.config.pipeline_nrank)==0, need_sync=need_sync)
+                        self.update_gradient_local(node, init_value=(batch_id % self.config.pipeline_nrank)==1, need_sync=need_sync)
                         if need_sync:
                             input_vals = [self.grad_accum_map[node.parameter]]
                             self.comp_stream.sync()
@@ -399,8 +421,12 @@ class SubExecutor4Pipedream(object):
                                  self.comp_stream, inference=self.inference)
 
                 elif isinstance(node, OptimizerOp):
-                    self.copy_latest_weight()
-                    node.compute(input_vals, node_val, self.comp_stream, self.batch_to_tensor_maps[batch_id])
+                    if self.config.use_preduce:
+                        self.preduce_partner = None # renew partner for the next iteration
+                    else:
+                        for weight_node in self.config.placeholder_to_arr_map:
+                            self.copy_latest_weight(weight_node)
+                        node.compute(input_vals, node_val, self.comp_stream, self.batch_to_tensor_maps[batch_id])
 
                 else:
                     node.compute(input_vals, node_val, self.comp_stream)
@@ -427,5 +453,7 @@ class SubExecutor4Pipedream(object):
             # end of scheduling loop
         # release for the next run
         self.batch_to_tensor_maps = {}
+        if self.config.pipeline == 'hetpipe':
+            self.skip_h2d.clear()
 
         return results_list
