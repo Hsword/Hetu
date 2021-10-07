@@ -137,6 +137,18 @@ class LinearOp(Op):
                 input_statuses[0].set_order(res_order)
                 res_order = tuple(res2r_map[x] for x in status.order)
                 input_statuses[1].set_order(res_order)
+                new_order = list(status.order)
+                if 0 in new_order:
+                    new_order[new_order.index(0)] = -1
+                if 1 in new_order:
+                    new_order[new_order.index(1)] = 0
+                appeared = False
+                for o in new_order:
+                    if o == -1:
+                        assert not appeared
+                        appeared = True
+                new_order = tuple(new_order)
+                input_statuses[2].set_order(new_order)
         else:
             if status.valid_state():
                 state, duplicate = status.get()
