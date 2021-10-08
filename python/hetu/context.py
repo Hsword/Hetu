@@ -292,6 +292,15 @@ class NodeStatus(object):
     def __repr__(self):
         return '(' + str(self.state) + ', ' + str(self.duplicate) + ', ' + str(self.order) + ')'
 
+    def __eq__(self, other):
+        assert self.valid_all() and other.valid_all(), 'Cannot check equal if not valid.'
+        return self.state == other.state \
+            and self.duplicate == other.duplicate \
+            and self.order == other.order
+
+    def __hash__(self):
+        return hash(id(self))
+
 
 def get_current_context():
     return _default_ctx_stack.peek()
@@ -993,7 +1002,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream, node_
                 # devices number of each stage is equal
                 # the device in correspondent place will communicate with each other
 
-                if node in node_tar_state_map[n]:
+                if node in node_tar_state_map[n] and node_cur_state_map[n] != node_tar_state_map[n][node]:
                     # here in every context each device appear only once
                     # TODO: consider whether or not release the constraint above?
                     if dp_index_map[n] >= 0:
