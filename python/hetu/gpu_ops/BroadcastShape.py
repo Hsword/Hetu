@@ -88,6 +88,7 @@ class BroadcastShapeOp(Op):
                     while in_dims[temp_ind] == 1:
                         temp_ind += 1
                     in_dims[temp_ind] = dim
+                    temp_ind += 1
             else:
                 in_dims = [1 for _ in range(diff)] + input_shape
 
