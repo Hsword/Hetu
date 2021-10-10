@@ -1,66 +1,78 @@
 import hetu as ht
 from hetu import init
+from hetu import ndarray
+import torch
 
-
-def conv2d(x, in_channel, out_channel, stride=1, padding=1, name=''):
-    weight = init.random_normal(
-        shape=(out_channel, in_channel, 3, 3), stddev=0.1, name=name+'_weight')
+def conv2d(x, in_channel, out_channel, stride=1, padding=1, kernel_size=3, name=''):
+    a = torch.nn.Conv2d(in_channel, out_channel, kernel_size, stride=stride)
+    weight = ht.Variable(name=name+'_weight', value=a.weight.detach().numpy(), ctx=ndarray.gpu(0))
+    # weight = init.he_normal(
+    #     shape=(out_channel, in_channel, kernel_size, kernel_size), name=name+'_weight')
     x = ht.conv2d_op(x, weight, stride=stride, padding=padding)
     return x
 
 
 def batch_norm_with_relu(x, hidden, name):
-    scale = init.random_normal(
-        shape=(1, hidden, 1, 1), stddev=0.1, name=name+'_scale')
-    bias = init.random_normal(shape=(1, hidden, 1, 1),
-                              stddev=0.1, name=name+'_bias')
-    x = ht.batch_normalization_op(x, scale, bias)
+    scale = init.ones(shape=(1, hidden, 1, 1), name=name+'_scale')
+    bias = init.zeros(shape=(1, hidden, 1, 1), name=name+'_bias')
+    x = ht.batch_normalization_op(x, scale, bias, momentum=0.9, eps=1e-5)
     x = ht.relu_op(x)
     return x
 
-
-def resnet_block(x, in_channel, num_blocks, is_first=False, name=''):
-    if is_first:
-        out_channel = in_channel
-        identity = x
-        x = conv2d(x, in_channel, out_channel, stride=1,
-                   padding=1, name=name+'_conv1')
-        x = batch_norm_with_relu(x, out_channel, name+'_bn1')
-        x = conv2d(x, out_channel, out_channel, stride=1,
-                   padding=1, name=name+'_conv2')
-        x = x + identity
-    else:
-        out_channel = 2 * in_channel
-        identity = x
-        x = batch_norm_with_relu(x, in_channel, name+'_bn0')
-        x = ht.pad_op(x, [[0, 0], [0, 0], [0, 1], [0, 1]])
-        x = conv2d(x, in_channel, out_channel, stride=2,
-                   padding=0, name=name+'_conv1')
-        x = batch_norm_with_relu(x, out_channel, name+'_bn1')
-        x = conv2d(x, out_channel, out_channel, stride=1,
-                   padding=1, name=name+'_conv2')
-        identity = ht.avg_pool2d_op(
-            identity, kernel_H=2, kernel_W=2, padding=0, stride=2)
-        identity = ht.pad_op(
-            identity, [[0, 0], [in_channel // 2, in_channel // 2], [0, 0], [0, 0]])
-        x = x + identity
-
-    for i in range(1, num_blocks):
-        identity = x
-        x = batch_norm_with_relu(x, out_channel, name+'_bn%d' % (2 * i))
-        x = conv2d(x, out_channel, out_channel, stride=1,
-                   padding=1, name=name+'_conv%d' % (2 * i + 1))
-        x = batch_norm_with_relu(x, out_channel, name+'_bn%d' % (2 * i + 1))
-        x = conv2d(x, out_channel, out_channel, stride=1,
-                   padding=1, name=name+'_conv%d' % (2 * i + 2))
-        x = x + identity
-
+def batch_norm(x, hidden, name):
+    scale = init.ones(shape=(1, hidden, 1, 1), name=name+'_scale')
+    bias = init.zeros(shape=(1, hidden, 1, 1), name=name+'_bias')
+    x = ht.batch_normalization_op(x, scale, bias, momentum=0.9, eps=1e-5)
     return x
 
+def bottleneck(x, input_channel, channel, stride=1, name=''):
+    # bottleneck architecture used when layer > 34
+    # there are 3 block in reset that should set stride to 2
+    # when channel expands, use 11 conv to expand identity
+    output_channel = 4 * channel
+    shortcut = x
+    x = conv2d(x, input_channel, channel, stride=stride, kernel_size=1, padding=0, name=name+'_conv11a')
+    x = batch_norm_with_relu(x, channel, name+'_bn1')
+
+    x = conv2d(x, channel, channel, kernel_size=3, padding=1, name=name+'_conv33')
+    x = batch_norm_with_relu(x, channel, name+'_bn2')
+
+    x = conv2d(x, channel, output_channel, kernel_size=1, padding=0, name=name+'_conv11b')
+    x = batch_norm(x, output_channel, name+'_bn2')
+
+    if input_channel != output_channel:
+        shortcut = conv2d(shortcut, input_channel, output_channel,
+            kernel_size=1, stride=stride, padding=0, name=name+'_conv11c')
+        shortcut = batch_norm(shortcut, output_channel, name+'_bn3')
+
+    x = x + shortcut
+    x = ht.relu_op(x)
+
+    return x, output_channel
+
+def basic_block(x, input_channel, output_channel, stride=1, name=''):
+    # there are 3 block in reset that should set stride to 2
+    # when channel expands, use 11 conv to expand identity
+    shortcut = x
+    x = conv2d(x, input_channel, output_channel, stride=stride, kernel_size=3, name=name+'_conv33a')
+    x = batch_norm_with_relu(x, output_channel, name+'_bn1')
+
+    x = conv2d(x, output_channel, output_channel, stride=1, kernel_size=3, name=name+'_conv33b')
+    x = batch_norm(x, output_channel, name+'_bn2')
+
+    if input_channel != output_channel or stride > 1:
+        shortcut = conv2d(shortcut, input_channel, output_channel,
+            kernel_size=1, stride=stride, padding=0, name=name+'_conv11')
+        shortcut = batch_norm(shortcut, output_channel, name+'_bn3')
+
+    x = x + shortcut
+    x = ht.relu_op(x)
+
+    return x, output_channel
 
 def fc(x, shape, name):
-    weight = init.random_normal(shape=shape, stddev=0.1, name=name+'_weight')
-    bias = init.random_normal(shape=shape[-1:], stddev=0.1, name=name+'_bias')
+    weight = init.he_normal(shape=shape, name=name+'_weight')
+    bias = init.zeros(shape=shape[-1:], name=name+'_bias')
     x = ht.matmul_op(x, weight)
     x = x + ht.broadcastto_op(bias, x)
     return x
@@ -79,40 +91,45 @@ def resnet(x, y_, num_layers=18, num_class=10):
         y: Variable(hetu.gpu_ops.Node.Node), shape (N, num_classes)
     '''
 
-    base_size = 16
+    cur_channel = 16
 
-    x = conv2d(x, 3, base_size, stride=1, padding=1,
+    x = conv2d(x, 3, cur_channel, stride=1, padding=1,
                name='resnet_initial_conv')
-    x = batch_norm_with_relu(x, base_size, 'resnet_initial_bn')
+
+    x = batch_norm_with_relu(x, cur_channel, 'resnet_initial_bn')
+
+    channels = [16, 32, 64, 128]
 
     if num_layers == 18:
-        print("Building ResNet-18 model...")
-        x = resnet_block(x,     base_size, num_blocks=2,
-                         is_first=True, name='resnet_block1')
-        x = resnet_block(x,     base_size, num_blocks=2,
-                         is_first=False, name='resnet_block2')
-        x = resnet_block(x, 2 * base_size, num_blocks=2,
-                         is_first=False, name='resnet_block3')
-        x = resnet_block(x, 4 * base_size, num_blocks=2,
-                         is_first=False, name='resnet_block4')
+        layers = [2, 2, 2, 2]
     elif num_layers == 34:
-        print("Building ResNet-34 model...")
-        x = resnet_block(x,     base_size, num_blocks=3,
-                         is_first=True, name='resnet_block1')
-        x = resnet_block(x,     base_size, num_blocks=4,
-                         is_first=False, name='resnet_block2')
-        x = resnet_block(x, 2 * base_size, num_blocks=6,
-                         is_first=False, name='resnet_block3')
-        x = resnet_block(x, 4 * base_size, num_blocks=3,
-                         is_first=False, name='resnet_block4')
+        layers = [3, 4, 6, 3]
+    elif num_layers == 50:
+        layers = [3, 4, 6, 3]
+    elif num_layers == 101:
+        layers = [3, 4, 23, 3]
+    elif num_layers == 152:
+        layers = [3, 8, 36, 3]
     else:
-        assert False, "Number of layers should be 18 or 34 !"
+        assert False
 
-    x = batch_norm_with_relu(x, 8 * base_size, 'resnet_final_bn')
-    x = ht.array_reshape_op(x, (-1, 128 * base_size))
-    y = fc(x, (128 * base_size, num_class), name='resnet_final_fc')
+    if num_layers > 34:
+        block = bottleneck
+    else:
+        block = basic_block
+
+    for i in range(len(layers)):
+        for k in range(layers[i]):
+            stride = 2 if k == 0 and i > 0 else 1
+            x, cur_channel = block(
+                x, cur_channel, channels[i], stride=stride,
+                name='resnet_block_{}_{}'.format(i, k)
+            )
+
+    x = ht.reduce_mean_op(x, [2, 3]) # H, W
+    y = fc(x, (cur_channel, num_class), name='resnet_final_fc')
     # here we don't use cudnn for softmax crossentropy to avoid overflows
-    loss = ht.softmaxcrossentropy_op(y, y_, use_cudnn=False)
+    loss = ht.softmaxcrossentropy_op(y, y_, use_cudnn=True)
     loss = ht.reduce_mean_op(loss, [0])
     return loss, y
 
@@ -120,6 +137,14 @@ def resnet(x, y_, num_layers=18, num_class=10):
 def resnet18(x, y_, num_class=10):
     return resnet(x, y_, 18, num_class)
 
-
 def resnet34(x, y_, num_class=10):
     return resnet(x, y_, 34, num_class)
+
+def resnet50(x, y_, num_class=10):
+    return resnet(x, y_, 50, num_class)
+
+def resnet101(x, y_, num_class=10):
+    return resnet(x, y_, 101, num_class)
+
+def resnet152(x, y_, num_class=10):
+    return resnet(x, y_, 152, num_class)
