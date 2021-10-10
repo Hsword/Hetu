@@ -3,12 +3,9 @@ from hetu import init
 
 
 def conv_bn_relu(x, in_channel, out_channel, name):
-    weight = init.random_normal(shape=(out_channel, in_channel, 3, 3),
-                                stddev=0.1, name=name+'_weight')
-    bn_scale = init.random_normal(shape=(1, out_channel, 1, 1),
-                                  stddev=0.1, name=name+'_bn_scale')
-    bn_bias = init.random_normal(shape=(1, out_channel, 1, 1),
-                                 stddev=0.1, name=name+'_bn_bias')
+    weight = init.he_normal(shape=(out_channel, in_channel, 3, 3), name=name+'_weight')
+    bn_scale = init.ones(shape=(1, out_channel, 1, 1), name=name+'_bn_scale')
+    bn_bias = init.zeros(shape=(1, out_channel, 1, 1), name=name+'_bn_bias')
 
     x = ht.conv2d_op(x, weight, padding=1, stride=1)
     x = ht.batch_normalization_op(x, bn_scale, bn_bias)
@@ -41,10 +38,8 @@ def vgg_4block(x, in_channel, out_channel, name):
 
 
 def vgg_fc(x, in_feat, out_feat, name):
-    weight = init.random_normal(shape=(in_feat, out_feat),
-                                stddev=0.1, name=name+'_weight')
-    bias = init.random_normal(shape=(out_feat,),
-                              stddev=0.1, name=name+'_bias')
+    weight = init.xavier_uniform(shape=(in_feat, out_feat), name=name+'_weight')
+    bias = init.zeros(shape=(out_feat,), name=name+'_bias')
     x = ht.matmul_op(x, weight)
     x = x + ht.broadcastto_op(bias, x)
     return x
