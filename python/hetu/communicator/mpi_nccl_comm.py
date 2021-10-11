@@ -309,6 +309,10 @@ class NCCL_Communicator():
         lib_mpi_nccl.dlarrayRecv(arr.handle, c_int(datatype.value), c_int(
             src), self.ncclcomm, executor_stream.handle if executor_stream else self.stream.handle)
 
+    def dlarrayAllToAll(self, sendarr, recvarr, datatype, executor_stream=None):
+        lib_mpi_nccl.dlarrayAllToAll(sendarr.handle, recvarr.handle, c_int(datatype.value), \
+                                    self.ncclcomm, executor_stream.handle if executor_stream else self.stream.handle, self.nRanks)
+
     def ncclCommDestroy(self):
         lib_mpi_nccl.commDestroyNccl(ctypes.byref(self.ncclcomm))
 
@@ -325,13 +329,13 @@ if __name__ == "__main__":
     t = mpi_communicator()
     t = t.ncclInit()
 
-    arr = np.ones(16)*t.localRank.value
-    print("before: = ", arr)
-    arr = ndarray.array(arr, ctx=ndarray.gpu(t.device_id.value))
-    output_arr = np.zeros(16 * t.nRanks.value)
-
-    output_arr = ndarray.array(output_arr, ctx=ndarray.gpu(t.device_id.value))
-    t.dlarrayNcclAllReduce(
-        arr, arr, ncclDataType_t.ncclFloat32, ncclRedOp_t.ncclSum)
-
-    print("after: = ", arr.asnumpy())
+    send_arr = np.ones(32)*t.localRank.value
+    recv_arr = np.ones(32)*t.localRank.value
+    print("before: send_arr = "+str(send_arr)+" recv_arr = "+str(recv_arr))
+    send_arr = ndarray.array(send_arr, ctx=ndarray.gpu(t.device_id.value))
+    recv_arr = ndarray.array(recv_arr, ctx=ndarray.gpu(t.device_id.value))
+#t.dlarrayNcclAllReduce(
+#       arr, arr, ncclDataType_t.ncclFloat32, ncclRedOp_t.ncclSum)
+	
+    t.dlarrayAllToAll(send_arr, recv_arr, ncclDataType_t.ncclFloat32)
+    print("after:  send_arr = "+str(send_arr.asnumpy())+" recv_arr = "+str(recv_arr.asnumpy()))

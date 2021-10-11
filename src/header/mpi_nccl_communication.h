@@ -68,6 +68,8 @@ void dlarraySend(DLArray *array, int datatype, int target, ncclComm_t comm,
                  DLStreamHandle stream_handle);
 void dlarrayRecv(DLArray *array, int datatype, int src, ncclComm_t comm,
                  DLStreamHandle stream_handle);
+void dlarrayAllToAll(DLArray *sendarray, DLArray *recvarray, int datatype, \
+                     ncclComm_t comm, DLStreamHandle stream_handle, int num_of_peers);
 void commDestroyNccl(ncclComm_t *comm);
 void setDevice(int device_id);
 }

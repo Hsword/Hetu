@@ -53,6 +53,21 @@ void NCCL_AllReduce(float **sendbuff, float **recvbuff, int size,
     NCCLCHECK(ncclGroupEnd());
 }
 
+void NCCL_AllToAll(float **sendbuff, float **recvbuff, int size,
+					ncclComm_t *comms, cudaStream_t *stream,
+					int devices_numbers){
+	// what is slice?
+	int one_piece = size/devices_numbers;
+	NCCLCHECK(ncclGroupStart());
+	for(int i=0; i<devices_numbers; i++){
+		for(int j=0; j<devices_numbers; j++){
+			NCCLCHECK(ncclSend((const void*)(sendbuff[i] + j*one_piece*sizeof(float)), one_piece, ncclFloat, j, comms[i], stream[i]));
+			NCCLCHECK(ncclRecv((void*)(recvbuff[i] + j*one_piece*sizeof(float)), one_piece, ncclFloat, j,comms[i], stream[i]));
+		}
+	}
+	NCCLCHECK(ncclGroupEnd());
+}
+
 void display(const float *device_data, int dev_id, int size) {
     printf("Display Device %d:\n", dev_id);
     CUDACHECK(cudaSetDevice(dev_id));
