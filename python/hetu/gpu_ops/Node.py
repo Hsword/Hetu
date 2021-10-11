@@ -127,6 +127,9 @@ class Op(object):
         """
         raise NotImplementedError
 
+    def naive_infer_shape(self, input_shapes):
+        return self.infer_shape(input_shapes)
+
     def add_transfer_op(self, src_node, dst_ctx, h2d_ops, d2h_ops):
         from .DataTransfer import datah2d_op, datad2h_op, datad2h_sparse_op
 

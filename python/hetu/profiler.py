@@ -21,6 +21,14 @@ class HetuProfiler(object):
         self.cnt = 0
         self.idx = 0  # index of feed arrays
 
+    def renew_nodes(self, computing_nodes, feed_shapes, node_to_arr_map, single=False):
+        self.computing_nodes = computing_nodes
+        self.feed_shapes = feed_shapes
+        self.node_to_arr_map = node_to_arr_map
+        self.timer = {node: 0.0 for node in self.computing_nodes}
+        self.cnt = 0
+        self.idx = 0
+
     def renew_instances(self, num_instances=10):
         self.feed_values = {node: [ht.array(np.random.normal(scale=0.01, size=shape).astype(np.float32), ctx=self.ctx) for _ in range(
             num_instances)] for node, shape in self.feed_shapes.items()}

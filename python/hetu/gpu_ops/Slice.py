@@ -57,6 +57,21 @@ class SliceOp(Op):
                 gpu_buf, self.ctx, data_type=np.uintc)
         return self.output_shape
 
+    def naive_infer_shape(self, input_shapes):
+        assert len(input_shapes) == 1
+        ori_shape = list(input_shapes[0])
+        assert len(ori_shape) == len(self.begin_pos)
+        for i in range(len(ori_shape)):
+            if self.ori_output_shape[i] == -1:
+                self.output_shape[i] = ori_shape[i] - self.begin_pos[i]
+            assert self.output_shape[i] > 0
+            assert self.begin_pos[i] + self.output_shape[i] <= ori_shape[i]
+        self.ori_shape = tuple(ori_shape)
+        if hasattr(self, 'grad_node'):
+            self.grad_node.output_shape = self.ori_shape
+            assert len(self.ori_shape) == len(self.grad_node.begin_pos)
+        return self.output_shape
+
 
 class SliceGradientOp(Op):
     def __init__(self, node_A, begin_pos, output_shape, ctx=None):

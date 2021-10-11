@@ -293,6 +293,8 @@ class NodeStatus(object):
         return '(' + str(self.state) + ', ' + str(self.duplicate) + ', ' + str(self.order) + ')'
 
     def __eq__(self, other):
+        if self is other:
+            return True
         assert self.valid_all() and other.valid_all(), 'Cannot check equal if not valid.'
         return self.state == other.state \
             and self.duplicate == other.duplicate \

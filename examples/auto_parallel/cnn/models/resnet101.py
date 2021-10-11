@@ -5,7 +5,7 @@ from hetu import layers as htl
 def ResNet101():
     def bottleneck(inplanes, outplanes, stride, downsample=htl.Identity()):
         nonlocal layer_id
-        sequence = htl.Sequence(
+        main_sequence = htl.Sequence(
             htl.Conv2d(inplanes, outplanes, kernel_size=1, stride=1,
                        initializer=conv_init, bias=False),
             htl.BatchNorm(outplanes),
@@ -20,8 +20,12 @@ def ResNet101():
                        initializer=conv_init, bias=False),
             htl.BatchNorm(4 * outplanes),
         )
+        sequence = htl.Sequence(
+            htl.SumLayers([main_sequence, downsample]),
+            htl.Relu(),
+        )
         layer_id += 3
-        return lambda x: htl.Relu()(sequence(x) + downsample(x))
+        return sequence
 
     conv_init = ht.init.GenGeneralXavierNormal(gain=2, mode='fan_out')
     global_planes = 64
