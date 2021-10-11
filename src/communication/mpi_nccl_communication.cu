@@ -137,6 +137,40 @@ void _ncclAllReduce(const void *sendbuff, void *recvbuff, int size,
                             _get_proper_redop(op), comm, stream));
 }
 
+void _ncclAllToAll(const void *sendbuff, void *recvbuff, int size,
+				   int datatype, ncclComm_t comm,
+				   cudaStream_t stream, int num_of_peers) {
+	ncclDataType_t type = _get_proper_datatype(datatype);
+	int unit_size = sizeof(type);
+
+	switch(type){
+		case 0:
+		case 1:
+			unit_size = 1;
+			break;
+		case 5:
+			unit_size = 2;
+			break;
+		case 2:
+		case 3:
+		case 7:
+			unit_size = 4;
+			break;
+		case 4:
+		case 8:
+			unit_size = 8;
+			break;
+	}
+
+	int split_size = size / num_of_peers;
+	GroupStart();
+	for(int i = 0; i < num_of_peers; i++){
+		NCCLCHECK(ncclSend(sendbuff+i*split_size*unit_size, split_size, type, i, comm, stream));
+		NCCLCHECK(ncclRecv(recvbuff+i*split_size*unit_size, split_size, type, i, comm, stream));
+	}
+	GroupEnd();
+}
+
 void _ncclBroadcast(const void *sendbuff, void *recvbuff, int size,
                     int datatype, int root, ncclComm_t comm,
                     cudaStream_t stream) {
@@ -203,6 +237,19 @@ void dlarrayAllGather(DLArray *array, DLArray *output_array, int datatype,
     float *output_buffer = (float *)(output_array->data);
     cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
     _ncclAllGather(input_buffer, output_buffer, size, datatype, comm, stream);
+}
+
+void dlarrayAllToAll(DLArray *sendarray, DLArray *recvarray, int datatype, ncclComm_t comm,
+					 DLStreamHandle stream_handle, int num_of_peers){
+	int size = 1;
+	for(int i = 0; i < sendarray->ndim; i++){
+		size = size * sendarray->shape[i];
+	}
+	float *send_data_buffer = (float *)(sendarray->data);
+	float* recv_data_buffer = (float *)(recvarray->data);
+	cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
+
+	_ncclAllToAll(send_data_buffer, recv_data_buffer, size, datatype, comm, stream, num_of_peers);
 }
 
 void dlarraySend(DLArray *array, int datatype, int target, ncclComm_t comm,

@@ -51,6 +51,10 @@ class NCCL_Communicator():
         lib_nccl.NCCL_AllReduce(
             send_buff, recv_buff, size, self.comms, self.streams, self.devs_number)
 
+    def _alltoall(self, send_buff, recv_buff, size):
+        lib_nccl.NCCL_AllToAll(
+            send_buff, recv_buff, size, self.comms, self.streams, self.devs_number)
+
     def get_send_buff(self, array):
         self.send_buff = (c_void_p * self.devs_number.value)(*array)
 
