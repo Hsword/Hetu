@@ -144,6 +144,7 @@ class HetuConfig(object):
         'pipeline_rank',
         'pipeline_nrank',
         'pipeline_dp_rank',
+        'use_preduce',
         'dynamic_memory',
         'layer_indices',
         'dist_strategy',
@@ -167,6 +168,7 @@ class HetuConfig(object):
         pipeline=None,
         dynamic_memory=False,
         dist_strategy=None,
+        use_preduce=False,
     ):
         '''
         context: default device context
@@ -176,8 +178,9 @@ class HetuConfig(object):
             AllRedeuce -> MPI AllReduce
             Hybrid     -> Parameter Server for Sparse Parameter and MPI AllReduce for Dense Parameter
         '''
-        assert pipeline in ("", "gpipe", "pipedream", "hetpipe")
+        assert pipeline in (None, "gpipe", "pipedream", "hetpipe")
         self.pipeline = pipeline
+        self.use_preduce = use_preduce
 
         self.eval_node_list = eval_node_list
         self.train_name = train_name
@@ -206,7 +209,7 @@ class HetuConfig(object):
                 [dev.device_id for dev in devices if dev.local and ndarray.is_gpu_ctx(dev)])
             if not launchMPI and not launchPS:
                 self.comm_mode = None
-            elif launchMPI and not launchPS:
+            elif launchMPI and (not launchPS or self.use_preduce):
                 self.comm_mode = 'AllReduce'
             elif not launchMPI and launchPS:
                 self.comm_mode = 'PS'
@@ -1145,6 +1148,7 @@ def get_pipeline_stage_info(node_list, ctx):
     # for a n stage pipeline, we have 2 * ( n - 1) pipeline articulation and 1 optimizer,
     # thus max(stage_index.values()) = 2n -1
     total_stage = ( max(stage_index.values()) + 1 ) // 2
+    total_stage = max(1, total_stage) # handle corner case
     # find out my stage index, which is the biggest stage number in the forward pass
     my_stage = set()
     # dp rank (data parallel rank) is used to let dataloader know which part of data it should load

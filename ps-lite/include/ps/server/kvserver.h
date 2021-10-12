@@ -2,6 +2,7 @@
 
 #include "ps/server/PSFHandle.h"
 #include "ps/server/ssp_handler.h"
+#include "ps/server/preduce_handler.h"
 #include "ps/psf/serializer.h"
 #include "ps/kvapp.h"
 #include <memory>
@@ -26,6 +27,7 @@ public:
         // TODO : change this to index_sequence if c++14 is available
         handler_[static_cast<int>(PsfGroup::kParameterServer)] = std::make_shared<PSHandler<PsfGroup::kParameterServer>>();
         handler_[static_cast<int>(PsfGroup::kSSPControl)] = std::make_shared<PSHandler<PsfGroup::kSSPControl>>();
+        handler_[static_cast<int>(PsfGroup::kPReduceScheduler)] = std::make_shared<PSHandler<PsfGroup::kPReduceScheduler>>();
     }
 
 private:

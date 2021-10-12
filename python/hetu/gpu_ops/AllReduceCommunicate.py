@@ -11,6 +11,7 @@ class AllReduceCommunicateOp(Op):
         self.on_gpu = ndarray.is_gpu_ctx(self.ctx)
         self.on_cpu = not self.on_gpu
         self.comm = comm
+        self.event = create_event_handle(self.ctx)
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
@@ -32,8 +33,6 @@ class AllReduceCommunicateOp(Op):
             else:
                 assert False
         else:
-            if self.event == None:
-                self.event = create_event_handle(self.ctx)
             if isinstance(input_vals[0], ndarray.NDArray):
                 self.comm.dlarrayNcclAllReduce(
                     input_vals[0], output_val, self.dtype, self.reduce_op, stream_handle)
