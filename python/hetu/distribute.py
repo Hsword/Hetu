@@ -376,7 +376,7 @@ class OneWeirdTrick4CNN(Strategy):
 
 
 class FlexFlow(Strategy):
-    def __init__(self, feed_shapes, bandwidth=None, budget=-1, alpha=0.05):
+    def __init__(self, feed_shapes, bandwidth=None, budget=-1, alpha=0.05, save_path=None, load_path=None):
         from itertools import combinations
         from collections import namedtuple
         # now only consider homogeneous environment
@@ -421,6 +421,8 @@ class FlexFlow(Strategy):
         self.raw_ctx = DeviceGroup(tuple(self.all_devices))
         self.rank0_ctx = DeviceGroup(self.settings.chief + ':gpu:0')
         self.rank0_device = ht.gpu(0)
+        self.save_path = save_path
+        self.load_path = load_path
 
         # generate candidates for random sampling
         cur_num = 1
@@ -1061,129 +1063,96 @@ class FlexFlow(Strategy):
             for grad in grads:
                 grad.raw_ctx = node.raw_ctx
         if mpi_comm.rank == 0:
-            # infer states using partial information
-            start = time()
-            meta_cur_state_map = node_cur_state_map.copy()
-            node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
-                eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
-            task_graph, ready_tasks = self.init_task_graph(
-                eval_node_list, node_cur_state_map, node_tar_state_map)
-            simulation_result = self.full_simulate(task_graph, ready_tasks)
-            print('Initial data parallel configuration generated; simulation result: {:.3f}ms.'.format(
-                simulation_result))
-            best_cur_status = [meta_cur_state_map[node]
-                               for node in all_possible_nodes]
-            best_raw_ctx = [node.raw_ctx for node in all_possible_nodes]
-            best_simulation = simulation_result
-            best_emerge_time = time()
-            prev_simulation = simulation_result
-            cnt = 0
-            # with open('meta{}.txt'.format(cnt), 'w') as fw:
-            #     for node in all_possible_nodes:
-            #         print(
-            #             node, node.inputs, meta_cur_state_map[node], node.raw_ctx, file=fw, flush=True)
-            # with open('status{}.txt'.format(cnt), 'w') as fw:
-            #     from .gpu_ops.executor import find_topo_sort
-            #     topo_order = find_topo_sort(eval_node_list)
-            #     for node in topo_order:
-            #         if node in node_tar_state_map:
-            #             print(node, node.inputs, node.raw_ctx,
-            #                   node_cur_state_map[node], node_tar_state_map[node], file=fw, flush=True)
-            #         elif node in node_cur_state_map:
-            #             print(node, node.inputs, node.raw_ctx,
-            #                   node_cur_state_map[node], file=fw, flush=True)
-            #         else:
-            #             print(node, node.inputs, node.raw_ctx,
-            #                   file=fw, flush=True)
-            # with open('log{}.txt'.format(cnt), 'w') as fw:
-            #     for task in task_graph:
-            #         print(task, task.inputs, task.outputs, task.shape, task.exeTime, task.device,
-            #               task.readyTime, task.startTime, task.endTime, file=fw, flush=True)
+            if self.load_path is None:
+                print('No configuration loaded. Start autotuning.')
+                # infer states using partial information
+                start = time()
+                meta_cur_state_map = node_cur_state_map.copy()
+                node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
+                    eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
+                task_graph, ready_tasks = self.init_task_graph(
+                    eval_node_list, node_cur_state_map, node_tar_state_map)
+                simulation_result = self.full_simulate(task_graph, ready_tasks)
+                print('Initial data parallel configuration generated; simulation result: {:.3f}ms.'.format(
+                    simulation_result))
+                best_cur_status = [meta_cur_state_map[node]
+                                   for node in all_possible_nodes]
+                best_raw_ctx = [node.raw_ctx for node in all_possible_nodes]
+                best_simulation = simulation_result
+                best_emerge_time = time()
+                prev_simulation = simulation_result
+                cnt = 0
 
-            ending = time()
-            cnt += 1
-            while (self.budget < 0 or ending - start < self.budget) and 2 * (ending - best_emerge_time) < ending - start:
-                # sample new configuration
-                changing_node = choice(all_possible_nodes)
-                new_split = choice(self.split_candidates)
-                new_raw_ctx = choice(self.device_candidates[np.prod(
-                    list(new_split.values()), dtype=int)])
-                while new_split == node_cur_state_map[changing_node].state and new_raw_ctx == changing_node.raw_ctx:
+                ending = time()
+                cnt += 1
+                while (self.budget < 0 or ending - start < self.budget) and 2 * (ending - best_emerge_time) < ending - start:
+                    # sample new configuration
+                    changing_node = choice(all_possible_nodes)
                     new_split = choice(self.split_candidates)
                     new_raw_ctx = choice(self.device_candidates[np.prod(
                         list(new_split.values()), dtype=int)])
-                print('Search round {}'.format(cnt))
-                print('    Change node {} from {} in {} to {} in {}.'.format(
-                    changing_node, node_cur_state_map[changing_node].state, changing_node.raw_ctx, new_split, new_raw_ctx))
-                ori_raw_ctx = changing_node.raw_ctx
-                changing_node.raw_ctx = new_raw_ctx
-                for grad in node_group[changing_node]:
-                    grad.raw_ctx = new_raw_ctx
-                ori_status = meta_cur_state_map[changing_node]
-                meta_cur_state_map[changing_node] = NodeStatus(
-                    new_split, dev_num=changing_node.raw_ctx.mp_device_num)
-                # with open('meta{}.txt'.format(cnt), 'w') as fw:
-                #     for node in all_possible_nodes:
-                #         print(
-                #             node, node.inputs, meta_cur_state_map[node], node.raw_ctx, file=fw, flush=True)
-                node_cur_state_map = meta_cur_state_map.copy()
-                node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
-                    eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
-                # with open('status{}.txt'.format(cnt), 'w') as fw:
-                #     from .gpu_ops.executor import find_topo_sort
-                #     topo_order = find_topo_sort(eval_node_list)
-                #     for node in topo_order:
-                #         if node in node_tar_state_map:
-                #             print(node, node.inputs, node.raw_ctx,
-                #                   node_cur_state_map[node], node_tar_state_map[node], file=fw, flush=True)
-                #         elif node in node_cur_state_map:
-                #             print(node, node.inputs, node.raw_ctx,
-                #                   node_cur_state_map[node], file=fw, flush=True)
-                #         else:
-                #             print(node, node.inputs, node.raw_ctx,
-                #                   file=fw, flush=True)
-                task_graph, ready_tasks = self.init_task_graph(
-                    eval_node_list, node_cur_state_map, node_tar_state_map)
-                new_simulation = self.full_simulate(task_graph, ready_tasks)
-                # with open('log{}.txt'.format(cnt), 'w') as fw:
-                #     for task in task_graph:
-                #         print(task, task.inputs, task.outputs, task.shape, task.exeTime, task.device,
-                #               task.readyTime, task.startTime, task.endTime, file=fw, flush=True)
-                print('    Simulation result {:.3f}ms.'.format(new_simulation))
-                if new_simulation < prev_simulation:
-                    # move to new strategy
-                    print('    Better than last simulation; move to new configuration.')
-                    if new_simulation < best_simulation:
-                        best_cur_status = [meta_cur_state_map[node]
-                                           for node in all_possible_nodes]
-                        best_raw_ctx = [
-                            node.raw_ctx for node in all_possible_nodes]
-                        best_simulation = new_simulation
-                        best_emerge_time = time()
-                        print('    Reach the best simulation so far!')
-                    prev_simulation = new_simulation
-                else:
-                    # probably move to new strategy
-                    threshold = np.exp(
-                        self.alpha * (prev_simulation - new_simulation))
-                    print('    Worse than last simulation; the probability of moving is {:.3f}.'.format(
-                        threshold))
-                    if random() < threshold:
+                    while new_split == node_cur_state_map[changing_node].state and new_raw_ctx == changing_node.raw_ctx:
+                        new_split = choice(self.split_candidates)
+                        new_raw_ctx = choice(self.device_candidates[np.prod(
+                            list(new_split.values()), dtype=int)])
+                    print('Search round {}'.format(cnt))
+                    print('    Change node {} from {} in {} to {} in {}.'.format(
+                        changing_node, node_cur_state_map[changing_node].state, changing_node.raw_ctx, new_split, new_raw_ctx))
+                    ori_raw_ctx = changing_node.raw_ctx
+                    changing_node.raw_ctx = new_raw_ctx
+                    for grad in node_group[changing_node]:
+                        grad.raw_ctx = new_raw_ctx
+                    ori_status = meta_cur_state_map[changing_node]
+                    meta_cur_state_map[changing_node] = NodeStatus(
+                        new_split, dev_num=changing_node.raw_ctx.mp_device_num)
+                    node_cur_state_map = meta_cur_state_map.copy()
+                    node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
+                        eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
+                    task_graph, ready_tasks = self.init_task_graph(
+                        eval_node_list, node_cur_state_map, node_tar_state_map)
+                    new_simulation = self.full_simulate(
+                        task_graph, ready_tasks)
+                    print('    Simulation result {:.3f}ms.'.format(
+                        new_simulation))
+                    if new_simulation < prev_simulation:
                         # move to new strategy
-                        print('    Move to new configuration.')
+                        print(
+                            '    Better than last simulation; move to new configuration.')
+                        if new_simulation < best_simulation:
+                            best_cur_status = [meta_cur_state_map[node]
+                                               for node in all_possible_nodes]
+                            best_raw_ctx = [
+                                node.raw_ctx for node in all_possible_nodes]
+                            best_simulation = new_simulation
+                            best_emerge_time = time()
+                            print('    Reach the best simulation so far!')
                         prev_simulation = new_simulation
                     else:
-                        # not move
-                        print('    Keep the last configuration.')
-                        meta_cur_state_map[changing_node] = ori_status
-                        changing_node.raw_ctx = ori_raw_ctx
-                        for grad in node_group[changing_node]:
-                            grad.raw_ctx = ori_raw_ctx
+                        # probably move to new strategy
+                        threshold = np.exp(
+                            self.alpha * (prev_simulation - new_simulation))
+                        print('    Worse than last simulation; the probability of moving is {:.3f}.'.format(
+                            threshold))
+                        if random() < threshold:
+                            # move to new strategy
+                            print('    Move to new configuration.')
+                            prev_simulation = new_simulation
+                        else:
+                            # not move
+                            print('    Keep the last configuration.')
+                            meta_cur_state_map[changing_node] = ori_status
+                            changing_node.raw_ctx = ori_raw_ctx
+                            for grad in node_group[changing_node]:
+                                grad.raw_ctx = ori_raw_ctx
 
-                    # TODO: delta change current states, target states, task graph, simulation result(maybe need to profile)
-                ending = time()
-                cnt += 1
-                # exit()
+                        # TODO: delta change current states, target states, task graph, simulation result(maybe need to profile)
+                    ending = time()
+                    cnt += 1
+                node_cur_state_map = meta_cur_state_map
+            else:
+                print('Loading configuration from {} ...'.format(self.load_path))
+                with open(self.load_path, 'rb') as fr:
+                    best_cur_status, best_raw_ctx = pickle.load(fr)
             status_bytes = pickle.dumps(best_cur_status)
             context_bytes = pickle.dumps(best_raw_ctx)
             status_length = len(status_bytes)
@@ -1195,7 +1164,6 @@ class FlexFlow(Strategy):
                 cast(status_bytes, c_void_p), status_length, root=0)
             mpi_comm.MPI_Broadcast(
                 cast(context_bytes, c_void_p), context_length, root=0)
-            node_cur_state_map = meta_cur_state_map
         else:
             sizes = (c_int * 2)()
             psizes = cast(sizes, c_void_p)
@@ -1211,6 +1179,10 @@ class FlexFlow(Strategy):
                 string_at(status_bytes, size=status_length))
             best_raw_ctx = pickle.loads(
                 string_at(context_bytes, size=context_length))
+        if self.save_path is not None and mpi_comm.rank == 0:
+            print('Saving configuration to {} ...'.format(self.save_path))
+            with open(self.save_path, 'wb') as fw:
+                pickle.dump((best_cur_status, best_raw_ctx), fw)
         for i, node in enumerate(all_possible_nodes):
             node_cur_state_map[node] = best_cur_status[i]
             node.raw_ctx = best_raw_ctx[i]
