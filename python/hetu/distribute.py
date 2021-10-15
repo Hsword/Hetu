@@ -3,7 +3,8 @@ import yaml
 import socket
 import psutil
 import numpy as np
-from random import choice
+from random import choice, random
+from collections import defaultdict
 
 from .context import DeviceGroup, NodeStatus
 from .gpu_ops.Variable import PlaceholderOp
@@ -428,7 +429,8 @@ class FlexFlow(Strategy):
             left = cur_num
             right = 1
             while left >= 1:
-                self.split_candidates.append({0: left, 1: right})
+                cand = {k: v for k, v in {0: left, 1: right}.items() if v != 1}
+                self.split_candidates.append(cand)
                 left //= 2
                 right *= 2
             cur_num *= 2
@@ -451,29 +453,25 @@ class FlexFlow(Strategy):
             self.outputs = []
             for task in inputs:
                 task.add_output(self)
-            self.exetime = None
+            self.exeTime = None
             self.readyTime = 0
             self.startTime = 0
             self.endTime = 0
             self.preTask = 0
             self.nextTask = 0
-            self.state = 0
+            self.state = 0  # 0 for incomplete, 1 for complete
 
         def add_output(self, out_node):
             self.outputs.append(out_node)
 
-        def set_exetime(self, exetime):
-            self.exetime = exetime
+        def set_exetime(self, exeTime):
+            self.exeTime = exeTime
 
         def __repr__(self):
             return self.name
 
-    def sample_config(self):
-        new_splits = choice(self.split_candidates)
-        num_devices = np.prod(new_splits.values(), dtype=int)
-        new_devices = choice(self.device_candidates[num_devices])
-        new_config = self.OpConfig(new_devices, new_splits)
-        return new_config
+        def __lt__(self, other):
+            return self.readyTime < other.readyTime
 
     def profile_new_case(self, new_node, task, opt=False):
         new_node.ctx = self.rank0_device
@@ -484,10 +482,11 @@ class FlexFlow(Strategy):
         if num_cur_ph < num_inputs:
             self.cached_placeholders.extend([PlaceholderOp(
                 'test_node', ctx=self.rank0_device) for _ in range(num_inputs - num_cur_ph)])
+        # return 0.
         new_node.inputs = self.cached_placeholders[:len(task.inputs)]
         new_node.infer_shape([t.shape for t in task.inputs])
-        node_to_arr_map = {n: ht.empty(t.shape, ctx=ht.gpu(
-            0)) for n, t in zip(new_node.inputs, task.inputs)}
+        node_to_arr_map = {n: ht.empty(t.shape, ctx=self.rank0_device) for n, t in zip(
+            new_node.inputs, task.inputs)}
         node_to_arr_map[new_node] = ht.empty(
             task.shape, ctx=self.rank0_device) if not opt else None
         self.profiler.renew_nodes(
@@ -530,7 +529,7 @@ class FlexFlow(Strategy):
         from .gpu_ops.Split import split_op, SplitOp
         name = 'split_{}'.format(op_index)
         device = input_task.device
-        shape = self.get_split_shape(splits, input_task.shape)
+        shape = self.get_split_shape(dict(zip(axes, splits)), input_task.shape)
         task = self.TaskNode(name, device, inputs=(input_task,), shape=shape)
         # TODO: consider whether add indices in key
         key = (SplitOp, task.shape, input_task.shape)
@@ -557,7 +556,7 @@ class FlexFlow(Strategy):
     def make_sum_task_node(self, device, inputs):
         from .gpu_ops.Sum import sum_op, SumOp
         task = self.TaskNode('sum_duplicate', device, inputs=inputs)
-        key = (SumOp, task.shape) + (n.shape for n in inputs)
+        key = (SumOp, task.shape) + tuple(n.shape for n in inputs)
         if key not in self.cached_exetime:
             new_node = sum_op(self.cached_placeholders, ctx=self.rank0_device)
             self.cached_exetime[key] = self.profile_new_case(new_node, task)
@@ -610,7 +609,7 @@ class FlexFlow(Strategy):
             allreduce_devices = []
             dup_dim = order.index(-1)
             for cur_order in order[dup_dim+1:]:
-                interval *= order[cur_order]
+                interval *= state[cur_order]
             macro_interval = interval * duplicate
             start = index - index % macro_interval + index % interval
             for ind in range(start, start + interval * duplicate, interval):
@@ -632,7 +631,7 @@ class FlexFlow(Strategy):
         task.set_exetime(cur_size / cur_band)
         return task
 
-    def init_states(self, node_list, init_ctx):
+    def init_states(self, node_list, for2back, init_ctx):
         # init as data parallel
         from .gpu_ops.Conv2d import Conv2dOp
         from .gpu_ops.Conv2dAddBias import Conv2dAddBiasOp
@@ -648,22 +647,40 @@ class FlexFlow(Strategy):
                 return
             visited.add(node)
             node.raw_ctx = ctx
+            key = None  # the key of node group
             if isinstance(node, (SoftmaxCrossEntropyOp, SoftmaxCrossEntropySparseOp)):
                 init_cur_states(node.inputs[0], self.raw_ctx)
                 init_cur_states(node.inputs[1], self.rank0_ctx)
                 node_cur_state_map[node] = NodeStatus({}, dev_num=1)
             else:
+                backbone_node = isinstance(
+                    node, (Conv2dOp, Conv2dAddBiasOp, MatMulOp, LinearOp, SumOp, ConcatenateOp))
                 for n in node.inputs:
-                    init_cur_states(n, ctx)
-                if isinstance(node, (Conv2dOp, Conv2dAddBiasOp, MatMulOp, LinearOp, SumOp, ConcatenateOp)):
+                    if backbone_node and isinstance(n, PlaceholderOp) and n not in visited:
+                        node_group[node].append(n)
+                    temp_key = init_cur_states(n, ctx)
+                    if key is None:
+                        key = temp_key
+                    else:
+                        assert backbone_node or temp_key in (key, None)
+                if backbone_node:
                     node_cur_state_map[node] = NodeStatus(
                         {0: self.num_ctxs}, dev_num=node.raw_ctx.mp_device_num)
+                    key = node
+                elif key is not None:
+                    node_group[key].append(node)
+            return key
 
         visited = set()
         node_cur_state_map = {}
+        node_group = defaultdict(list)
         for node in node_list:
             init_cur_states(node, init_ctx)
-        return node_cur_state_map
+        for k, v in node_group.items():
+            backward_nodes = for2back[k] + \
+                sum([for2back.get(n, []) for n in v], [])
+            node_group[k].extend(backward_nodes)
+        return node_cur_state_map, node_group
 
     def get_split_shape(self, parts, shape):
         shape = list(shape)
@@ -682,7 +699,6 @@ class FlexFlow(Strategy):
 
     def init_task_graph(self, node_list, node_cur_state_map, node_tar_state_map):
         # TODO: transfer node_to_cur_state_map to task graph
-        from collections import defaultdict
         from copy import copy
         from .optimizer import OptimizerOp
 
@@ -694,6 +710,7 @@ class FlexFlow(Strategy):
                         status.state, self.feed_shapes.get(node, node.shape))
                     cur_tasks = [self.make_task_node(
                         node, i, new_shape) for i in range(status.dev_num)]
+                    ready_tasks.extend(cur_tasks)
 
                 elif isinstance(node, OptimizerOp):
                     self.cached_optimizer = copy(node.optimizer)
@@ -729,7 +746,10 @@ class FlexFlow(Strategy):
         def init_comm_task(prev, node):
             prev_tasks = init_task(prev)
             generated_tasks = []
-            if node in node_tar_state_map[prev] and node_cur_state_map[prev] != node_tar_state_map[prev][node]:
+            deduce_mp = node in node_tar_state_map[prev] \
+                and (node_cur_state_map[prev] != node_tar_state_map[prev][node] or prev.raw_ctx != node.raw_ctx) \
+                and (node_cur_state_map[prev].is_dist() or node_tar_state_map[prev][node].is_dist())
+            if deduce_mp:
                 key = node_tar_state_map[prev][node]
                 if not key in recv_src[prev]:
                     cur_tasks = []
@@ -842,7 +862,7 @@ class FlexFlow(Strategy):
                                         device_index, prev_tasks[mp_index], keys, indices, splits)
                                     generated_tasks.append(res_task)
                                 else:
-                                    res_task = prev_task[mp_index]
+                                    res_task = prev_tasks[mp_index]
                                 if prev_devices[mp_index] != cur_devices[device_index]:
                                     res_task = self.make_comm_task_node(
                                         prev_devices[mp_index].device_id, cur_devices[device_index].device_id, res_task)
@@ -887,7 +907,7 @@ class FlexFlow(Strategy):
                                         assert False, 'The dispatch state (%d, %d) at dimension %d is invalid.' % (
                                             pre_st, target_state[cur_dim], cur_dim)
 
-                        for mp_index in range(prev.mp_device_num):
+                        for mp_index in range(prev.raw_ctx.mp_device_num):
                             cur_state_index = prev_ns.map_dev_to_index(
                                 mp_index)
                             loop_sizes = key.get_loop_sizes()
@@ -945,7 +965,7 @@ class FlexFlow(Strategy):
                             return res_task
 
                         loop_sizes = prev_ns.get_loop_sizes()
-                        for mp_index in range(node.mp_index_num):
+                        for mp_index in range(node.raw_ctx.mp_device_num):
                             cur_state_index = key.map_dev_to_index(mp_index)
                             device_index = 0
                             cur_tasks.append(cross_receive(0))
@@ -965,7 +985,8 @@ class FlexFlow(Strategy):
                             res_task = self.make_comm_task_node(
                                 prev.raw_ctx.workers[0].device_id, node.raw_ctx.workers[0].device_id, prev_tasks[0])
                             generated_tasks.append(res_task)
-                        recv_src[prev][-1] = [res_task]
+                            recv_src[prev][-1] = [res_task]
+                        res_task = recv_src[prev][-1][0]
                     else:
                         res_task = prev_tasks[0]
                     task_topo_order.extend(generated_tasks)
@@ -976,66 +997,226 @@ class FlexFlow(Strategy):
                     return prev_tasks
         node_to_task_map = {}
         task_topo_order = []
+        ready_tasks = []
         recv_src = defaultdict(dict)
         for node in node_list:
             init_task(node)
-        # with open('dev.txt', 'w') as fw:
-        #     for task in task_topo_order:
-        #         print(task, task.inputs, task.outputs,
-        #               task.shape, task.exetime, task.device, file=fw, flush=True)
-        # exit()
-        return task_topo_order
+        return task_topo_order, ready_tasks
+
+    def full_simulate(self, task_graph, ready_tasks):
+        import heapq
+        readyQueue = []
+        last_tasks = [self.TaskNode('NULL', i, shape=())
+                      for i in range(len(self.all_devices))]
+        # TODO: consider devices for communication
+        for task in ready_tasks:
+            dev = task.device
+            task.state = 1
+            last_tasks[dev] = task
+            for t in task.outputs:
+                if all([tt.state == 1 for tt in t.inputs]):
+                    heapq.heappush(readyQueue, t)
+        while readyQueue != []:
+            task = heapq.heappop(readyQueue)
+            dev = task.device
+            task.state = 1
+            if isinstance(dev, tuple):
+                # communication
+                task.startTime = task.readyTime
+            else:
+                task.startTime = max(task.readyTime, last_tasks[dev].endTime)
+                last_tasks[dev] = task
+            task.endTime = task.startTime + task.exeTime
+            for t in task.outputs:
+                if all([tt.state == 1 for tt in t.inputs]):
+                    t.readyTime = task.endTime
+                    heapq.heappush(readyQueue, t)
+        result = 0
+        for task in task_graph:
+            assert task.state == 1, 'Task {} not complete!'.format(task)
+            result = max(result, task.endTime)
+        return result
 
     def set_raw_ctxs_n_states(self, eval_node_list):
         from .context import complete_state_map_with_partial_information
-        from .gpu_ops.executor import wrapped_mpi_nccl_init
+        from .gpu_ops.executor import wrapped_mpi_nccl_init, get_mpi_communicate
         from time import time
+        import pickle
+        from ctypes import c_void_p, c_int, cast, string_at, c_char
 
-        mpi_comm = wrapped_mpi_nccl_init()
+        wrapped_mpi_nccl_init()
+        mpi_comm = get_mpi_communicate()
+        eval_nodes, opt = self.get_forward_eval_nodes(eval_node_list)
+        assert opt is not None
+        # add partial information for forward nodes
+        for2back = opt.optimizer.forward2backward
+        node_cur_state_map, node_group = self.init_states(
+            eval_nodes, for2back, self.rank0_ctx)
+        all_possible_nodes = [
+            k for k, v in node_cur_state_map.items() if v.is_dist()]
+        # set context for backward nodes using forward nodes
+        for grad in for2back.pop(None):
+            grad.raw_ctx = self.rank0_ctx
+        for node, grads in for2back.items():
+            for grad in grads:
+                grad.raw_ctx = node.raw_ctx
         if mpi_comm.rank == 0:
-            eval_nodes, opt = self.get_forward_eval_nodes(eval_node_list)
-            assert opt is not None
-            # add partial information for forward nodes
-            node_cur_state_map = self.init_states(eval_nodes, self.rank0_ctx)
-            all_possible_nodes = list(node_cur_state_map.keys())
-            # set context for backward nodes using forward nodes
-            for2back = opt.optimizer.forward2backward
-            for grad in for2back.pop(None):
-                grad.raw_ctx = self.rank0_ctx
-            for node, grads in for2back.items():
-                for grad in grads:
-                    grad.raw_ctx = node.raw_ctx
             # infer states using partial information
+            start = time()
             meta_cur_state_map = node_cur_state_map.copy()
             node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
                 eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
-            task_graph = self.init_task_graph(
+            task_graph, ready_tasks = self.init_task_graph(
                 eval_node_list, node_cur_state_map, node_tar_state_map)
-            # TODO: simulate time using new task graph, maybe need to profile
+            simulation_result = self.full_simulate(task_graph, ready_tasks)
+            print('Initial data parallel configuration generated; simulation result: {:.3f}ms.'.format(
+                simulation_result))
+            best_cur_status = [meta_cur_state_map[node]
+                               for node in all_possible_nodes]
+            best_raw_ctx = [node.raw_ctx for node in all_possible_nodes]
+            best_simulation = simulation_result
+            best_emerge_time = time()
+            prev_simulation = simulation_result
+            cnt = 0
+            # with open('meta{}.txt'.format(cnt), 'w') as fw:
+            #     for node in all_possible_nodes:
+            #         print(
+            #             node, node.inputs, meta_cur_state_map[node], node.raw_ctx, file=fw, flush=True)
+            # with open('status{}.txt'.format(cnt), 'w') as fw:
+            #     from .gpu_ops.executor import find_topo_sort
+            #     topo_order = find_topo_sort(eval_node_list)
+            #     for node in topo_order:
+            #         if node in node_tar_state_map:
+            #             print(node, node.inputs, node.raw_ctx,
+            #                   node_cur_state_map[node], node_tar_state_map[node], file=fw, flush=True)
+            #         elif node in node_cur_state_map:
+            #             print(node, node.inputs, node.raw_ctx,
+            #                   node_cur_state_map[node], file=fw, flush=True)
+            #         else:
+            #             print(node, node.inputs, node.raw_ctx,
+            #                   file=fw, flush=True)
+            # with open('log{}.txt'.format(cnt), 'w') as fw:
+            #     for task in task_graph:
+            #         print(task, task.inputs, task.outputs, task.shape, task.exeTime, task.device,
+            #               task.readyTime, task.startTime, task.endTime, file=fw, flush=True)
 
-            start = time()
             ending = time()
-            found = False
-            # TODO: implement another break condition: no improvement in half of the search time
-            # TODO: record the best configuration
-            while not found and (self.budget < 0 or ending - start < self.budget):
+            cnt += 1
+            while (self.budget < 0 or ending - start < self.budget) and 2 * (ending - best_emerge_time) < ending - start:
                 # sample new configuration
-                new_split = choice(self.split_candidates)
-                new_raw_ctx = choice(
-                    self.device_candidates[np.prod(new_split.values(), dtype=int)])
                 changing_node = choice(all_possible_nodes)
+                new_split = choice(self.split_candidates)
+                new_raw_ctx = choice(self.device_candidates[np.prod(
+                    list(new_split.values()), dtype=int)])
+                while new_split == node_cur_state_map[changing_node].state and new_raw_ctx == changing_node.raw_ctx:
+                    new_split = choice(self.split_candidates)
+                    new_raw_ctx = choice(self.device_candidates[np.prod(
+                        list(new_split.values()), dtype=int)])
+                print('Search round {}'.format(cnt))
+                print('    Change node {} from {} in {} to {} in {}.'.format(
+                    changing_node, node_cur_state_map[changing_node].state, changing_node.raw_ctx, new_split, new_raw_ctx))
+                ori_raw_ctx = changing_node.raw_ctx
                 changing_node.raw_ctx = new_raw_ctx
-                for grad in for2back[changing_node]:
-                    grad.raw_ctx = node.raw_ctx
+                for grad in node_group[changing_node]:
+                    grad.raw_ctx = new_raw_ctx
                 ori_status = meta_cur_state_map[changing_node]
                 meta_cur_state_map[changing_node] = NodeStatus(
                     new_split, dev_num=changing_node.raw_ctx.mp_device_num)
+                # with open('meta{}.txt'.format(cnt), 'w') as fw:
+                #     for node in all_possible_nodes:
+                #         print(
+                #             node, node.inputs, meta_cur_state_map[node], node.raw_ctx, file=fw, flush=True)
                 node_cur_state_map = meta_cur_state_map.copy()
                 node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
                     eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
-                # TODO: delta change current states, target states, task graph, simulation result(maybe need to profile)
-                # TODO: decide change or not
-                ending = time()
-        exit()
+                # with open('status{}.txt'.format(cnt), 'w') as fw:
+                #     from .gpu_ops.executor import find_topo_sort
+                #     topo_order = find_topo_sort(eval_node_list)
+                #     for node in topo_order:
+                #         if node in node_tar_state_map:
+                #             print(node, node.inputs, node.raw_ctx,
+                #                   node_cur_state_map[node], node_tar_state_map[node], file=fw, flush=True)
+                #         elif node in node_cur_state_map:
+                #             print(node, node.inputs, node.raw_ctx,
+                #                   node_cur_state_map[node], file=fw, flush=True)
+                #         else:
+                #             print(node, node.inputs, node.raw_ctx,
+                #                   file=fw, flush=True)
+                task_graph, ready_tasks = self.init_task_graph(
+                    eval_node_list, node_cur_state_map, node_tar_state_map)
+                new_simulation = self.full_simulate(task_graph, ready_tasks)
+                # with open('log{}.txt'.format(cnt), 'w') as fw:
+                #     for task in task_graph:
+                #         print(task, task.inputs, task.outputs, task.shape, task.exeTime, task.device,
+                #               task.readyTime, task.startTime, task.endTime, file=fw, flush=True)
+                print('    Simulation result {:.3f}ms.'.format(new_simulation))
+                if new_simulation < prev_simulation:
+                    # move to new strategy
+                    print('    Better than last simulation; move to new configuration.')
+                    if new_simulation < best_simulation:
+                        best_cur_status = [meta_cur_state_map[node]
+                                           for node in all_possible_nodes]
+                        best_raw_ctx = [
+                            node.raw_ctx for node in all_possible_nodes]
+                        best_simulation = new_simulation
+                        best_emerge_time = time()
+                        print('    Reach the best simulation so far!')
+                    prev_simulation = new_simulation
+                else:
+                    # probably move to new strategy
+                    threshold = np.exp(
+                        self.alpha * (prev_simulation - new_simulation))
+                    print('    Worse than last simulation; the probability of moving is {:.3f}.'.format(
+                        threshold))
+                    if random() < threshold:
+                        # move to new strategy
+                        print('    Move to new configuration.')
+                        prev_simulation = new_simulation
+                    else:
+                        # not move
+                        print('    Keep the last configuration.')
+                        meta_cur_state_map[changing_node] = ori_status
+                        changing_node.raw_ctx = ori_raw_ctx
+                        for grad in node_group[changing_node]:
+                            grad.raw_ctx = ori_raw_ctx
 
+                    # TODO: delta change current states, target states, task graph, simulation result(maybe need to profile)
+                ending = time()
+                cnt += 1
+                # exit()
+            status_bytes = pickle.dumps(best_cur_status)
+            context_bytes = pickle.dumps(best_raw_ctx)
+            status_length = len(status_bytes)
+            context_length = len(context_bytes)
+            sizes = (c_int * 2)(status_length, context_length)
+            psizes = cast(sizes, c_void_p)
+            mpi_comm.MPI_Broadcast(psizes, 8, root=0)
+            mpi_comm.MPI_Broadcast(
+                cast(status_bytes, c_void_p), status_length, root=0)
+            mpi_comm.MPI_Broadcast(
+                cast(context_bytes, c_void_p), context_length, root=0)
+            node_cur_state_map = meta_cur_state_map
+        else:
+            sizes = (c_int * 2)()
+            psizes = cast(sizes, c_void_p)
+            mpi_comm.MPI_Broadcast(psizes, 8, root=0)
+            status_length, context_length = sizes[0], sizes[1]
+            status_bytes = (c_char * status_length)()
+            context_bytes = (c_char * context_length)()
+            mpi_comm.MPI_Broadcast(
+                cast(status_bytes, c_void_p), status_length, root=0)
+            mpi_comm.MPI_Broadcast(
+                cast(context_bytes, c_void_p), context_length, root=0)
+            best_cur_status = pickle.loads(
+                string_at(status_bytes, size=status_length))
+            best_raw_ctx = pickle.loads(
+                string_at(context_bytes, size=context_length))
+        for i, node in enumerate(all_possible_nodes):
+            node_cur_state_map[node] = best_cur_status[i]
+            node.raw_ctx = best_raw_ctx[i]
+        for node, grads in node_group.items():
+            for grad in grads:
+                grad.raw_ctx = node.raw_ctx
+        node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
+            eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
         return self.raw_ctx, node_cur_state_map, node_tar_state_map

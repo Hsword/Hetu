@@ -77,13 +77,8 @@ class MatMulOp(Op):
         assert len(input_shapes) == 2
         A = input_shapes[0]
         B = input_shapes[1]
-        shape_A = A[0]
-        shape_B = B[1]
-        if self.matmul_attr_trans_A == True:
-            shape_A = A[1]
-        if self.matmul_attr_trans_B == True:
-            shape_B = B[0]
-        return (shape_A, shape_B)
+        assert A[1-self.matmul_attr_trans_A] == B[self.matmul_attr_trans_B]
+        return (A[self.matmul_attr_trans_A], B[1-self.matmul_attr_trans_B])
 
     def forward_deduce_states(self, input_statuses, status, deduce_order):
         assert len(input_statuses) == 2

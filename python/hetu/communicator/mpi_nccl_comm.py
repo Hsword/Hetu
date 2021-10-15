@@ -111,6 +111,9 @@ class MPI_Communicator(object):
     def MPIGetComm(self):
         lib_mpi_nccl.MPIGetComm(ctypes.byref(self.mpicomm))
 
+    def MPI_Broadcast(self, buffer, size, root=0):
+        lib_mpi_nccl.MPIBcast(buffer, size, root, self.mpicomm)
+
     def MPI_Comm_rank(self):
         lib_mpi_nccl.getMPICommRank(ctypes.byref(
             self.mpicomm), ctypes.byref(self.myRank))

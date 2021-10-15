@@ -34,9 +34,8 @@ void MPIGetComm(MPI_Comm *comm) {
     *comm = MPI_COMM_WORLD;
 }
 
-void MPIBcast(void *buffer, int size, MPI_Datatype datatype, int root,
-              MPI_Comm comm) {
-    MPICHECK(MPI_Bcast(buffer, size, datatype, root, comm));
+void MPIBcast(void *buffer, int size, int root, MPI_Comm comm) {
+    MPICHECK(MPI_Bcast(buffer, size, MPI_BYTE, root, comm));
 }
 
 void getMPICommRank(MPI_Comm *comm, int *myRank) {
@@ -98,7 +97,7 @@ void getNcclUniqueId(ncclUniqueId *Id, MPI_Comm mpi_comm, int localRank,
                      int senderRank) {
     if (localRank == 0)
         NCCLCHECK(ncclGetUniqueId(Id));
-    MPIBcast((void *)Id, sizeof(ncclUniqueId), MPI_BYTE, senderRank, mpi_comm);
+    MPIBcast((void *)Id, sizeof(ncclUniqueId), senderRank, mpi_comm);
 }
 
 void getGroupNcclUniqueId(ncclUniqueId *Id, MPI_Comm mpi_comm, int rank,

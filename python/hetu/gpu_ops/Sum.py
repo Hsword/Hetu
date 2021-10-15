@@ -106,19 +106,23 @@ class SumOp(Op):
                         temp_shape.insert(0, shape[curind])
                         curind -= 1
                     result_shape = tuple(temp_shape)
-        for ind, shape in enumerate(input_shapes):
-            if self.need_deduce[ind]:
-                if shape == (1,):
-                    self.callbacks[ind] = self._const_gpu_callback
-                elif shape != result_shape:
-                    self.callbacks[ind] = self._broadcast_gpu_callback
-                    self.check_reset[ind] = True
-                    self.middle_results[ind] = ndarray.NDArray(None)
-                elif self.inputs[ind].inplace:
-                    self.callbacks[ind] = self._lazy_gpu_callback
-                    self.check_reset[ind] = True
-                else:
-                    self.callbacks[ind] = self._simple_gpu_callback
+        if hasattr(self, 'need_deduce'):
+            for ind, shape in enumerate(input_shapes):
+                if self.need_deduce[ind]:
+                    if shape == (1,):
+                        self.callbacks[ind] = self._const_gpu_callback
+                    elif shape != result_shape:
+                        self.callbacks[ind] = self._broadcast_gpu_callback
+                        self.check_reset[ind] = True
+                        self.middle_results[ind] = ndarray.NDArray(None)
+                    elif self.inputs[ind].inplace:
+                        self.callbacks[ind] = self._lazy_gpu_callback
+                        self.check_reset[ind] = True
+                    else:
+                        self.callbacks[ind] = self._simple_gpu_callback
+        else:
+            # only in profile in FlexFlow strategy
+            self.callbacks = [self._simple_gpu_callback for _ in self.inputs]
         return result_shape
 
     def forward_hook(self, config):

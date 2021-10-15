@@ -40,6 +40,7 @@ extern "C" {
 void MPIInit();
 void MPIFinalize();
 void MPIGetComm(MPI_Comm *comm);
+void MPIBcast(void *buffer, int size, int root, MPI_Comm comm);
 void getMPICommRank(MPI_Comm *comm, int *myRank);
 void getMPICommSize(MPI_Comm *comm, int *nRanks);
 void getLocalRank(MPI_Comm *comm, int nRanks, int myRank, int *localRank,

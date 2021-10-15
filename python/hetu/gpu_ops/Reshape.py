@@ -22,7 +22,7 @@ class Array_ReshapeOp(Op):
         idx = -1
         cnt = 0
         output_size = 1
-        output_shape = list(self.output_shape)
+        output_shape = self.get_output_shape()
         for i in range(len(output_shape)):
             if(output_shape[i] == -1):
                 idx = i
@@ -63,7 +63,7 @@ class Array_ReshapeOp(Op):
         idx = -1
         cnt = 0
         output_size = 1
-        output_shape = list(self.output_shape)
+        output_shape = self.get_output_shape()
         for i in range(len(output_shape)):
             if(output_shape[i] == -1):
                 idx = i
@@ -82,17 +82,25 @@ class Array_ReshapeOp(Op):
     def backward_hook(self, config):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
 
+    def get_output_shape(self):
+        output_shape = self.output_shape.copy()
+        if hasattr(self, 'splits'):
+            if self.raw_ctx is None or not self.raw_ctx.is_mp():
+                del self.splits
+            else:
+                for k, v in self.splits.items():
+                    if output_shape[k] > 0:
+                        output_shape[k] //= v
+        return output_shape
+
     def forward_deduce_states(self, input_statuses, status, deduce_order):
         # !!! NO CHECKING !!!
         assert len(input_statuses) == len(self.inputs)
         # if input_statuses[0].valid(deduce_order):
         #     input_statuses[0].check_state(1, deduce_order)
         status.copy_from(input_statuses[0], deduce_order)
-        if status.valid_state() and not hasattr(self, 'processed'):
-            self.processed = True
-            for k, v in status.state.items():
-                if self.output_shape[k] > 0:
-                    self.output_shape[k] //= v
+        if status.valid_state():
+            self.splits = status.state
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
         # !!! NO CHECKING !!!

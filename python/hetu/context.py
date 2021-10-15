@@ -1004,7 +1004,9 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream, node_
                 # devices number of each stage is equal
                 # the device in correspondent place will communicate with each other
 
-                if node in node_tar_state_map[n] and node_cur_state_map[n] != node_tar_state_map[n][node]:
+                if node in node_tar_state_map[n] \
+                        and (node_cur_state_map[n] != node_tar_state_map[n][node] or n.raw_ctx != node.raw_ctx) \
+                        and (node_cur_state_map[n].is_dist() or node_tar_state_map[n][node].is_dist()):
                     # here in every context each device appear only once
                     # TODO: consider whether or not release the constraint above?
                     if dp_index_map[n] >= 0:

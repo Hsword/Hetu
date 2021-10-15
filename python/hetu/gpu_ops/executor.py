@@ -61,6 +61,11 @@ def new_group_comm(devices_context=None):
     return comm
 
 
+def get_mpi_communicate():
+    global mpi_comm
+    return mpi_comm
+
+
 def get_nccl_communicate():
     global nccl_comm
     return nccl_comm
