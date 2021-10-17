@@ -493,9 +493,9 @@ class FlexFlow(Strategy):
             task.shape, ctx=self.rank0_device) if not opt else None
         self.profiler.renew_nodes(
             [new_node], {n: t.shape for n, t in zip(new_node.inputs, task.inputs)}, node_to_arr_map)
-        result = self.profiler.profile(
-            num_iterations=5, profiler='gpu')
-        return result[new_node]
+        result = self.profiler.profile_all(
+            num_iterations=10, profiler='gpu')
+        return result['all']
 
     def make_task_node(self, node, index, shape, inputs=()):
         from copy import copy
