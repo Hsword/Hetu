@@ -445,7 +445,7 @@ class FlexFlow(Strategy):
             cur_num *= 2
 
     class TaskNode(object):
-        def __init__(self, name, device, inputs=(), shape=-1):
+        def __init__(self, name, device, inputs=[], shape=-1):
             self.name = name
             self.device = device
             self.inputs = inputs
@@ -459,8 +459,7 @@ class FlexFlow(Strategy):
             self.readyTime = 0
             self.startTime = 0
             self.endTime = 0
-            self.preTask = 0
-            self.nextTask = 0
+            self.contents = None
             self.state = 0  # 0 for incomplete, 1 for complete
 
         def add_output(self, out_node):
@@ -497,7 +496,7 @@ class FlexFlow(Strategy):
             num_iterations=10, profiler='gpu')
         return result['all']
 
-    def make_task_node(self, node, index, shape, inputs=()):
+    def make_task_node(self, node, index, shape, inputs=[]):
         from copy import copy
         node_type = type(node)
         name = '{}_{}'.format(node.name, index)
@@ -532,7 +531,7 @@ class FlexFlow(Strategy):
         name = 'split_{}'.format(op_index)
         device = input_task.device
         shape = self.get_split_shape(dict(zip(axes, splits)), input_task.shape)
-        task = self.TaskNode(name, device, inputs=(input_task,), shape=shape)
+        task = self.TaskNode(name, device, inputs=[input_task, ], shape=shape)
         # TODO: consider whether add indices in key
         key = (SplitOp, task.shape, input_task.shape)
         if key not in self.cached_exetime:
@@ -573,7 +572,7 @@ class FlexFlow(Strategy):
         else:
             assert index == 0
             device = device_group.device_id
-        task = self.TaskNode(name, device, inputs=(input_task,))
+        task = self.TaskNode(name, device, inputs=[input_task, ])
         key = (OptimizerOp, task.shape)
         if key not in self.cached_exetime:
             param = self.cached_placeholders[0]
@@ -593,18 +592,37 @@ class FlexFlow(Strategy):
     def make_comm_task_node(self, from_device, to_device, prev_task):
         name = 'comm_{}_to_{}'.format(from_device, to_device)
         device = (from_device, to_device)
-        task = self.TaskNode(name, device, inputs=(prev_task,))
+        task = self.TaskNode(name, device, inputs=[prev_task, ])
         cur_band = self.bandwidth['p2p']
+        if from_device // 2 == to_device // 2:
+            cur_band /= 2
         cur_size = 4 * np.prod(task.shape, dtype=int)
         task.set_exetime(cur_size / cur_band)
         return task
 
+    def make_group_comm_task_node(self, tasks):
+        if len(tasks) == 0:
+            return None
+        name = 'group_comm'
+        device = tuple(t.device for t in tasks)
+        task = self.TaskNode(name, device, shape=None)
+        task.inputs = list(set([ti for t in tasks for ti in t.inputs]))
+        send_sizes = [0 for _ in range(self.num_ctxs // 2)]
+        recv_sizes = [0 for _ in range(self.num_ctxs // 2)]
+        for t in tasks:
+            cur_size = np.prod(t.shape, dtype=int)
+            send_sizes[t.device[0] // 2] += cur_size
+            recv_sizes[t.device[1] // 2] += cur_size
+        max_size = max(send_sizes + recv_sizes)
+        task.set_exetime(4 * max_size / self.bandwidth['p2p'])
+        task.contents = tasks
+        return task
+
     def make_allreduce_task_node(self, device_group, index, prev_task, status):
         name = 'allreduce_{}'.format(index)
-        device = device_group[index].device_id
-        task = self.TaskNode(name, device, inputs=(prev_task,))
         state, duplicate, order = status.get_all()
         if duplicate == 8:
+            devices = tuple(range(8))
             cur_band = self.bandwidth['allreduce'][8]
         else:
             interval = 1
@@ -616,6 +634,7 @@ class FlexFlow(Strategy):
             start = index - index % macro_interval + index % interval
             for ind in range(start, start + interval * duplicate, interval):
                 allreduce_devices.append(device_group[ind].device_id)
+            devices = tuple(allreduce_devices)
             if duplicate == 2:
                 d0, d1 = allreduce_devices
                 distance = 0
@@ -629,6 +648,7 @@ class FlexFlow(Strategy):
                 allreduce_devices = [ad // 2 for ad in allreduce_devices]
                 distance = 1 + (len(np.unique(allreduce_devices)) == 4)
                 cur_band = self.bandwidth['allreduce'][(4, distance)]
+        task = self.TaskNode(name, devices, inputs=[prev_task, ])
         cur_size = 4 * np.prod(task.shape, dtype=int)
         task.set_exetime(cur_size / cur_band)
         return task
@@ -738,7 +758,7 @@ class FlexFlow(Strategy):
                     for n in node.inputs:
                         inputs[n] = init_comm_task(n, node)
                     cur_tasks = [self.make_task_node(node, i, node.naive_infer_shape(
-                        [n.shape for n in ns]), inputs=ns) for i, ns in enumerate(zip(*inputs.values()))]
+                        [n.shape for n in ns]), inputs=list(ns)) for i, ns in enumerate(zip(*inputs.values()))]
 
                     # TODO: set the exetime of TaskNode
                 node_to_task_map[node] = cur_tasks
@@ -747,11 +767,13 @@ class FlexFlow(Strategy):
 
         def init_comm_task(prev, node):
             prev_tasks = init_task(prev)
-            generated_tasks = []
             deduce_mp = node in node_tar_state_map[prev] \
                 and (node_cur_state_map[prev] != node_tar_state_map[prev][node] or prev.raw_ctx != node.raw_ctx) \
                 and (node_cur_state_map[prev].is_dist() or node_tar_state_map[prev][node].is_dist())
             if deduce_mp:
+                generated_splits = []
+                generated_comb = []
+                comm_tasks = []
                 key = node_tar_state_map[prev][node]
                 if not key in recv_src[prev]:
                     cur_tasks = []
@@ -770,11 +792,11 @@ class FlexFlow(Strategy):
                                 splits = [target_state[k] for k in keys]
                                 split_task = self.make_split_task_node(
                                     device_index, prev_task, keys, indices, splits)
-                                generated_tasks.append(split_task)
+                                generated_splits.append(split_task)
                                 if devices[device_index] != prev_ctx:
                                     res_task = self.make_comm_task_node(
                                         prev_ctx.device_id, devices[device_index].device_id, split_task)
-                                    generated_tasks.append(res_task)
+                                    comm_tasks.append(res_task)
                                 else:
                                     res_task = split_task
                                 cur_tasks.append(res_task)
@@ -805,7 +827,7 @@ class FlexFlow(Strategy):
                                 if devices[device_index] != cur_ctx:
                                     res_task = self.make_comm_task_node(
                                         devices[device_index].device_id, cur_ctx.device_id, prev_tasks[device_index])
-                                    generated_tasks.append(res_task)
+                                    comm_tasks.append(res_task)
                                 else:
                                     res_task = prev_tasks[device_index]
                                 device_index += 1
@@ -816,19 +838,19 @@ class FlexFlow(Strategy):
                                         res_task = make_comb(depth + 1)
                                     else:
                                         # sum op task
-                                        res_task = self.make_sum_task_node(cur_ctx.device_id, tuple(
-                                            make_comb(depth + 1) for _ in range(cur_duplicate)))
-                                        generated_tasks.append(res_task)
+                                        res_task = self.make_sum_task_node(
+                                            cur_ctx.device_id, [make_comb(depth + 1) for _ in range(cur_duplicate)])
+                                        generated_comb.append(res_task)
                                 else:
                                     if cur_state[cur_dim] == 1:
                                         res_task = make_comb(depth + 1)
                                     else:
                                         # concatenate op task
-                                        inputs = tuple(make_comb(depth + 1)
-                                                       for _ in range(cur_state[cur_dim]))
+                                        inputs = [make_comb(depth + 1)
+                                                  for _ in range(cur_state[cur_dim])]
                                         res_task = self.make_concatenate_task_node(
                                             cur_ctx.device_id, inputs, cur_dim)
-                                        generated_tasks.append(res_task)
+                                        generated_comb.append(res_task)
                             return res_task
                         device_index = 0
                         devices = prev.raw_ctx.workers[0]
@@ -862,13 +884,13 @@ class FlexFlow(Strategy):
                                     # split op
                                     res_task = self.make_split_task_node(
                                         device_index, prev_tasks[mp_index], keys, indices, splits)
-                                    generated_tasks.append(res_task)
+                                    generated_splits.append(res_task)
                                 else:
                                     res_task = prev_tasks[mp_index]
                                 if prev_devices[mp_index] != cur_devices[device_index]:
                                     res_task = self.make_comm_task_node(
                                         prev_devices[mp_index].device_id, cur_devices[device_index].device_id, res_task)
-                                    generated_tasks.append(res_task)
+                                    comm_tasks.append(res_task)
                                 task_buffer[mp_index][device_index] = res_task
                                 device_index += 1
                             else:
@@ -930,9 +952,9 @@ class FlexFlow(Strategy):
                                         res_task = cross_receive(depth+1)
                                     else:
                                         # sum op task
-                                        res_task = self.make_sum_task_node(cur_devices[mp_index].device_id, tuple(
-                                            cross_receive(depth+1) for _ in range(prev_duplicate)))
-                                        generated_tasks.append(res_task)
+                                        res_task = self.make_sum_task_node(cur_devices[mp_index].device_id, [
+                                                                           cross_receive(depth+1) for _ in range(prev_duplicate)])
+                                        generated_comb.append(res_task)
                                 else:
                                     tar_st = target_state.get(cur_dim, 1)
                                     cur_st = cur_state_index.get(
@@ -946,11 +968,11 @@ class FlexFlow(Strategy):
                                             res_task = cross_receive(depth+1)
                                         else:
                                             # concatenate op task
-                                            inputs = tuple(cross_receive(
-                                                depth+1) for _ in range(multiple))
+                                            inputs = [cross_receive(
+                                                depth+1) for _ in range(multiple)]
                                             res_task = self.make_concatenate_task_node(
                                                 cur_devices[mp_index].device_id, inputs, cur_dim)
-                                            generated_tasks.append(res_task)
+                                            generated_comb.append(res_task)
                                         device_index += (tar_st - 1 - cur_st) * \
                                             multiple * loop_sizes[depth]
                                     elif tar_st % prev_state[cur_dim] == 0:
@@ -974,10 +996,17 @@ class FlexFlow(Strategy):
                             assert device_index == len(prev_devices)
 
                     recv_src[prev][key] = cur_tasks
-                task_topo_order.extend(generated_tasks)
+                task_topo_order.extend(generated_splits)
+                group_comm_task = self.make_group_comm_task_node(comm_tasks)
+                for t in comm_tasks:
+                    group_comm_map[t] = group_comm_task
+                if group_comm_task is not None:
+                    task_topo_order.append(group_comm_task)
+                task_topo_order.extend(generated_comb)
                 return recv_src[prev][key]
             else:
                 # check parallel + data parallel
+                generated_tasks = []
                 assert prev.raw_ctx.worker_num == node.raw_ctx.worker_num == 1, \
                     'In flexflow, the worker number should be 1!'
                 assert prev.raw_ctx.mp_device_num == node.raw_ctx.mp_device_num
@@ -998,18 +1027,37 @@ class FlexFlow(Strategy):
                     assert prev.raw_ctx == node.raw_ctx
                     return prev_tasks
         node_to_task_map = {}
+        group_comm_map = {}
         task_topo_order = []
         ready_tasks = []
         recv_src = defaultdict(dict)
         for node in node_list:
             init_task(node)
+        for task in task_topo_order:
+            changed = False
+            for i, t in enumerate(task.inputs):
+                if t in group_comm_map:
+                    task.inputs[i] = group_comm_map[t]
+                    changed = True
+            if changed:
+                task.inputs = list(set(task.inputs))
+            changed = False
+            for i, t in enumerate(task.outputs):
+                if t in group_comm_map:
+                    task.outputs[i] = group_comm_map[t]
+                    changed = True
+            if changed:
+                task.outputs = list(set(task.outputs))
+        for task in set(group_comm_map.values()):
+            outputs = sum([t.outputs for t in task.contents], [])
+            task.outputs = list(set(outputs))
         return task_topo_order, ready_tasks
 
     def full_simulate(self, task_graph, ready_tasks):
         import heapq
         readyQueue = []
         last_tasks = [self.TaskNode('NULL', i, shape=())
-                      for i in range(len(self.all_devices))]
+                      for i in range(self.num_ctxs)]
         # TODO: consider devices for communication
         for task in ready_tasks:
             dev = task.device
@@ -1024,7 +1072,21 @@ class FlexFlow(Strategy):
             task.state = 1
             if isinstance(dev, tuple):
                 # communication
-                task.startTime = task.readyTime
+                is_group = (task.name == 'group_comm')
+                is_allreduce = task.name.startswith('allreduce')
+                startTime = task.readyTime
+                if is_group:
+                    startTime = max(
+                        startTime, *tuple(last_tasks[i[0]].endTime for i in dev))
+                elif is_allreduce:
+                    startTime = max(
+                        startTime, *tuple(last_tasks[i].endTime for i in dev))
+                else:
+                    startTime = max(startTime, last_tasks[dev[0]].endTime)
+                task.startTime = startTime
+                if is_allreduce:
+                    for i in dev:
+                        last_tasks[i] = task
             else:
                 task.startTime = max(task.readyTime, last_tasks[dev].endTime)
                 last_tasks[dev] = task
