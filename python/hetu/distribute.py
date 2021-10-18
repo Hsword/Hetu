@@ -732,7 +732,6 @@ class FlexFlow(Strategy):
                         status.state, self.feed_shapes.get(node, node.shape))
                     cur_tasks = [self.make_task_node(
                         node, i, new_shape) for i in range(status.dev_num)]
-                    ready_tasks.extend(cur_tasks)
 
                 elif isinstance(node, OptimizerOp):
                     self.cached_optimizer = copy(node.optimizer)
@@ -1029,7 +1028,6 @@ class FlexFlow(Strategy):
         node_to_task_map = {}
         group_comm_map = {}
         task_topo_order = []
-        ready_tasks = []
         recv_src = defaultdict(dict)
         for node in node_list:
             init_task(node)
@@ -1051,23 +1049,13 @@ class FlexFlow(Strategy):
         for task in set(group_comm_map.values()):
             outputs = sum([t.outputs for t in task.contents], [])
             task.outputs = list(set(outputs))
-        return task_topo_order, ready_tasks
+        return task_topo_order
 
-    def full_simulate(self, task_graph, ready_tasks):
-        import heapq
-        readyQueue = []
+    def full_simulate(self, task_graph):
         last_tasks = [self.TaskNode('NULL', i, shape=())
                       for i in range(self.num_ctxs)]
-        # TODO: consider devices for communication
-        for task in ready_tasks:
-            dev = task.device
-            task.state = 1
-            last_tasks[dev] = task
-            for t in task.outputs:
-                if all([tt.state == 1 for tt in t.inputs]):
-                    heapq.heappush(readyQueue, t)
-        while readyQueue != []:
-            task = heapq.heappop(readyQueue)
+        for task in task_graph:
+            assert all([t.state == 1 for t in task.inputs])
             dev = task.device
             task.state = 1
             if isinstance(dev, tuple):
@@ -1084,22 +1072,23 @@ class FlexFlow(Strategy):
                 else:
                     startTime = max(startTime, last_tasks[dev[0]].endTime)
                 task.startTime = startTime
-                if is_allreduce:
-                    for i in dev:
-                        last_tasks[i] = task
             else:
                 task.startTime = max(task.readyTime, last_tasks[dev].endTime)
                 last_tasks[dev] = task
             task.endTime = task.startTime + task.exeTime
             for t in task.outputs:
-                if all([tt.state == 1 for tt in t.inputs]):
-                    t.readyTime = task.endTime
-                    heapq.heappush(readyQueue, t)
+                t.readyTime = task.endTime
         result = 0
-        for task in task_graph:
-            assert task.state == 1, 'Task {} not complete!'.format(task)
+        for task in last_tasks:
             result = max(result, task.endTime)
         return result
+
+    def log_task_graph(self, task_topo, log_path='task_graph.txt'):
+        # only for debug
+        with open(log_path, 'w') as fw:
+            for task in task_topo:
+                print(task, task.inputs, task.outputs, task.exeTime, task.device, task.shape,
+                      task.readyTime, task.startTime, task.endTime, file=fw, flush=True)
 
     def set_raw_ctxs_n_states(self, eval_node_list):
         from .context import complete_state_map_with_partial_information
@@ -1132,9 +1121,10 @@ class FlexFlow(Strategy):
                 meta_cur_state_map = node_cur_state_map.copy()
                 node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
                     eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
-                task_graph, ready_tasks = self.init_task_graph(
+                task_graph = self.init_task_graph(
                     eval_node_list, node_cur_state_map, node_tar_state_map)
-                simulation_result = self.full_simulate(task_graph, ready_tasks)
+                simulation_result = self.full_simulate(task_graph)
+                # self.log_task_graph(task_graph)
                 print('Initial data parallel configuration generated; simulation result: {:.3f}ms.'.format(
                     simulation_result))
                 best_cur_status = [meta_cur_state_map[node]
@@ -1170,10 +1160,9 @@ class FlexFlow(Strategy):
                     node_cur_state_map = meta_cur_state_map.copy()
                     node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
                         eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
-                    task_graph, ready_tasks = self.init_task_graph(
+                    task_graph = self.init_task_graph(
                         eval_node_list, node_cur_state_map, node_tar_state_map)
-                    new_simulation = self.full_simulate(
-                        task_graph, ready_tasks)
+                    new_simulation = self.full_simulate(task_graph)
                     print('    Simulation result {:.3f}ms.'.format(
                         new_simulation))
                     if new_simulation < prev_simulation:
