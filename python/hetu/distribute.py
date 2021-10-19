@@ -618,40 +618,54 @@ class FlexFlow(Strategy):
         task.contents = tasks
         return task
 
-    def make_allreduce_task_node(self, device_group, index, prev_task, status):
-        name = 'allreduce_{}'.format(index)
+    def make_allreduce_task_nodes(self, device_group, prev_tasks, status):
+        name = 'allreduce'
         state, duplicate, order = status.get_all()
+        cur_size = 4 * np.prod(prev_tasks[0].shape, dtype=int)
         if duplicate == 8:
             devices = tuple(range(8))
             cur_band = self.bandwidth['allreduce'][8]
+            task = self.TaskNode(name, devices, inputs=list(prev_tasks))
+            task.set_exetime(cur_size / cur_band)
+            allreduce_tasks = [task]
+            update_tasks = [self.make_update_task_node(
+                device_group, i, task) for i in range(8)]
         else:
+            num_splits = status.dev_num // duplicate
+            allreduce_tasks = []
+            update_tasks = []
             interval = 1
-            allreduce_devices = []
             dup_dim = order.index(-1)
             for cur_order in order[dup_dim+1:]:
                 interval *= state[cur_order]
             macro_interval = interval * duplicate
-            start = index - index % macro_interval + index % interval
-            for ind in range(start, start + interval * duplicate, interval):
-                allreduce_devices.append(device_group[ind].device_id)
-            devices = tuple(allreduce_devices)
-            if duplicate == 2:
-                d0, d1 = allreduce_devices
-                distance = 0
-                while d0 != d1:
-                    distance += 1
-                    d0 //= 2
-                    d1 //= 2
-                cur_band = self.bandwidth['allreduce'][(2, distance)]
-            else:
-                assert duplicate == 4
-                allreduce_devices = [ad // 2 for ad in allreduce_devices]
-                distance = 1 + (len(np.unique(allreduce_devices)) == 4)
-                cur_band = self.bandwidth['allreduce'][(4, distance)]
-        task = self.TaskNode(name, devices, inputs=[prev_task, ])
-        cur_size = 4 * np.prod(task.shape, dtype=int)
-        task.set_exetime(cur_size / cur_band)
-        return task
+            for index in range(num_splits):
+                start = (index // interval) * \
+                    macro_interval + (index % interval)
+                indices = range(start, start + macro_interval, interval)
+                allreduce_devices = [
+                    device_group[ind].device_id for ind in indices]
+                devices = tuple(allreduce_devices)
+                if duplicate == 2:
+                    d0, d1 = allreduce_devices
+                    distance = 0
+                    while d0 != d1:
+                        distance += 1
+                        d0 //= 2
+                        d1 //= 2
+                    cur_band = self.bandwidth['allreduce'][(2, distance)]
+                else:
+                    assert duplicate == 4
+                    allreduce_devices = [ad // 2 for ad in allreduce_devices]
+                    distance = 1 + (len(np.unique(allreduce_devices)) == 4)
+                    cur_band = self.bandwidth['allreduce'][(4, distance)]
+                task = self.TaskNode(name, devices, inputs=[
+                                     prev_tasks[ind] for ind in indices])
+                task.set_exetime(cur_size / cur_band)
+                allreduce_tasks.append(task)
+                update_tasks.extend([self.make_update_task_node(
+                    device_group, ind, task) for ind in indices])
+        return allreduce_tasks, update_tasks
 
     def init_states(self, node_list, for2back, init_ctx):
         # init as data parallel
@@ -745,13 +759,15 @@ class FlexFlow(Strategy):
                     for grad, param in zip(node.inputs, node.optimizer.params):
                         temp_tasks = init_comm_task(grad, param)
                         if node_cur_state_map[param].duplicate > 1:
-                            # allreduce task
-                            temp_tasks = [self.make_allreduce_task_node(
-                                param.raw_ctx.workers[0], i, t, node_cur_state_map[param]) for i, t in enumerate(temp_tasks)]
-                            task_topo_order.extend(temp_tasks)
-                        # update
-                        cur_tasks.extend([self.make_update_task_node(
-                            param.raw_ctx.workers[0], i, t) for i, t in enumerate(temp_tasks)])
+                            # allreduce tasks + update tasks
+                            allreduce_tasks, update_tasks = self.make_allreduce_task_nodes(
+                                param.raw_ctx.workers[0], temp_tasks, node_cur_state_map[param])
+                            task_topo_order.extend(allreduce_tasks)
+                            cur_tasks.extend(update_tasks)
+                        else:
+                            # update task
+                            cur_tasks.extend([self.make_update_task_node(
+                                param.raw_ctx.workers[0], i, t) for i, t in enumerate(temp_tasks)])
                 else:
                     inputs = {}
                     for n in node.inputs:
@@ -1054,6 +1070,8 @@ class FlexFlow(Strategy):
     def full_simulate(self, task_graph):
         last_tasks = [self.TaskNode('NULL', i, shape=())
                       for i in range(self.num_ctxs)]
+        last_comm_tasks = [self.TaskNode('NULL', i, shape=())
+                           for i in range(self.num_ctxs)]
         for task in task_graph:
             assert all([t.state == 1 for t in task.inputs])
             dev = task.device
@@ -1061,17 +1079,43 @@ class FlexFlow(Strategy):
             if isinstance(dev, tuple):
                 # communication
                 is_group = (task.name == 'group_comm')
-                is_allreduce = task.name.startswith('allreduce')
+                is_allreduce = (task.name == 'allreduce')
                 startTime = task.readyTime
                 if is_group:
-                    startTime = max(
-                        startTime, *tuple(last_tasks[i[0]].endTime for i in dev))
+                    for d in dev:
+                        startTime = max(
+                            startTime,
+                            last_tasks[d[0]].endTime,
+                            last_comm_tasks[d[0] // 2 * 2].endTime,
+                            last_comm_tasks[d[1] // 2 * 2 + 1].endTime,
+                        )
                 elif is_allreduce:
-                    startTime = max(
-                        startTime, *tuple(last_tasks[i].endTime for i in dev))
+                    for d in dev:
+                        startTime = max(
+                            startTime,
+                            last_tasks[d].endTime,
+                            last_comm_tasks[d // 2 * 2].endTime,
+                            last_comm_tasks[d // 2 * 2 + 1].endTime,
+                        )
                 else:
-                    startTime = max(startTime, last_tasks[dev[0]].endTime)
+                    startTime = max(
+                        startTime,
+                        last_tasks[dev[0]].endTime,
+                        last_comm_tasks[dev[0] // 2 * 2].endTime,
+                        last_comm_tasks[dev[1] // 2 * 2 + 1].endTime
+                    )
                 task.startTime = startTime
+                if is_group:
+                    for d in dev:
+                        last_comm_tasks[d[0] // 2 * 2] = task
+                        last_comm_tasks[d[1] // 2 * 2 + 1] = task
+                elif is_allreduce:
+                    for d in dev:
+                        last_comm_tasks[d // 2 * 2] = task
+                        last_comm_tasks[d // 2 * 2 + 1] = task
+                else:
+                    last_comm_tasks[dev[0] // 2 * 2] = task
+                    last_comm_tasks[dev[1] // 2 * 2 + 1] = task
             else:
                 task.startTime = max(task.readyTime, last_tasks[dev].endTime)
                 last_tasks[dev] = task
