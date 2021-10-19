@@ -376,7 +376,7 @@ class OneWeirdTrick4CNN(Strategy):
 
 
 class FlexFlow(Strategy):
-    def __init__(self, feed_shapes, bandwidth=None, budget=-1, alpha=0.05, save_path=None, load_path=None):
+    def __init__(self, feed_shapes, bandwidth=None, budget=-1, alpha=0.05, save_path=None, load_path=None, use_json=True):
         from itertools import combinations
         from collections import namedtuple
         # now only consider homogeneous environment
@@ -423,6 +423,7 @@ class FlexFlow(Strategy):
         self.rank0_device = ht.gpu(0)
         self.save_path = save_path
         self.load_path = load_path
+        self.use_json = use_json
 
         # generate candidates for random sampling
         cur_num = 1
@@ -1134,6 +1135,44 @@ class FlexFlow(Strategy):
                 print(task, task.inputs, task.outputs, task.exeTime, task.device, task.shape,
                       task.readyTime, task.startTime, task.endTime, file=fw, flush=True)
 
+    def save_json(self, best_cur_status, best_raw_ctx, all_possible_nodes, save_path):
+        import json
+        contents = []
+        for i, node in enumerate(all_possible_nodes):
+            state, duplicate, order = best_cur_status[i].get_all()
+            ctxs = best_raw_ctx[i].workers[0]
+            cur_entry = {
+                'name': node.name,
+                'status': {
+                    'splits': str(state),
+                    'duplicate': duplicate,
+                    'order': str(order),
+                },
+                'device': str([c.device_id for c in ctxs]),
+            }
+            contents.append(cur_entry)
+        with open(save_path, 'w') as fw:
+            json.dump(contents, fw, indent=4)
+
+    def load_json(self, load_path, all_possible_nodes):
+        import json
+        best_cur_status = []
+        best_raw_ctx = []
+        with open(load_path, 'r') as fr:
+            contents = json.load(fr)
+        for i, node in enumerate(all_possible_nodes):
+            assert contents[i]['name'] == node.name
+            status = contents[i]['status']
+            splits = eval(status['splits'])
+            ctxs = eval(contents[i]['device'])
+            assert len(ctxs) == np.prod(
+                list(splits.values()), dtype=int) * status['duplicate']
+            new_status = NodeStatus(splits, len(ctxs))
+            new_status.set_order(eval(status['order']))
+            best_cur_status.append(new_status)
+            best_raw_ctx.append(DeviceGroup(tuple(ht.gpu(i) for i in ctxs)))
+        return best_cur_status, best_raw_ctx
+
     def set_raw_ctxs_n_states(self, eval_node_list):
         from .context import complete_state_map_with_partial_information
         from .gpu_ops.executor import wrapped_mpi_nccl_init, get_mpi_communicate
@@ -1246,8 +1285,12 @@ class FlexFlow(Strategy):
                 node_cur_state_map = meta_cur_state_map
             else:
                 print('Loading configuration from {} ...'.format(self.load_path))
-                with open(self.load_path, 'rb') as fr:
-                    best_cur_status, best_raw_ctx = pickle.load(fr)
+                if self.use_json:
+                    best_cur_status, best_raw_ctx = self.load_json(
+                        self.load_path, all_possible_nodes)
+                else:
+                    with open(self.load_path, 'rb') as fr:
+                        best_cur_status, best_raw_ctx = pickle.load(fr)
             status_bytes = pickle.dumps(best_cur_status)
             context_bytes = pickle.dumps(best_raw_ctx)
             status_length = len(status_bytes)
@@ -1276,8 +1319,12 @@ class FlexFlow(Strategy):
                 string_at(context_bytes, size=context_length))
         if self.save_path is not None and mpi_comm.rank == 0:
             print('Saving configuration to {} ...'.format(self.save_path))
-            with open(self.save_path, 'wb') as fw:
-                pickle.dump((best_cur_status, best_raw_ctx), fw)
+            if self.use_json:
+                self.save_json(best_cur_status, best_raw_ctx,
+                               all_possible_nodes, self.save_path)
+            else:
+                with open(self.save_path, 'wb') as fw:
+                    pickle.dump((best_cur_status, best_raw_ctx), fw)
         for i, node in enumerate(all_possible_nodes):
             node_cur_state_map[node] = best_cur_status[i]
             node.raw_ctx = best_raw_ctx[i]
