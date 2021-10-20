@@ -3,6 +3,7 @@ import yaml
 import socket
 import psutil
 import numpy as np
+import pickle
 from random import choice, random
 from collections import defaultdict
 
@@ -376,9 +377,8 @@ class OneWeirdTrick4CNN(Strategy):
 
 
 class FlexFlow(Strategy):
-    def __init__(self, feed_shapes, bandwidth=None, budget=-1, alpha=0.05, save_path=None, load_path=None, use_json=True):
+    def __init__(self, feed_shapes, bandwidth=None, budget=-1, alpha=0.05, save_path=None, load_path=None, cache_path='/tmp/hetu_ff_cached_exetime.bin'):
         from itertools import combinations
-        from collections import namedtuple
         # now only consider homogeneous environment
         # the simulations now are all on the rank-0 device
         # TODO: use multiple devices to simulate
@@ -410,20 +410,16 @@ class FlexFlow(Strategy):
         assert len(self.settings.hosts) == 1, 'Not support multiple machines.'
         self.num_ctxs = self.settings.num_workers
         assert self.num_ctxs in (
-            2, 4, 8), 'Number of workers should be 2, 4, 8.'
+            1, 2, 4, 8), 'Number of workers should be 1, 2, 4, 8.'
         self.all_devices = [ht.gpu(i) for i in range(self.num_ctxs)]
         self.profiler = ht.HetuProfiler([], {}, {})
-        self.cached_exetime = {}
-        self.cached_placeholders = []
-        self.cached_optimizer = None
-        self.cached_config = namedtuple(
-            'Config', 'placeholder_to_arr_map')(placeholder_to_arr_map={})
-        self.raw_ctx = DeviceGroup(tuple(self.all_devices))
+        self.cache_path = cache_path
+        self.raw_ctx = DeviceGroup(
+            tuple(self.all_devices)) if self.num_ctxs > 1 else DeviceGroup(self.all_devices)
         self.rank0_ctx = DeviceGroup(self.settings.chief + ':gpu:0')
         self.rank0_device = ht.gpu(0)
         self.save_path = save_path
         self.load_path = load_path
-        self.use_json = use_json
 
         # generate candidates for random sampling
         cur_num = 1
@@ -574,7 +570,7 @@ class FlexFlow(Strategy):
             assert index == 0
             device = device_group.device_id
         task = self.TaskNode(name, device, inputs=[input_task, ])
-        key = (OptimizerOp, task.shape)
+        key = (OptimizerOp, type(self.cached_optimizer), task.shape)
         if key not in self.cached_exetime:
             param = self.cached_placeholders[0]
             self.cached_optimizer.params = [param]
@@ -1177,8 +1173,8 @@ class FlexFlow(Strategy):
         from .context import complete_state_map_with_partial_information
         from .gpu_ops.executor import wrapped_mpi_nccl_init, get_mpi_communicate
         from time import time
-        import pickle
         from ctypes import c_void_p, c_int, cast, string_at, c_char
+        from collections import namedtuple
 
         wrapped_mpi_nccl_init()
         mpi_comm = get_mpi_communicate()
@@ -1198,12 +1194,27 @@ class FlexFlow(Strategy):
                 grad.raw_ctx = node.raw_ctx
         if mpi_comm.rank == 0:
             if self.load_path is None:
-                print('No configuration loaded. Start autotuning.')
+                print('No configuration loaded. Start autotuning...')
                 # infer states using partial information
                 start = time()
                 meta_cur_state_map = node_cur_state_map.copy()
                 node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
                     eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
+                if self.num_ctxs == 1:
+                    print('Only 1 device. Start training...')
+                    return self.raw_ctx, node_cur_state_map, node_tar_state_map
+
+                try:
+                    with open(self.cache_path, 'rb') as fr:
+                        self.cached_exetime = pickle.load(fr)
+                except:
+                    self.cached_exetime = {}
+                self.cached_placeholders = [PlaceholderOp(
+                    'test_node', ctx=self.rank0_device)]
+                self.cached_optimizer = None
+                self.cached_config = namedtuple(
+                    'Config', 'placeholder_to_arr_map')(placeholder_to_arr_map={})
+
                 task_graph = self.init_task_graph(
                     eval_node_list, node_cur_state_map, node_tar_state_map)
                 simulation_result = self.full_simulate(task_graph)
@@ -1283,14 +1294,14 @@ class FlexFlow(Strategy):
                     ending = time()
                     cnt += 1
                 node_cur_state_map = meta_cur_state_map
+
+                if self.cache_path is not None:
+                    with open(self.cache_path, 'wb') as fw:
+                        pickle.dump(self.cached_exetime, fw)
             else:
                 print('Loading configuration from {} ...'.format(self.load_path))
-                if self.use_json:
-                    best_cur_status, best_raw_ctx = self.load_json(
-                        self.load_path, all_possible_nodes)
-                else:
-                    with open(self.load_path, 'rb') as fr:
-                        best_cur_status, best_raw_ctx = pickle.load(fr)
+                best_cur_status, best_raw_ctx = self.load_json(
+                    self.load_path, all_possible_nodes)
             status_bytes = pickle.dumps(best_cur_status)
             context_bytes = pickle.dumps(best_raw_ctx)
             status_length = len(status_bytes)
@@ -1319,12 +1330,8 @@ class FlexFlow(Strategy):
                 string_at(context_bytes, size=context_length))
         if self.save_path is not None and mpi_comm.rank == 0:
             print('Saving configuration to {} ...'.format(self.save_path))
-            if self.use_json:
-                self.save_json(best_cur_status, best_raw_ctx,
-                               all_possible_nodes, self.save_path)
-            else:
-                with open(self.save_path, 'wb') as fw:
-                    pickle.dump((best_cur_status, best_raw_ctx), fw)
+            self.save_json(best_cur_status, best_raw_ctx,
+                           all_possible_nodes, self.save_path)
         for i, node in enumerate(all_possible_nodes):
             node_cur_state_map[node] = best_cur_status[i]
             node.raw_ctx = best_raw_ctx[i]

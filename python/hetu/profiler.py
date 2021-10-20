@@ -21,7 +21,7 @@ class HetuProfiler(object):
         self.timer['all'] = 0.0
         self.idx = 0  # index of feed arrays
 
-    def renew_nodes(self, computing_nodes, feed_shapes, node_to_arr_map, single=False):
+    def renew_nodes(self, computing_nodes, feed_shapes, node_to_arr_map):
         self.computing_nodes = computing_nodes
         self.feed_shapes = feed_shapes
         self.node_to_arr_map = node_to_arr_map
