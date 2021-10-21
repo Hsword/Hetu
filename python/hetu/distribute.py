@@ -377,7 +377,7 @@ class OneWeirdTrick4CNN(Strategy):
 
 
 class FlexFlow(Strategy):
-    def __init__(self, feed_shapes, bandwidth=None, budget=-1, alpha=0.05, save_path=None, load_path=None, cache_path='/tmp/hetu_ff_cached_exetime.bin'):
+    def __init__(self, feed_shapes, budget=-1, alpha=0.05, save_path=None, load_path=None, cache_path='/tmp/hetu_ff_cached_exetime.bin'):
         from itertools import combinations
         # now only consider homogeneous environment
         # the simulations now are all on the rank-0 device
@@ -387,24 +387,6 @@ class FlexFlow(Strategy):
         super().__init__()
         self.use_dispatch = False
         self.feed_shapes = feed_shapes
-        # bandwidth should contain following keys:
-        # p2p: send/recv bandwidth
-        # allreduce groups: 248(0, 1), 48(0, 2), 8(0, 4),
-        # 8(0, 1, 2, 3), 8(0, 1, 2, 4), 8(0, 1, 4, 5), 8(0, 1, 4, 6), 8(0, 2, 4, 6)
-        # 8(0, 1, 2, 3, 4, 5, 6, 7)
-        if bandwidth is None:
-            bandwidth = {
-                'p2p': 10659721.697151,
-                'allreduce': {
-                    (2, 1): 4053906.914546,
-                    (2, 2): 7207890.632895,
-                    (2, 3): 7157173.727458,
-                    (4, 1): 3301009.95906475,  # same pcie switch
-                    (4, 2): 6234281.734696,  # not using same pcie switch
-                    8: 3005380.3449143744,
-                }
-            }
-        self.bandwidth = bandwidth
         self.budget = budget
         self.alpha = alpha
         assert len(self.settings.hosts) == 1, 'Not support multiple machines.'
@@ -412,7 +394,6 @@ class FlexFlow(Strategy):
         assert self.num_ctxs in (
             1, 2, 4, 8), 'Number of workers should be 1, 2, 4, 8.'
         self.all_devices = [ht.gpu(i) for i in range(self.num_ctxs)]
-        self.profiler = ht.HetuProfiler([], {}, {})
         self.cache_path = cache_path
         self.raw_ctx = DeviceGroup(
             tuple(self.all_devices)) if self.num_ctxs > 1 else DeviceGroup(self.all_devices)
@@ -440,6 +421,16 @@ class FlexFlow(Strategy):
             self.device_candidates[cur_num] = [DeviceGroup(
                 devs) for devs in combinations(self.all_devices, cur_num)]
             cur_num *= 2
+
+        # initialize mpi communicator
+        from .gpu_ops.executor import wrapped_mpi_nccl_init, get_mpi_communicate
+        self.nccl_comm = wrapped_mpi_nccl_init()
+        self.mpi_comm = get_mpi_communicate()
+
+        # initialize profiler
+        self.profiler = ht.HetuProfiler([], {}, {})
+        if self.mpi_comm.nrank > 1:
+            self.nccl_profiler = ht.NCCLProfiler()
 
     class TaskNode(object):
         def __init__(self, name, device, inputs=[], shape=-1):
@@ -586,44 +577,100 @@ class FlexFlow(Strategy):
         task.set_exetime(self.cached_exetime[key])
         return task
 
+    def get_dev_distance(self, from_device, to_device):
+        distance = 1
+        while from_device != to_device:
+            distance *= 2
+            from_device //= 2
+            to_device //= 2
+        return distance // 2
+
     def make_comm_task_node(self, from_device, to_device, prev_task):
+        from .gpu_ops.PipelineSend import PipelineSendOp
+        from ctypes import cast, byref, c_void_p, c_int
         name = 'comm_{}_to_{}'.format(from_device, to_device)
         device = (from_device, to_device)
         task = self.TaskNode(name, device, inputs=[prev_task, ])
-        cur_band = self.bandwidth['p2p']
-        if from_device // 2 == to_device // 2:
-            cur_band /= 2
-        cur_size = 4 * np.prod(task.shape, dtype=int)
-        task.set_exetime(cur_size / cur_band)
+        cur_size = np.prod(task.shape, dtype=int)
+        distance = self.get_dev_distance(from_device, to_device)
+        key = (PipelineSendOp, cur_size, distance)
+        if key not in self.cached_exetime:
+            # send signal
+            signal = c_int(3)
+            self.mpi_comm.MPI_Broadcast(
+                cast(byref(signal), c_void_p), 4, root=0)
+            # profile send/recv
+            self.cached_exetime[key] = self.nccl_profiler.profile_sendrecv(
+                cur_size, [0, distance])
+        task.set_exetime(self.cached_exetime[key])
         return task
 
     def make_group_comm_task_node(self, tasks):
+        from .gpu_ops.PipelineSend import PipelineSendOp
+        from ctypes import cast, byref, c_void_p, c_int
         if len(tasks) == 0:
             return None
         name = 'group_comm'
         device = tuple(t.device for t in tasks)
         task = self.TaskNode(name, device, shape=None)
         task.inputs = list(set([ti for t in tasks for ti in t.inputs]))
-        send_sizes = [0 for _ in range(self.num_ctxs // 2)]
-        recv_sizes = [0 for _ in range(self.num_ctxs // 2)]
+        # now only consider adjacent devices are in single PCIe switch
+        send_time = [0 for _ in range(self.num_ctxs // 2)]
+        recv_time = [0 for _ in range(self.num_ctxs // 2)]
         for t in tasks:
             cur_size = np.prod(t.shape, dtype=int)
-            send_sizes[t.device[0] // 2] += cur_size
-            recv_sizes[t.device[1] // 2] += cur_size
-        max_size = max(send_sizes + recv_sizes)
-        task.set_exetime(4 * max_size / self.bandwidth['p2p'])
+            key = (PipelineSendOp, cur_size,
+                   self.get_dev_distance(t.device[0], t.device[1]))
+            if key not in self.cached_exetime:
+                # send signal
+                signal = c_int(3)
+                self.mpi_comm.MPI_Broadcast(
+                    cast(byref(signal), c_void_p), 4, root=0)
+                # profile send/recv
+                self.cached_exetime[key] = self.nccl_profiler.profile_sendrecv(
+                    cur_size, [0, key[-1]])
+            send_time[t.device[0] // 2] += self.cached_exetime[key]
+            recv_time[t.device[1] // 2] += self.cached_exetime[key]
+        task.set_exetime(max(send_time + recv_time))
         task.contents = tasks
         return task
 
     def make_allreduce_task_nodes(self, device_group, prev_tasks, status):
+        from .gpu_ops.AllReduceCommunicate import AllReduceCommunicateOp
+        from ctypes import c_int, cast, byref, c_void_p
+
+        def get_topo_equal_4(devs):
+            devs = sorted(devs)
+            if devs in ([0, 1, 2, 3], [4, 5, 6, 7]):
+                return [0, 1, 2, 3]
+            devs = [d // 2 for d in devs]
+            same_bucket = len(np.unique(devs))
+            if same_bucket == 4:
+                return [0, 2, 4, 6]
+            elif same_bucket == 2:
+                return [0, 1, 4, 5]
+            devs = [d // 2 for d in devs]
+            if devs[0] == devs[1] and devs[2] == devs[3]:
+                return [0, 1, 4, 6]
+            else:
+                return [0, 1, 2, 4]
+
         name = 'allreduce'
         state, duplicate, order = status.get_all()
-        cur_size = 4 * np.prod(prev_tasks[0].shape, dtype=int)
+        cur_size = np.prod(prev_tasks[0].shape, dtype=int)
+        signal = c_int(2)
         if duplicate == 8:
             devices = tuple(range(8))
-            cur_band = self.bandwidth['allreduce'][8]
+            key = (AllReduceCommunicateOp, cur_size, 8)
+            if key not in self.cached_exetime:
+                # send signal
+                self.mpi_comm.MPI_Broadcast(
+                    cast(byref(signal), c_void_p), 4, root=0)
+                # profile allreduce
+                self.cached_exetime[key] = self.nccl_profiler.profile_allreduce(
+                    cur_size, list(range(8)))
             task = self.TaskNode(name, devices, inputs=list(prev_tasks))
-            task.set_exetime(cur_size / cur_band)
+            task.set_exetime(self.cached_exetime[key])
             allreduce_tasks = [task]
             update_tasks = [self.make_update_task_node(
                 device_group, i, task) for i in range(8)]
@@ -650,15 +697,29 @@ class FlexFlow(Strategy):
                         distance += 1
                         d0 //= 2
                         d1 //= 2
-                    cur_band = self.bandwidth['allreduce'][(2, distance)]
+                    key = (AllReduceCommunicateOp, cur_size, 2, distance)
+                    if key not in self.cached_exetime:
+                        # send signal
+                        self.mpi_comm.MPI_Broadcast(
+                            cast(byref(signal), c_void_p), 4, root=0)
+                        # profile allreduce
+                        self.cached_exetime[key] = self.nccl_profiler.profile_allreduce(
+                            cur_size, [0, 2 ** (distance - 1)])
                 else:
                     assert duplicate == 4
-                    allreduce_devices = [ad // 2 for ad in allreduce_devices]
-                    distance = 1 + (len(np.unique(allreduce_devices)) == 4)
-                    cur_band = self.bandwidth['allreduce'][(4, distance)]
+                    topo_equal_dev = get_topo_equal_4(allreduce_devices)
+                    key = (AllReduceCommunicateOp, cur_size,
+                           4, tuple(topo_equal_dev))
+                    if key not in self.cached_exetime:
+                        # send signal
+                        self.mpi_comm.MPI_Broadcast(
+                            cast(byref(signal), c_void_p), 4, root=0)
+                        # profile allreduce
+                        self.cached_exetime[key] = self.nccl_profiler.profile_allreduce(
+                            cur_size, topo_equal_dev)
                 task = self.TaskNode(name, devices, inputs=[
                                      prev_tasks[ind] for ind in indices])
-                task.set_exetime(cur_size / cur_band)
+                task.set_exetime(self.cached_exetime[key])
                 allreduce_tasks.append(task)
                 update_tasks.extend([self.make_update_task_node(
                     device_group, ind, task) for ind in indices])
@@ -772,7 +833,6 @@ class FlexFlow(Strategy):
                     cur_tasks = [self.make_task_node(node, i, node.naive_infer_shape(
                         [n.shape for n in ns]), inputs=list(ns)) for i, ns in enumerate(zip(*inputs.values()))]
 
-                    # TODO: set the exetime of TaskNode
                 node_to_task_map[node] = cur_tasks
                 task_topo_order.extend(cur_tasks)
             return node_to_task_map[node]
@@ -1137,6 +1197,8 @@ class FlexFlow(Strategy):
         for i, node in enumerate(all_possible_nodes):
             state, duplicate, order = best_cur_status[i].get_all()
             ctxs = best_raw_ctx[i].workers[0]
+            dev_list = [c.device_id for c in ctxs] if isinstance(ctxs, tuple) else [
+                ctxs.device_id]
             cur_entry = {
                 'name': node.name,
                 'status': {
@@ -1144,7 +1206,7 @@ class FlexFlow(Strategy):
                     'duplicate': duplicate,
                     'order': str(order),
                 },
-                'device': str([c.device_id for c in ctxs]),
+                'device': str(dev_list),
             }
             contents.append(cur_entry)
         with open(save_path, 'w') as fw:
@@ -1166,18 +1228,16 @@ class FlexFlow(Strategy):
             new_status = NodeStatus(splits, len(ctxs))
             new_status.set_order(eval(status['order']))
             best_cur_status.append(new_status)
-            best_raw_ctx.append(DeviceGroup(tuple(ht.gpu(i) for i in ctxs)))
+            device_group = DeviceGroup(tuple(ht.gpu(i) for i in ctxs)) if len(
+                ctxs) > 1 else DeviceGroup(ht.gpu(ctxs[0]))
+            best_raw_ctx.append(device_group)
         return best_cur_status, best_raw_ctx
 
     def set_raw_ctxs_n_states(self, eval_node_list):
         from .context import complete_state_map_with_partial_information
-        from .gpu_ops.executor import wrapped_mpi_nccl_init, get_mpi_communicate
         from time import time
-        from ctypes import c_void_p, c_int, cast, string_at, c_char
         from collections import namedtuple
 
-        wrapped_mpi_nccl_init()
-        mpi_comm = get_mpi_communicate()
         eval_nodes, opt = self.get_forward_eval_nodes(eval_node_list)
         assert opt is not None
         # add partial information for forward nodes
@@ -1192,7 +1252,7 @@ class FlexFlow(Strategy):
         for node, grads in for2back.items():
             for grad in grads:
                 grad.raw_ctx = node.raw_ctx
-        if mpi_comm.rank == 0:
+        if self.mpi_comm.rank == 0:
             if self.load_path is None:
                 print('No configuration loaded. Start autotuning...')
                 # infer states using partial information
@@ -1231,7 +1291,7 @@ class FlexFlow(Strategy):
 
                 ending = time()
                 cnt += 1
-                while (self.budget < 0 or ending - start < self.budget) and 2 * (ending - best_emerge_time) < ending - start:
+                while ending - start < self.budget or (self.budget < 0 and 2 * (ending - best_emerge_time) < ending - start):
                     # sample new configuration
                     changing_node = choice(all_possible_nodes)
                     new_split = choice(self.split_candidates)
@@ -1298,37 +1358,16 @@ class FlexFlow(Strategy):
                 if self.cache_path is not None:
                     with open(self.cache_path, 'wb') as fw:
                         pickle.dump(self.cached_exetime, fw)
+                print('The simulation result of the best strategy discovered is: {:.3f}ms.'.format(
+                    best_simulation))
             else:
                 print('Loading configuration from {} ...'.format(self.load_path))
                 best_cur_status, best_raw_ctx = self.load_json(
                     self.load_path, all_possible_nodes)
-            status_bytes = pickle.dumps(best_cur_status)
-            context_bytes = pickle.dumps(best_raw_ctx)
-            status_length = len(status_bytes)
-            context_length = len(context_bytes)
-            sizes = (c_int * 2)(status_length, context_length)
-            psizes = cast(sizes, c_void_p)
-            mpi_comm.MPI_Broadcast(psizes, 8, root=0)
-            mpi_comm.MPI_Broadcast(
-                cast(status_bytes, c_void_p), status_length, root=0)
-            mpi_comm.MPI_Broadcast(
-                cast(context_bytes, c_void_p), context_length, root=0)
+            self.send_best_config(best_cur_status, best_raw_ctx)
         else:
-            sizes = (c_int * 2)()
-            psizes = cast(sizes, c_void_p)
-            mpi_comm.MPI_Broadcast(psizes, 8, root=0)
-            status_length, context_length = sizes[0], sizes[1]
-            status_bytes = (c_char * status_length)()
-            context_bytes = (c_char * context_length)()
-            mpi_comm.MPI_Broadcast(
-                cast(status_bytes, c_void_p), status_length, root=0)
-            mpi_comm.MPI_Broadcast(
-                cast(context_bytes, c_void_p), context_length, root=0)
-            best_cur_status = pickle.loads(
-                string_at(status_bytes, size=status_length))
-            best_raw_ctx = pickle.loads(
-                string_at(context_bytes, size=context_length))
-        if self.save_path is not None and mpi_comm.rank == 0:
+            best_cur_status, best_raw_ctx = self.recv_best_config()
+        if self.save_path is not None and self.mpi_comm.rank == 0:
             print('Saving configuration to {} ...'.format(self.save_path))
             self.save_json(best_cur_status, best_raw_ctx,
                            all_possible_nodes, self.save_path)
@@ -1341,3 +1380,48 @@ class FlexFlow(Strategy):
         node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
             eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
         return self.raw_ctx, node_cur_state_map, node_tar_state_map
+
+    def send_best_config(self, best_cur_status, best_raw_ctx):
+        from ctypes import c_void_p, c_int, cast, byref
+        status_bytes = pickle.dumps(best_cur_status)
+        context_bytes = pickle.dumps(best_raw_ctx)
+        status_length = len(status_bytes)
+        context_length = len(context_bytes)
+        sizes = (c_int * 2)(status_length, context_length)
+        psizes = cast(sizes, c_void_p)
+        signal = c_int(0)
+        psignal = cast(byref(signal), c_void_p)
+        self.mpi_comm.MPI_Broadcast(psignal, 4, root=0)
+        self.mpi_comm.MPI_Broadcast(psizes, 8, root=0)
+        self.mpi_comm.MPI_Broadcast(
+            cast(status_bytes, c_void_p), status_length, root=0)
+        self.mpi_comm.MPI_Broadcast(
+            cast(context_bytes, c_void_p), context_length, root=0)
+
+    def recv_best_config(self):
+        from ctypes import c_void_p, c_int, cast, string_at, c_char, byref
+        signal = c_int(1)
+        psignal = cast(byref(signal), c_void_p)
+        while signal.value > 0:
+            self.mpi_comm.MPI_Broadcast(psignal, 4, root=0)
+            if signal.value == 2:
+                # profile allreduce
+                self.nccl_profiler.profile_allreduce(0, [])
+            elif signal.value == 3:
+                # profile send/recv
+                self.nccl_profiler.profile_sendrecv(0, [])
+        sizes = (c_int * 2)()
+        psizes = cast(sizes, c_void_p)
+        self.mpi_comm.MPI_Broadcast(psizes, 8, root=0)
+        status_length, context_length = sizes[0], sizes[1]
+        status_bytes = (c_char * status_length)()
+        context_bytes = (c_char * context_length)()
+        self.mpi_comm.MPI_Broadcast(
+            cast(status_bytes, c_void_p), status_length, root=0)
+        self.mpi_comm.MPI_Broadcast(
+            cast(context_bytes, c_void_p), context_length, root=0)
+        best_cur_status = pickle.loads(
+            string_at(status_bytes, size=status_length))
+        best_raw_ctx = pickle.loads(
+            string_at(context_bytes, size=context_length))
+        return best_cur_status, best_raw_ctx

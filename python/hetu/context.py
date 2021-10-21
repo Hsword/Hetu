@@ -141,7 +141,7 @@ class NodeStatus(object):
         self._state = state
         self._device_num = dev_num
         if self._device_num is not None and self._state is not None:
-            temp = np.prod(list(self._state.values()), dtype=int)
+            temp = int(np.prod(list(self._state.values()), dtype=int))
             assert dev_num % temp == 0
             self._duplicate = dev_num // temp
         else:
@@ -180,7 +180,7 @@ class NodeStatus(object):
             assert dev_num == self._device_num
         self._device_num = dev_num
         if self._state is not None:
-            temp = np.prod(list(self._state.values()), dtype=int)
+            temp = int(np.prod(list(self._state.values()), dtype=int))
             assert dev_num % temp == 0
             temp_duplicate = dev_num // temp
             assert self._duplicate in (None, temp_duplicate)
@@ -195,7 +195,7 @@ class NodeStatus(object):
             assert self._state in (state, None)
             self._state = state
             if self._device_num is not None:
-                temp = np.prod(list(self._state.values()), dtype=int)
+                temp = int(np.prod(list(self._state.values()), dtype=int))
                 assert self._device_num % temp == 0
                 temp_duplicate = self._device_num // temp
                 assert self._duplicate in (temp_duplicate, None)
@@ -241,8 +241,8 @@ class NodeStatus(object):
         else:
             self._valid_state = True
             if self._device_num is None:
-                self._device_num = np.prod(
-                    list(self._state.values()), dtype=int) * self._duplicate
+                self._device_num = int(np.prod(
+                    list(self._state.values()), dtype=int)) * self._duplicate
             return True
 
     def valid_all(self):
