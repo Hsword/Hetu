@@ -32,6 +32,7 @@ import ctypes
 import os
 from time import time
 
+
 def path_to_lib(name):
     curr_path = os.path.dirname(os.path.abspath(os.path.expanduser(__file__)))
     lib_path = os.path.join(curr_path, '../../../build/lib/')
@@ -245,7 +246,8 @@ class HetuConfig(object):
             ps_rank = int(self.ps_comm.rank())
             ps_nrank = int(
                 os.environ['DMLC_NUM_WORKER']) if 'DMLC_NUM_WORKER' in os.environ else 1
-            topo_sort_register_ps(eval_node_list, self.ps_comm, self.comm_mode, self.seed, cstable_policy)
+            topo_sort_register_ps(
+                eval_node_list, self.ps_comm, self.comm_mode, self.seed, cstable_policy)
         if self.comm_mode == "Hybrid" or self.comm_mode == "AllReduce":
             self.nccl_comm = wrapped_mpi_nccl_init(devices=local_gpu_devices)
         elif context_launch:
@@ -276,7 +278,11 @@ class HetuConfig(object):
         if context_launch:
             # comm_mode is None <=> only 1 model parallel instance
             self.context = ndarray.gpu(device_id)
-            self.pipeline_rank, self.pipeline_nrank, self.pipeline_dp_rank = get_pipeline_stage_info(eval_node_list, self.context)
+            if self.pipeline is not None:
+                self.pipeline_rank, self.pipeline_nrank, self.pipeline_dp_rank = get_pipeline_stage_info(
+                    eval_node_list, self.context)
+            else:
+                self.pipeline_rank, self.pipeline_nrank, self.pipeline_dp_rank = 0, 1, self.rank
             self.p2p_stream = create_stream_handle(
                 self.context) if init_p2p_stream else None
             if node_cur_state_map is None:
@@ -293,7 +299,7 @@ class HetuConfig(object):
                 if self.comm_mode == 'PS':
                     self.comm_mode = 'Hybrid'
         else:
-            self.pipeline_rank , self.pipeline_nrank, self.pipeline_dp_rank = 0, 1, self.rank
+            self.pipeline_rank, self.pipeline_nrank, self.pipeline_dp_rank = 0, 1, self.rank
             self.context = ctx
 
         on_gpu = ndarray.is_gpu_ctx(self.context)
@@ -502,6 +508,7 @@ class Executor(object):
         if self.comm_mode in ('PS', 'Hybrid'):
             worker_finish()
 
+
 class SubExecutor(object):
     def __init__(self, name, eval_node_list, config):
         """
@@ -530,6 +537,11 @@ class SubExecutor(object):
                     remove_send = 0
                 elif not isinstance(node, OptimizerOp):
                     self.eval_node_list.append(node)
+            self.global_eval_nodes = eval_node_list
+        elif config.p2p_stream:
+            self.run_results_indices = [eval_node_list.index(
+                node) if node in eval_node_list else -1 for node in config.my_eval_nodes]
+            self.eval_node_list = config.my_eval_nodes
             self.global_eval_nodes = eval_node_list
 
         if inference == False:
@@ -1066,6 +1078,11 @@ class SubExecutor(object):
             results = filter(lambda x: x[0] in self.global_eval_nodes,
                              zip(self.eval_node_list, results))
             results = [x[1] for x in results]
+        elif self.use_p2p:
+            new_results = [None for _ in self.global_eval_nodes]
+            for i, j in enumerate(self.run_results_indices):
+                new_results[j] = results[i]
+            results = new_results
 
         return results
 
@@ -1163,12 +1180,14 @@ def topo_sort_register_ps(node_list, ps_comm, comm_mode, seed, cstable_policy):
             node_type = int(node.is_embed)
             if node_type and cstable_policy is not None:
                 node_type = 2
-            node.initializer.init_on_ps(ps_comm, node.id, node_type, seed=seed + node.id, opt=opt)
+            node.initializer.init_on_ps(
+                ps_comm, node.id, node_type, seed=seed + node.id, opt=opt)
         for n in node.inputs:
             _topo_sort_register_ps(n)
 
     for node in node_list:
         _topo_sort_register_ps(node)
+
 
 def get_pipeline_stage_info(node_list, ctx):
     stage_index = {}
@@ -1193,8 +1212,8 @@ def get_pipeline_stage_info(node_list, ctx):
 
     # for a n stage pipeline, we have 2 * ( n - 1) pipeline articulation and 1 optimizer,
     # thus max(stage_index.values()) = 2n -1
-    total_stage = ( max(stage_index.values()) + 1 ) // 2
-    total_stage = max(1, total_stage) # handle corner case
+    total_stage = (max(stage_index.values()) + 1) // 2
+    total_stage = max(1, total_stage)  # handle corner case
     # find out my stage index, which is the biggest stage number in the forward pass
     my_stage = set()
     # dp rank (data parallel rank) is used to let dataloader know which part of data it should load
@@ -1318,6 +1337,7 @@ def sum_node_list(node_list, ctx):
         return node_list[0]
     else:
         return sum_op(node_list, ctx=ctx)
+
 
 def reorder_for_group(topo_order, layer_indices):
     if layer_indices is None:
