@@ -21,8 +21,7 @@ class ParameterServerCommunicateOp(Op):
         # the optimizer only support fixed learning rate, no scheduler supported.
         # TODO: implement optimizer on Servers(already implemented, not in use) and Caches(not implemented yet)
         # TODO: implement learning rate scheduler
-        self.learning_rate = -optimizer[1][0] / \
-            int(os.environ['DMLC_NUM_WORKER'])
+        self.learning_rate = -optimizer[1][0]
         self.ps_id = ctypes.c_int(self.parameter.id)
         self.psevent = None
 
@@ -38,6 +37,13 @@ class ParameterServerCommunicateOp(Op):
     def _compute_asp_prefetch(self, input_vals, output_val, stream_handle=None):
         self._mult_lr(input_vals[0], stream_handle)
         self._update_event(self._push_pull(input_vals[0], stream_handle))
+
+    def _compute_ssp_prefetch(self, input_vals, output_val, stream_handle=None):
+        self._mult_lr(input_vals[0], stream_handle)
+        self._wait(self._push(input_vals[0], stream_handle))
+        self.comm.ssp_sync(self.ps_id, self.ssp_version)
+        self._update_event(self._pull())
+        self.ssp_version += 1
 
     def _compute_bsp_prefetch(self, input_vals, output_val, stream_handle=None):
         self._mult_lr(input_vals[0], stream_handle)
@@ -139,7 +145,7 @@ class ParameterServerCommunicateOp(Op):
             self._wait = self._wait_cache
             self._update_event = self._update_event_cache
             self._mult_lr = self._mult_lr_sparse_cpu
-            if config.bsp and config.prefetch:
+            if config.bsp == 0 and config.prefetch:
                 self._push = self._push_cache
                 self._pull = self._pull_cache
                 self.compute = self._compute_bsp_prefetch
@@ -153,8 +159,6 @@ class ParameterServerCommunicateOp(Op):
             # only worker 0 will do the initialization on server,
             # this function synchronously initialize meta information and do the initialization,
             # ALREADY has barrier!
-            self.parameter.initializer.init_on_ps(
-                self.comm, self.ps_id, 2, seed=config.seed + self.ps_id.value, opt=self.optimizer)
             self.cache = CacheSparseTable(
                 limit, node_shape[0], node_shape[1], self.parameter.id, config.cstable_policy, config.cache_bound)
             self.parameter.cache = self.cache
@@ -176,11 +180,6 @@ class ParameterServerCommunicateOp(Op):
             self.push_val = ndarray.empty(node_shape, ctx=ndarray.cpu(0))
             if config.d2h_stream:
                 self.psevent = stream.create_event_handle(self.ctx)
-        # only worker 0 will do the initialization on server,
-        # this function synchronously initialize meta information and do the initialization,
-        # ALREADY has barrier!
-        self.parameter.initializer.init_on_ps(self.comm, self.ps_id, int(
-            self.parameter.is_embed), seed=config.seed + self.ps_id.value, opt=self.optimizer)
         if self_sparse:
             if config.prefetch:
                 self.dl_name = config.train_name
@@ -223,8 +222,10 @@ class ParameterServerCommunicateOp(Op):
             self._push = self._push_dense_gpu
             self._pull = self._pull_dense
             self._push_pull = self._push_pull_dense_gpu
-        if config.bsp and (config.prefetch or not self_sparse):
-            self.compute = self._compute_bsp_prefetch
+        if config.bsp >= 0 and (config.prefetch or not self_sparse):
+            self.compute = self._compute_ssp_prefetch
+            self.ssp_version = 0
+            self.comm.ssp_init(self.ps_id, config.nrank // config.pipeline_nrank, config.bsp)
         elif config.prefetch or not self_sparse:
             self.compute = self._compute_asp_prefetch
         else:

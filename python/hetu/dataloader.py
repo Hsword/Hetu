@@ -167,7 +167,9 @@ class DataloaderOp(Op):
 
     def backward_hook(self, config):
         for d in self.dataloaders.values():
-            if config.context_launch and not (config.pipedream or config.gpipe):
+            if config.pipeline:
+                d.init_states(config.pipeline_dp_rank, config.nrank // config.pipeline_nrank)
+            elif config.context_launch:
                 d.init_states(config.rank, config.nrank)
             else:
                 d.init_states()

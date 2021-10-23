@@ -133,13 +133,14 @@ if __name__ == "__main__":
             torch.cuda.set_device(args.gpu)
             print_rank0('Use GPU %d.' % args.gpu)
 
-    assert args.model in ['mlp', 'resnet18', 'resnet34',
+    assert args.model in ['mlp', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
                           'vgg16', 'vgg19', 'rnn'], 'Model not supported now.'
 
     assert args.dataset in ['MNIST', 'CIFAR10', 'CIFAR100', 'ImageNet']
     dataset = args.dataset
 
-    if args.model in ['resnet18', 'resnet34', 'vgg16', 'vgg19'] and args.dataset == 'CIFAR100':
+    if args.model in ['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152', 'vgg16', 'vgg19'] \
+        and args.dataset == 'CIFAR100':
         net = eval(args.model)(100)
     elif args.model == 'rnn':
         net = eval(args.model)(28, 10, 128, 28)
@@ -205,8 +206,9 @@ if __name__ == "__main__":
             print_rank0("Running time of current epoch = %fs" % (end - start))
             if i != 0:
                 running_time += (end - start)
-        test(epoch=i, net=net, data=valid_set_x, label=valid_set_y,
-             batch_size=args.batch_size, criterion=criterion)
+        if args.validate:
+            test(epoch=i, net=net, data=valid_set_x, label=valid_set_y,
+                batch_size=args.batch_size, criterion=criterion)
 
     print_rank0("*"*50)
     print_rank0("Running time of total %d epoch = %fs" %

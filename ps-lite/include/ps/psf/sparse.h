@@ -7,6 +7,8 @@ namespace ps {
 
 template <>
 struct PSFData<SparsePull> {
+    static constexpr PsfGroup group = PsfGroup::kParameterServer;
+    static constexpr const char* name = "SparsePull";
     using Request = tuple<Key,           // key
                           SArray<size_t> // offset
                           >;
@@ -31,6 +33,8 @@ struct PSFData<SparsePull> {
 
 template <>
 struct PSFData<SparsePush> {
+    static constexpr PsfGroup group = PsfGroup::kParameterServer;
+    static constexpr const char* name = "SparsePush";
     using Request = tuple<Key,            // key
                           SArray<size_t>, // offset
                           SArray<float>   // data
@@ -42,6 +46,8 @@ struct PSFData<SparsePush> {
 
 template <>
 struct PSFData<SDPushPull> {
+    static constexpr PsfGroup group = PsfGroup::kParameterServer;
+    static constexpr const char* name = "SDPushPull";
     using Request = tuple<Key,            // key
                           SArray<size_t>, // offset
                           SArray<float>,  // data
@@ -58,6 +64,8 @@ struct PSFData<SDPushPull> {
 
 template <>
 struct PSFData<SSPushPull> {
+    static constexpr PsfGroup group = PsfGroup::kParameterServer;
+    static constexpr const char* name = "SSPushPull";
     using Request = tuple<Key,            // key
                           SArray<size_t>, // push offset
                           SArray<float>,  // data

@@ -8,6 +8,8 @@ typedef int64_t version_t;
 
 template <>
 struct PSFData<kPushEmbedding> {
+    static constexpr PsfGroup group = PsfGroup::kParameterServer;
+    static constexpr const char* name = "PushEmbedding";
     using Request = tuple<Key,              // key
                           SArray<size_t>,   // rows
                           SArray<float>,    // data
@@ -20,6 +22,8 @@ struct PSFData<kPushEmbedding> {
 
 template <>
 struct PSFData<kSyncEmbedding> {
+    static constexpr PsfGroup group = PsfGroup::kParameterServer;
+    static constexpr const char* name = "SyncEmbedding";
     using Request = tuple<Key,               // key
                           SArray<size_t>,    // rows
                           SArray<version_t>, // current version
@@ -36,6 +40,8 @@ struct PSFData<kSyncEmbedding> {
 
 template <>
 struct PSFData<kPushSyncEmbedding> {
+    static constexpr PsfGroup group = PsfGroup::kParameterServer;
+    static constexpr const char* name = "PushSyncEmbedding";
     using Request = tuple<Key,               // key
                           SArray<size_t>,    // rows
                           SArray<version_t>, // current version

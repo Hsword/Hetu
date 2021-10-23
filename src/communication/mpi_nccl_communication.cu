@@ -16,9 +16,14 @@ ncclDataType_t _get_proper_datatype(int datatype) {
     return TYPE2TYPE_V1[datatype];
 }
 
+#if NCCL_MINOR >= 10
+static const ncclRedOp_t TYPE2TYPE_V2[] = {ncclSum, ncclProd, ncclMax, ncclMin, ncclAvg};
+#else
 static const ncclRedOp_t TYPE2TYPE_V2[] = {ncclSum, ncclProd, ncclMax, ncclMin};
+#endif
 
 ncclRedOp_t _get_proper_redop(int redop) {
+    assert (redop < sizeof(TYPE2TYPE_V2) / sizeof(ncclRedOp_t));
     return TYPE2TYPE_V2[redop];
 }
 

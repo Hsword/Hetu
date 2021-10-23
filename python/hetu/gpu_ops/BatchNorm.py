@@ -166,8 +166,8 @@ class Batch_Normalization_GradientOp(Op):
                     shape=input_vals[1].shape, ctx=input_vals[0].ctx)
             CuDNN_Batch_Normalization_gradient(input_vals[0], input_vals[1], input_vals[2],
                                                self.tmp_gradient_in_arr, self.tmp_gradient_bn_scale,
-                                               self.tmp_gradient_bn_bias, self.forward_node.save_mean,
-                                               self.forward_node.save_var, self.eps, stream_handle)
+                                               self.tmp_gradient_bn_bias, self.forward_node.running_mean,
+                                               self.forward_node.running_var, self.eps, stream_handle)
 
     def gradient(self, output_grad):
         raise NotImplementedError

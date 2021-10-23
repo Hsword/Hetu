@@ -52,7 +52,7 @@ class ncclRedOp_t(Enum):
     ncclProd = 1
     ncclMax = 2
     ncclMin = 3
-    ncclNumOps = 4
+    ncclAvg = 4 # only avaiable if nccl>=2.10
 
 
 class ncclUniqueId(Structure):
@@ -186,6 +186,18 @@ class NCCL_Communicator():
         self.ncclSetDevice(self.device_id.value)
         if devices_context is None:
             self.ncclGetUniqueId()
+            self.ncclCommInitRank()
+        elif isinstance(devices_context, tuple):
+            # add for preduce case
+            global_rank = self.rank
+            rank = devices_context.index(self.rank)
+            nrank = len(devices_context)
+            self.nRanks = c_int32(nrank)
+            self.myRank = c_int32(rank)
+            self.localRank = c_int32(rank) # we don't need to know about local rank in partial reduce
+            tag = hash(devices_context) % 10000007
+            self.ncclGetGroupUniqueId(
+                    (c_int32 * nrank)(*devices_context), c_int32(global_rank), self.nRanks, c_int32(tag))
             self.ncclCommInitRank()
         else:
             assert isinstance(
