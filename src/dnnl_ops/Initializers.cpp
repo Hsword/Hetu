@@ -21,11 +21,26 @@ int cpu_NormalInit(DLArrayHandle arr, const float mean, const float stddev,
     }
     float *arr_data = (float *)arr->data;
 
+    size_t n_threads = (size >> 25) + 1;
+    if (n_threads > 16)
+        n_threads = 16;
+
     std::normal_distribution<float> normal_dist(mean, stddev);
-    std::default_random_engine generator(seed);
-    for (size_t j = 0; j < size; j++) {
-        arr_data[j] = normal_dist(generator);
+#pragma omp parallel num_threads(n_threads)
+    {
+        size_t rank = omp_get_thread_num();
+        size_t num_threads = omp_get_num_threads();
+        std::default_random_engine generator(seed + rank);
+        size_t length = size / num_threads;
+        size_t start = rank * length;
+        size_t ending = start + length;
+        if (rank == num_threads - 1)
+            ending = size;
+        for (size_t j = start; j < ending; ++j) {
+            arr_data[j] = normal_dist(generator);
+        }
     }
+
     return 0;
 }
 
@@ -37,11 +52,26 @@ int cpu_UniformInit(DLArrayHandle arr, const float lb, const float ub,
     }
     float *arr_data = (float *)arr->data;
 
+    size_t n_threads = (size >> 25) + 1;
+    if (n_threads > 16)
+        n_threads = 16;
+
     std::uniform_real_distribution<float> uniform_dist(lb, ub);
-    std::default_random_engine generator(seed);
-    for (size_t j = 0; j < size; j++) {
-        arr_data[j] = uniform_dist(generator);
+#pragma omp parallel num_threads(n_threads)
+    {
+        size_t rank = omp_get_thread_num();
+        size_t num_threads = omp_get_num_threads();
+        std::default_random_engine generator(seed + rank);
+        size_t length = size / num_threads;
+        size_t start = rank * length;
+        size_t ending = start + length;
+        if (rank == num_threads - 1)
+            ending = size;
+        for (size_t j = start; j < ending; ++j) {
+            arr_data[j] = uniform_dist(generator);
+        }
     }
+
     return 0;
 }
 
@@ -53,15 +83,29 @@ int cpu_TruncatedNormalInit(DLArrayHandle arr, const float mean,
     }
     float *arr_data = (float *)arr->data;
 
+    size_t n_threads = (size >> 25) + 1;
+    if (n_threads > 16)
+        n_threads = 16;
+
     std::normal_distribution<float> truncated_normal_dist(mean, stddev);
     float upper_limit = mean + 2 * stddev;
     float lower_limit = mean - 2 * stddev;
-    std::default_random_engine generator(seed);
-    for (size_t j = 0; j < size; j++) {
-        float temp = truncated_normal_dist(generator);
-        while (temp > upper_limit || temp < lower_limit)
-            temp = truncated_normal_dist(generator);
-        arr_data[j] = temp;
+#pragma omp parallel num_threads(n_threads)
+    {
+        size_t rank = omp_get_thread_num();
+        size_t num_threads = omp_get_num_threads();
+        std::default_random_engine generator(seed + rank);
+        size_t length = size / num_threads;
+        size_t start = rank * length;
+        size_t ending = start + length;
+        if (rank == num_threads - 1)
+            ending = size;
+        for (size_t j = start; j < ending; ++j) {
+            float temp = truncated_normal_dist(generator);
+            while (temp > upper_limit || temp < lower_limit)
+                temp = truncated_normal_dist(generator);
+            arr_data[j] = temp;
+        }
     }
     return 0;
 }
