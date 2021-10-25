@@ -8,7 +8,6 @@ from .. import ndarray as _nd
 def add_l2_regularization(param, grad, l2reg, stream=None):
     assert isinstance(param, _nd.NDArray)
     assert isinstance(grad, (_nd.NDArray, _nd.IndexedSlices))
-    # not support indexed slices now
     if isinstance(grad, _nd.NDArray):
         _LIB.AddL2Regularization(param.handle, grad.handle, ctypes.c_float(
             l2reg), stream.handle if stream else None)

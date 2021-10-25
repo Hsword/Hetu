@@ -20,8 +20,6 @@ class Optimizer(object):
             assert learning_rate >= 0, \
                 "learning rate must be non-negative"
             self.lr_sched = FixedScheduler(learning_rate)
-        # now we don't support l2 regularizer for sparse updates
-        # TODO: support l2 regularizer for sparse updates
         # now we don't support l2 regularizer for PS mode parameters
         # TODO: support l2 regularizer for PS mode parameters (after PS mode has optimizer on Servers)
         assert l2reg >= 0, 'L2 regularizer should be positive or 0.'
