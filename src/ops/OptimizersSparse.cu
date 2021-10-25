@@ -1,5 +1,55 @@
 #include "gpu_runtime.h"
 
+__global__ void add_l2_regularization_sparse(const float *param, 
+                                            float *grad_data,
+                                            const float *indices_data,
+                                            float l2reg, size_t size, size_t length) {
+    size_t thread_ind = blockIdx.x * blockDim.x + threadIdx.x;
+    if (thread_ind >= size)
+        return;
+    size_t ind = thread_ind / length;
+    size_t offset = thread_ind % length;
+    int grad_ind = indices_data[ind];
+    const float cur_grad = grad_data[thread_ind];
+    size_t total_offset = length * grad_ind + offset;
+    const float *param_ptr = param + total_offset;
+    grad_data[thread_ind] = cur_grad + l2reg * (*param_ptr);
+}
+
+int AddL2RegularizationSparse(const DLArrayHandle param, 
+                                const DLArrayHandle grad_indices,
+                                DLArrayHandle grad_values, float l2reg, 
+                                DLStreamHandle stream_handle = NULL) {
+    size_t size = 1;
+    size_t length = param->shape[1];
+    for (int i = 0; i < grad_values->ndim; i++) {
+        size *= grad_values->shape[i];
+    }
+
+    dim3 blocks;
+    dim3 threads;
+    float *grad_data = (float *)grad_values->data;
+    const float *param_data = (const float *)param->data;
+    const float *indices_data = (const float *)grad_indices->data;
+
+    if (size <= 1024) {
+        threads.x = size;
+        blocks.x = 1;
+    } else {
+        threads.x = 1024;
+        blocks.x = (size + 1023) / 1024;
+    }
+
+    if (stream_handle)
+        add_l2_regularization_sparse<<<blocks, threads, 0,
+                            *(cudaStream_t *)stream_handle->handle>>>(
+                param_data, grad_data, indices_data, l2reg, size, length);
+    else
+        add_l2_regularization_sparse<<<blocks, threads>>>(param_data, 
+                grad_data, indices_data, l2reg, size, length);
+    return 0;
+}
+
 __global__ void sgd_sparse_update(const float *grad_data,
                                   const float *indices_data, float *param_data,
                                   size_t size, size_t length, float lr) {
@@ -177,6 +227,55 @@ int MomentumOptimizerSparseUpdate(DLArrayHandle param,
                 param_data, velocity_data, momentum, total_size);
         }
     }
+    return 0;
+}
+
+__global__ void indexedslices2dense_kernel(const float *values_data,
+                                   const float *indices_data,
+                                   float *new_values_data, size_t size,
+                                   size_t length) {
+    size_t thread_ind = blockIdx.x * blockDim.x + threadIdx.x;
+    if (thread_ind >= size)
+        return;
+    size_t ind = thread_ind / length;
+    size_t offset = thread_ind % length;
+    int to_ind = indices_data[ind];
+    const float cur_value = values_data[thread_ind];
+    float *new_value_ptr = new_values_data + length * to_ind + offset;
+    *new_value_ptr = cur_value;
+}
+
+int IndexedSlices2Dense(const DLArrayHandle values, 
+                        const DLArrayHandle indices,
+                        DLArrayHandle new_values, 
+                        DLStreamHandle stream_handle){
+    size_t size = 1;
+    size_t length = new_values->shape[new_values->ndim - 1];
+    for (int i = 0; i < values->ndim; ++i) {
+        size *= values->shape[i];
+    }
+    const float *values_data = (const float *)values->data;
+    const float *indices_data = (const float *)indices->data;
+    float *new_values_data = (float *)new_values->data;
+
+    dim3 blocks;
+    dim3 threads;
+    if (size <= 1024) {
+        threads.x = size;
+        blocks.x = 1;
+    } else {
+        threads.x = 1024;
+        blocks.x = (size + 1023) / 1024;
+    }
+
+    if (stream_handle)
+        indexedslices2dense_kernel<<<blocks, threads, 0,
+                                *(cudaStream_t *)stream_handle->handle>>>(
+                        values_data, indices_data, new_values_data, size, length);
+    else
+        indexedslices2dense_kernel<<<blocks, threads>>>(values_data, indices_data,
+                                new_values_data, size, length);
+
     return 0;
 }
 

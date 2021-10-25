@@ -480,7 +480,7 @@ def sparse_array(values, indices, shape, ctx=cpu(0)):
 
 
 class IndexedSlices(object):
-    __slots__ = ["indices", "values", "dense_shape", "deduplicated", "lazy"]
+    __slots__ = ["indices", "values", "dense_shape", "deduplicated", "lazy", "to_dense_flag"]
 
     def __init__(self, indices=None, values=None, dense_shape=None):
         self.indices = indices
@@ -488,6 +488,7 @@ class IndexedSlices(object):
         self.dense_shape = dense_shape
         self.deduplicated = False
         self.lazy = False
+        self.to_dense_flag = False
 
     def get_dense_shape(self):
         assert self.dense_shape is not None
@@ -545,3 +546,26 @@ class IndexedSlices(object):
             self.indices = None
             self.values = None
             self.deduplicated = False
+
+    def to_dense(self, stream):
+        assert is_gpu_ctx(self.indices.ctx)
+        np_indices = self.indices.asnumpy()
+        indicies_all = np.arange(self.get_dense_shape()[0])
+        indices_all_on_ctx = array(indicies_all, ctx=self.indices.ctx)
+        new_value_shape = self.get_dense_shape()
+        new_values = empty(new_value_shape, ctx=self.values.ctx)
+        _LIB.DLGpuArraySet(new_values.handle, ctypes.c_float(
+            0), stream.handle if stream else None)
+        _LIB.IndexedSlices2Dense(self.values.handle, self.indices.handle, new_values.handle, stream.handle if stream else None)
+        self.free_deduplicate()
+        self.values = new_values
+        self.indices = indices_all_on_ctx
+        self.to_dense_flag = True
+
+    def free_dense(self):
+        if self.to_dense_flag:
+            del self.indices
+            del self.values
+            self.indices = None
+            self.values = None
+            self.to_dense_flag = False
