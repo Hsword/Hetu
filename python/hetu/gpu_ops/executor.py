@@ -1104,6 +1104,9 @@ def gradients(output_node, node_list, insert_grad=None, return_all=False):
     from .ReduceMean import ReduceMeanOp
     from .BatchNorm import Batch_NormalizationOp
     from .LayerNorm import Layer_NormalizationOp
+    from .AddElewise import AddOp
+    from .AddConst import AddByConstOp
+    from .Sum import SumOp
     # TODO: add support for Csrmm, Division, MatrixDot, Sigmoid, Sqrt, Tanh, Where
     backward2forward = {}  # key: backward node; value: tuple of forward nodes
     forward2backward = {}  # key: forward node; value: list of generated backward nodes
@@ -1137,8 +1140,14 @@ def gradients(output_node, node_list, insert_grad=None, return_all=False):
         node_to_output_grad[node] = output_grad
         input_grads_list = node.gradient(output_grad)
         if input_grads_list is not None:
-            forward2backward[node] = [
-                n for n in input_grads_list if n is not None]
+            # TODO: not consider following nodes in forward2backward, can be improved
+            # DistGCN_15d, Division, MatrixDot, Sigmoid, Sqrt, Tanh, Where
+            if isinstance(node, (AddOp, AddByConstOp, SumOp)):
+                # these nodes don't generate new nodes
+                forward2backward[node] = []
+            else:
+                forward2backward[node] = [
+                    n for n in input_grads_list if n is not None]
             if isinstance(node, (ReduceMeanOp, Batch_NormalizationOp, Layer_NormalizationOp)):
                 forward2backward[node].append(input_grads_list[0].inputs[0])
             if len(node_to_output_grads_list[node]) > 1:
@@ -1150,7 +1159,14 @@ def gradients(output_node, node_list, insert_grad=None, return_all=False):
             # Calculate partial adjoint for input nodes.
             node_to_output_grads_list[node.inputs[i]].append(
                 input_grads_list[i])
-            backward2forward[input_grads_list[i]] = (node.inputs[i], node)
+            need_target = True
+            cur_key = input_grads_list[i]
+            if cur_key not in backward2forward:
+                need_target = False
+                backward2forward[cur_key] = (node, [])
+            if not isinstance(node.inputs[i], (AddOp, AddByConstOp, SumOp)):
+                backward2forward[cur_key][1].append(
+                    (node.inputs[i], need_target))
 
     grad_node_list = [node_to_output_grad[node] for node in node_list]
     if return_all:

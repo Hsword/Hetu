@@ -251,7 +251,7 @@ class ModelParallel4CNN(Strategy):
 
         # infer states using partial information
         node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
-            eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
+            eval_nodes, eval_node_list, node_cur_state_map, opt)
         return self.raw_ctx, node_cur_state_map, node_tar_state_map
 
 
@@ -372,7 +372,7 @@ class OneWeirdTrick4CNN(Strategy):
 
         # infer states using partial information
         node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
-            eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
+            eval_nodes, eval_node_list, node_cur_state_map, opt)
         return self.raw_ctx, node_cur_state_map, node_tar_state_map
 
 
@@ -431,6 +431,15 @@ class FlexFlow(Strategy):
         self.profiler = ht.HetuProfiler([], {}, {})
         if self.mpi_comm.nrank > 1:
             self.nccl_profiler = ht.NCCLProfiler()
+
+        # form a list of no-computing nodes to avoid profiling
+        from .gpu_ops.BatchNorm import Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp
+        from .gpu_ops.LayerNorm import Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp
+        self.no_computing_nodes = (
+            PlaceholderOp,
+            Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp,
+            Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp,
+        )
 
     class TaskNode(object):
         def __init__(self, name, device, inputs=[], shape=-1):
@@ -495,7 +504,7 @@ class FlexFlow(Strategy):
             assert index == 0
             device = device_group.device_id
         task = self.TaskNode(name, device, inputs=inputs, shape=shape)
-        if node_type == PlaceholderOp:
+        if node_type in self.no_computing_nodes:
             # TODO: consider data feeding time ?
             task.set_exetime(0.)
             return task
@@ -503,12 +512,46 @@ class FlexFlow(Strategy):
         if key not in self.cached_exetime:
             new_node = copy(node)
             new_node.inputs = []
+            if hasattr(new_node, 'compute_to_be_config'):
+                new_node.compute_to_be_config = True
             if hasattr(new_node, 'grad_node'):
                 del new_node.grad_node
             if hasattr(new_node, 'grad_nodes'):
                 del new_node.grad_nodes
             if hasattr(new_node, 'forward_node'):
                 del new_node.forward_node
+                from .gpu_ops.BatchNorm import Batch_Normalization_GradientOp
+                from .gpu_ops.LayerNorm import Layer_Normalization_GradientOp
+                from .gpu_ops.InstanceNorm2d import Instance_Normalization2d_GradientOp
+                from collections import namedtuple
+                if isinstance(new_node, Batch_Normalization_GradientOp):
+                    temp_shape = (1, task.inputs[0].shape[1], 1, 1)
+                    forward_node = namedtuple('forward_node', ['running_mean', 'running_var'])(
+                        running_mean=ht.array(np.random.normal(
+                            scale=0.01, size=temp_shape), ctx=self.rank0_device),
+                        running_var=ht.array(np.random.normal(
+                            scale=0.01, size=temp_shape), ctx=self.rank0_device),
+                    )
+                    new_node.forward_node = forward_node
+                elif isinstance(new_node, Layer_Normalization_GradientOp):
+                    temp_shape = tuple(task.inputs[0].shape[:-1]) + (1,)
+                    forward_node = namedtuple('forward_node', ['save_mean', 'save_var'])(
+                        save_mean=ht.array(np.random.normal(
+                            scale=0.01, size=temp_shape), ctx=self.rank0_device),
+                        save_var=ht.array(np.random.normal(
+                            scale=0.01, size=temp_shape), ctx=self.rank0_device),
+                    )
+                    new_node.forward_node = forward_node
+                elif isinstance(new_node, Instance_Normalization2d_GradientOp):
+                    temp_shape = tuple(task.inputs[0].shape[:-2]) + (1, 1)
+                    forward_node = namedtuple('forward_node', ['save_mean', 'save_var', 'eps'])(
+                        save_mean=ht.array(np.random.normal(
+                            scale=0.01, size=temp_shape), ctx=self.rank0_device),
+                        save_var=ht.array(np.random.normal(
+                            scale=0.01, size=temp_shape), ctx=self.rank0_device),
+                        eps=0.0000001,
+                    )
+                    new_node.forward_node = forward_node
             self.cached_exetime[key] = self.profile_new_case(
                 new_node, task)
         task.set_exetime(self.cached_exetime[key])
@@ -735,11 +778,12 @@ class FlexFlow(Strategy):
         from .gpu_ops.Concatenate import ConcatenateOp
         from .gpu_ops.SoftmaxCrossEntropy import SoftmaxCrossEntropyOp
         from .gpu_ops.SoftmaxCrossEntropySparse import SoftmaxCrossEntropySparseOp
+        from .gpu_ops.BatchNorm import Batch_NormalizationOp
+        from .gpu_ops.LayerNorm import Layer_NormalizationOp
 
         def init_cur_states(node, ctx):
-            if node in visited:
-                return
-            visited.add(node)
+            if node in visited_key:
+                return visited_key[node]
             node.raw_ctx = ctx
             key = None  # the key of node group
             if isinstance(node, (SoftmaxCrossEntropyOp, SoftmaxCrossEntropySparseOp)):
@@ -750,8 +794,11 @@ class FlexFlow(Strategy):
                 backbone_node = isinstance(
                     node, (Conv2dOp, Conv2dAddBiasOp, MatMulOp, LinearOp, SumOp, ConcatenateOp))
                 for n in node.inputs:
-                    if backbone_node and isinstance(n, PlaceholderOp) and n not in visited:
+                    if backbone_node and isinstance(n, PlaceholderOp) and n not in visited_key:
                         node_group[node].append(n)
+                    elif isinstance(n, PlaceholderOp) and isinstance(node, (Batch_NormalizationOp, Layer_NormalizationOp)) and n not in visited_key:
+                        assert key is not None
+                        node_group[key].append(n)
                     temp_key = init_cur_states(n, ctx)
                     if key is None:
                         key = temp_key
@@ -761,11 +808,13 @@ class FlexFlow(Strategy):
                     node_cur_state_map[node] = NodeStatus(
                         {0: self.num_ctxs}, dev_num=node.raw_ctx.mp_device_num)
                     key = node
+                    _ = node_group[key]  # make the key into default dictionary
                 elif key is not None:
                     node_group[key].append(node)
+            visited_key[node] = key
             return key
 
-        visited = set()
+        visited_key = {}
         node_cur_state_map = {}
         node_group = defaultdict(list)
         for node in node_list:
@@ -1235,6 +1284,7 @@ class FlexFlow(Strategy):
 
     def set_raw_ctxs_n_states(self, eval_node_list):
         from .context import complete_state_map_with_partial_information
+        from .gpu_ops.Concatenate import ConcatenateOp
         from time import time
         from collections import namedtuple
 
@@ -1259,7 +1309,7 @@ class FlexFlow(Strategy):
                 start = time()
                 meta_cur_state_map = node_cur_state_map.copy()
                 node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
-                    eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
+                    eval_nodes, eval_node_list, node_cur_state_map, opt)
                 if self.num_ctxs == 1:
                     print('Only 1 device. Start training...')
                     return self.raw_ctx, node_cur_state_map, node_tar_state_map
@@ -1297,7 +1347,9 @@ class FlexFlow(Strategy):
                     new_split = choice(self.split_candidates)
                     new_raw_ctx = choice(self.device_candidates[np.prod(
                         list(new_split.values()), dtype=int)])
-                    while new_split == node_cur_state_map[changing_node].state and new_raw_ctx == changing_node.raw_ctx:
+                    is_concatenate = isinstance(changing_node, ConcatenateOp)
+                    while (new_split == node_cur_state_map[changing_node].state and new_raw_ctx == changing_node.raw_ctx) \
+                            or (is_concatenate and changing_node.axis in new_split):
                         new_split = choice(self.split_candidates)
                         new_raw_ctx = choice(self.device_candidates[np.prod(
                             list(new_split.values()), dtype=int)])
@@ -1313,7 +1365,7 @@ class FlexFlow(Strategy):
                         new_split, dev_num=changing_node.raw_ctx.mp_device_num)
                     node_cur_state_map = meta_cur_state_map.copy()
                     node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
-                        eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
+                        eval_nodes, eval_node_list, node_cur_state_map, opt)
                     task_graph = self.init_task_graph(
                         eval_node_list, node_cur_state_map, node_tar_state_map)
                     new_simulation = self.full_simulate(task_graph)
@@ -1378,7 +1430,7 @@ class FlexFlow(Strategy):
             for grad in grads:
                 grad.raw_ctx = node.raw_ctx
         node_cur_state_map, node_tar_state_map = complete_state_map_with_partial_information(
-            eval_nodes, eval_node_list, node_cur_state_map, opt.optimizer.backward2forward)
+            eval_nodes, eval_node_list, node_cur_state_map, opt)
         return self.raw_ctx, node_cur_state_map, node_tar_state_map
 
     def send_best_config(self, best_cur_status, best_raw_ctx):

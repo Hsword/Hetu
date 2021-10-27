@@ -444,7 +444,7 @@ def parse_graph_with_dispatch(node_list):
     return node_cur_state_map, node_tar_state_map
 
 
-def complete_state_map_with_partial_information(forward_node_list, node_list, node_cur_state_map, bf_map):
+def complete_state_map_with_partial_information(forward_node_list, node_list, node_cur_state_map, opt):
     # given current state of the node,
     # add target state to the forward graph
     from .dataloader import DataloaderOp
@@ -497,18 +497,23 @@ def complete_state_map_with_partial_information(forward_node_list, node_list, no
             if not node_cur_state_map[node].valid_all():
                 invalid_states.append(node_cur_state_map[node])
         if node in bf_map:
-            _, fnode = bf_map[node]
+            fnode, _ = bf_map[node]
         for n in node.inputs:
             dfs(n)
             if n in bf_map:
-                forward_n, forward_node = bf_map[n]
-                if forward_node in node_tar_state_map[forward_n]:
-                    node_tar_state_map[n][node] = node_cur_state_map[forward_n]
+                forward_node, forward_ns = bf_map[n]
+                for local_fn, need_target in forward_ns:
+                    if (local_fn not in fb_map or node in fb_map[local_fn]) and (need_target or forward_node in node_tar_state_map[local_fn]):
+                        node_tar_state_map[n][node] = node_cur_state_map[local_fn]
+                        break
             elif node in bf_map and fnode in node_tar_state_map[n]:
                 node_tar_state_map[n][node] = node_tar_state_map[n][fnode]
 
     visited = set()
     invalid_states = []
+    assert isinstance(opt, OptimizerOp)
+    bf_map = opt.optimizer.backward2forward
+    fb_map = opt.optimizer.forward2backward
     node_tar_state_map = defaultdict(dict)
     for node in forward_node_list:
         determine_state(node)

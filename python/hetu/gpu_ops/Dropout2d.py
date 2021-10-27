@@ -30,16 +30,16 @@ class Dropout2dOp(Op):
                           output_val, self.seed, stream_handle)
 
     def gradient(self, output_grad):
-        return [dropout2d_gradient_op(output_grad, self.keep_prob, self, ctx=self.raw_ctx)]
+        return [dropout2d_gradient_op(output_grad, self.keep_prob, self.seed, ctx=self.raw_ctx)]
 
     def infer_shape(self, input_shapes):
         return input_shapes[0]
 
 
 class Dropout2d_GradientOp(Op):
-    def __init__(self, node_in, keep_prob, forward_node, ctx=None):
+    def __init__(self, node_in, keep_prob, seed, ctx=None):
         super().__init__(Dropout2d_GradientOp, [node_in], ctx)
-        self.forward_node = forward_node
+        self.seed = seed
         self.keep_prob = keep_prob
 
     def compute(self, input_vals, output_val, stream_handle=None):
@@ -47,7 +47,7 @@ class Dropout2d_GradientOp(Op):
             raise NotImplementedError
         else:
             dropout2d_gradient(
-                input_vals[0], 1 - self.keep_prob, output_val, self.forward_node.seed, stream_handle)
+                input_vals[0], 1 - self.keep_prob, output_val, self.seed, stream_handle)
 
     def gradient(self, output_grad):
         raise NotImplementedError
@@ -71,7 +71,7 @@ def dropout2d_op(node_in, keep_prob, ctx=None):
     return Dropout2dOp(node_in, keep_prob, ctx=ctx)
 
 
-def dropout2d_gradient_op(node_in, keep_prob, forward_node, ctx=None):
+def dropout2d_gradient_op(node_in, keep_prob, seed, ctx=None):
     """Gradient node of dropout2d operation.
     Parameters:
     ----
@@ -83,4 +83,4 @@ def dropout2d_gradient_op(node_in, keep_prob, forward_node, ctx=None):
     ----
     A new Node instance created by Op.
     """
-    return Dropout2d_GradientOp(node_in, keep_prob, forward_node, ctx=ctx)
+    return Dropout2d_GradientOp(node_in, keep_prob, seed, ctx=ctx)
