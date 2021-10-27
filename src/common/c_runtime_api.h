@@ -592,6 +592,10 @@ HETUSYS_EXTERN_C {
     // Optimizer Ops
     int AddL2Regularization(const DLArrayHandle param, DLArrayHandle grad,
                             float l2reg, DLStreamHandle stream_handle);
+    int AddL2RegularizationSparse(const DLArrayHandle param, 
+                                const DLArrayHandle grad_indices,
+                                DLArrayHandle grad_values, float l2reg, 
+                                DLStreamHandle stream_handle);
     int SGDOptimizerUpdate(DLArrayHandle param, const DLArrayHandle grad,
                            float lr, DLStreamHandle stream_handle);
     int SGDOptimizerSparseUpdate(DLArrayHandle param,
@@ -628,6 +632,10 @@ HETUSYS_EXTERN_C {
     int DeduplicateIndexedSlices(
         const DLArrayHandle origin, const DLArrayHandle inverse,
         DLArrayHandle compressed, DLStreamHandle stream_handle);
+
+    int IndexedSlices2Dense(
+        const DLArrayHandle values, const DLArrayHandle indices,
+        DLArrayHandle new_values, DLStreamHandle stream_handle);
 
     // DNNL Ops
     int DnnlMatrixMultiply(const DLArrayHandle matA, bool transposeA,

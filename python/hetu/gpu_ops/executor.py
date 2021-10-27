@@ -31,6 +31,7 @@ from functools import reduce
 import ctypes
 import os
 from time import time
+import pickle
 
 
 def path_to_lib(name):
@@ -333,7 +334,7 @@ class HetuConfig(object):
         self.bsp = bsp
         self.cache_bound = int(cache_bound)
         if self.dynamic_memory:
-            self.enable_lazy = False
+            self.enable_lazy = True
 
         self.log_path = log_path
         if log_path is not None and (self.comm_mode == 'PS' or self.comm_mode == "Hybrid"):
@@ -413,14 +414,14 @@ class Executor(object):
     def get_batch_num(self, name='default'):
         return self.subexecutor[name].batch_num
 
-    def save(self, file_path):
+    def save(self, file_path, file_name):
         assert os.path.isdir(
             file_path), 'Need to specify a work directory to save parameters.'
+        state_dic={}
         if self.comm_mode in (None, 'AllReduce'):
             # when using allreduce, users need to specify the worker whose rank equals 0 to save
             for node in self.param_nodes:
-                np.save(os.path.join(file_path, node.name + '.npy'),
-                        self.config.placeholder_to_arr_map[node].asnumpy())
+                state_dic[node.name] = self.config.placeholder_to_arr_map[node].asnumpy()
         else:
             self.ps_comm.BarrierWorker()
             if self.config.rank == 0:
@@ -432,17 +433,24 @@ class Executor(object):
                             nodeid, ctypes.c_char_p(bytes(file_path, 'utf-8')))
                         self.ps_comm.Wait(nodeid)
                     else:
-                        np.save(os.path.join(file_path, node.name + '.npy'),
-                                self.config.placeholder_to_arr_map[node].asnumpy())
+                        state_dic[node.name] = self.config.placeholder_to_arr_map[node].asnumpy()
             self.ps_comm.BarrierWorker()
+        
+        with open(file_path+file_name, "wb") as writer:
+            pickle.dump(state_dic, writer)
 
-    def load(self, file_path):
+    def load(self, file_path, file_name):
         assert os.path.isdir(
             file_path), 'Need to specify a work directory to load parameters.'
+
+        state_dic={}
+        with open(file_path+file_name, "rb") as reader:
+            state_dic = pickle.load(reader)
+
         if self.comm_mode in (None, 'AllReduce'):
             for node in self.param_nodes:
-                self.config.placeholder_to_arr_map[node][:] = np.load(
-                    os.path.join(file_path, node.name + '.npy'))
+                if node.name in state_dic:
+                    self.config.placeholder_to_arr_map[node][:]=state_dic[node.name]
         else:
             self.ps_comm.BarrierWorker()
             if self.config.rank == 0:
@@ -463,8 +471,8 @@ class Executor(object):
                             nodeid, self.config.ps_map[node].handle)
                         node.event.update()
                     else:
-                        self.config.placeholder_to_arr_map[node][:] = np.load(
-                            os.path.join(file_path, node.name + '.npy'))
+                        if node.name in state_dic:
+                            self.config.placeholder_to_arr_map[node][:]=state_dic[node.name]
                 elif isinstance(node, EmbeddingLookUp) and self.config.prefetch:
                     node.event.sync()
                     nodeid = ctypes.c_int(node.inputs[0].id)
@@ -782,6 +790,9 @@ class SubExecutor(object):
             return False
 
     def to_memory_pool(self, key, node):
+        if isinstance(self.node_to_arr_map[node], ndarray.NDArray) and self.node_to_arr_map[node].no_free:
+            self.node_to_arr_map[node] = None
+            return
         if key not in self.memory_pool:
             self.memory_pool[key] = []
         self.memory_pool[key].append(self.node_to_arr_map[node])
@@ -792,6 +803,7 @@ class SubExecutor(object):
         Parameters
         ----------
         """
+        self.node_ref_cnt[node] = self.node_outdeg_map[node]
         shape = self.node_to_shape_map[node]
         if isinstance(node, PlaceholderOp):
             if self.config.placeholder_to_arr_map[node] is not None:
@@ -810,6 +822,10 @@ class SubExecutor(object):
                 return
             if isinstance(node, EmbeddingLookUp) and (self.use_sparse_pull or self.cstable_policy) and self.config.prefetch:
                 self.node_to_arr_map[node] = self.param_psval_map[node.inputs[0]]
+                return
+            if isinstance(node, AllReduceCommunicateOp) and isinstance(node.inputs[0], EmbeddingLookUp_Gradient):
+                self.node_to_arr_map[node] = ndarray.IndexedSlices(
+                    dense_shape=shape)
                 return
             if node.on_gpu:
                 if node.inplace:
@@ -952,6 +968,34 @@ class SubExecutor(object):
             if not self.dynamic_memory:
                 self.memory_plan()
 
+        # functions to free nodes when dynamic_memory == True
+        def free_node(node):
+            self.node_ref_cnt[node] = None
+            key = self.node_to_shape_map[node]
+            if key is not None:
+                if isinstance(node, (EmbeddingLookUp_Gradient, DataD2HSparseOp)):
+                    key = (key, 'IndexedSlices')
+                self.to_memory_pool(key, node)
+            else:
+                del self.node_to_arr_map[node]
+
+            if node.inplace: # if inplace node is freed, need to take care of its inputs node
+                for n in node.inputs:
+                    if n in self.computing_nodes and n not in self.eval_node_list \
+                        and not (isinstance(n, AllReduceCommunicateOp) and isinstance(n.inputs[0], EmbeddingLookUp_Gradient)):
+                        self.node_ref_cnt[n] -= 1
+                        if self.node_ref_cnt[n] <= 0:
+                            free_node(n)
+
+        def end_node(node): # finish executing a node, should deal with its inputs
+            if self.dynamic_memory and not node.inplace:
+                for n in node.inputs:
+                    if n in self.computing_nodes and n not in self.eval_node_list \
+                        and not (isinstance(n, AllReduceCommunicateOp) and isinstance(n.inputs[0], EmbeddingLookUp_Gradient)):
+                        self.node_ref_cnt[n] -= 1
+                        if self.node_ref_cnt[n] <= 0:
+                            free_node(n)
+
         # computing
         grouping_nodes = []
         cur_ind = -1
@@ -976,17 +1020,18 @@ class SubExecutor(object):
                 GroupEnd()
             for node in grouping_nodes:
                 node.event.record(p2p_stream)
+            # Free nodes when dynamic_memory == True
+            for n in grouping_nodes:
+                end_node(n)
             grouping_nodes.clear()
         for node in self.computing_nodes:
             if self.dynamic_memory:
                 # allocate memory for the node when dynamic_memory == True
                 if self.node_ref_cnt[node] is None or need_reallocation:
                     self.node_memory_plan(node)
-                    self.node_ref_cnt[node] = self.node_outdeg_map[node]
                 for n in node.inputs:
                     if n not in self.node_to_arr_map:
                         self.node_memory_plan(n)
-                        self.node_ref_cnt[n] = self.node_outdeg_map[n]
 
             if node.on_cpu and isinstance(self.node_to_arr_map[node], ndarray.NDArray):
                 if DNNL_LIB['cpu_ArraySet'] and not isinstance(node, DataD2HOp):
@@ -1043,20 +1088,8 @@ class SubExecutor(object):
                         # for d2h op / eval nodes / nodes before [allreduce or ps nodes or pipelinesend nodes]
                         node.event.record(self.comp_stream)
 
-            if self.dynamic_memory:
-                # free nodes whose reference count is 0 when dynamic_memory == True
-                for n in node.inputs:
-                    if n in self.computing_nodes:
-                        self.node_ref_cnt[n] -= 1
-                        if self.node_ref_cnt[n] <= 0 and n not in self.eval_node_list:
-                            self.node_ref_cnt[n] = None
-                            key = self.node_to_shape_map[n]
-                            if key is not None:
-                                if n.op_type in ['EmbeddingLookUp_Gradient', 'DataD2HSparseOp']:
-                                    key = (key, 'IndexedSlices')
-                                self.to_memory_pool(key, n)
-                            else:
-                                del self.node_to_arr_map[n]
+            # Free nodes when dynamic_memory == True
+            end_node(node)
 
         if len(grouping_nodes) > 0:
             make_group()
