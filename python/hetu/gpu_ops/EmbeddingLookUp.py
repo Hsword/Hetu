@@ -41,7 +41,7 @@ class EmbeddingLookUp(Op):
 
     def gradient(self, output_grad):
         self.grad_node = embedding_lookup_gradient_op(
-            output_grad, self.inputs[1], None, ctx=self.inputs[0].ctx)
+            output_grad, self.inputs[1], None, ctx=self.raw_ctx)
         return [self.grad_node, None]
 
     def infer_shape(self, input_shapes):

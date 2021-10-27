@@ -93,6 +93,7 @@ class BertEmbeddings(object):
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
 
         embeddings = words_embeddings + position_embeddings + token_type_embeddings
+
         embeddings = self.LayerNorm(embeddings)
         embeddings = self.dropout(embeddings)
         return embeddings
@@ -188,6 +189,12 @@ class BertSelfAttention(object):
         output_tensor = ht.transpose_op(output_tensor, [0, 2, 1, 3])
         return output_tensor
 
+    def transpose_key_for_scores(self, input_tensor):
+        output_tensor = ht.array_reshape_op(
+            input_tensor, [self.batch_size, self.seq_len, self.num_attention_heads, self.attention_head_size])
+        output_tensor = ht.transpose_op(output_tensor, [0, 2, 3, 1])
+        return output_tensor
+
     def __call__(self, hidden_states, attention_mask):
         '''
         inputs:
@@ -204,12 +211,12 @@ class BertSelfAttention(object):
 
         # transpose
         query_layer = self.transpose_for_scores(mixed_query_layer) # [batch_size, num_heads, seq_len, head_size]
-        key_layer = self.transpose_for_scores(mixed_key_layer) # [batch_size, num_heads, seq_len, head_size]
+        key_layer = self.transpose_key_for_scores(mixed_key_layer) # [batch_size, num_heads, head_size, seq_len]
         value_layer = self.transpose_for_scores(mixed_value_layer) # [batch_size, num_heads, seq_len, head_size]
 
         # score
         key_layer_scaled = key_layer * (1.0 / np.sqrt(float(self.attention_head_size)))
-        attention_scores = ht.batch_matmul_op(query_layer, key_layer_scaled, trans_B=True) # [batch_size, num_heads, seq_len, seq_len]
+        attention_scores = ht.batch_matmul_op(query_layer, key_layer_scaled) # [batch_size, num_heads, seq_len, seq_len]
 
         # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
         attention_scores = attention_scores + ht.broadcastto_op(attention_mask, attention_scores)  # [batch_size, num_heads, seq_len, seq_len]
@@ -349,7 +356,8 @@ class BertLMPredictionHead(object):
 
         linear_input_shape = [config.batch_size, config.max_position_embeddings, config.hidden_size]
         self.decoder = Linear(config.hidden_size, config.vocab_size, bias_initializer=ht.init.zeros,input_shape=linear_input_shape)
-        self.decoder.weights = ht.transpose_op(bert_model_embedding_weights)
+        #self.decoder.weights = ht.transpose_op(bert_model_embedding_weights)
+        self.decoder.weights = bert_model_embedding_weights
 
     def __call__(self, hidden_states):
         '''
@@ -547,9 +555,9 @@ class BertForPreTraining(object):
         return_op = [prediction_scores, seq_relationship_score]
         if masked_lm_labels is not None and next_sentence_label is not None:
             '''
-            masked_lm_labels: [batch_size, seq_len, vocab_size], one hot form, masked places are filled with 0
+            masked_lm_labels: [batch_size, seq_len]
             prediction_scores: [batch_size, seq_len, vocab_size]
-            next_sentence_label: [batch_size, 2], one hot form, masked places are filled with 0
+            next_sentence_label: [batch_size]
             seq_relationship_score: [batch_size, 2]
 
             masked_lm_loss: [batch_size*seq_len]
@@ -617,7 +625,7 @@ class BertForMaskedLM(object):
         return_op = [prediction_scores]
         if masked_lm_labels is not None:
             '''
-            masked_lm_labels: [batch_size, seq_len, vocab_size], one hot form, masked places are filled with 0
+            masked_lm_labels: [batch_size, seq_len]
             prediction_scores: [batch_size, seq_len, vocab_size]
 
             masked_lm_loss: [batch_size*seq_len]
@@ -682,7 +690,7 @@ class BertForNextSentencePrediction(object):
         return_op = [seq_relationship_score]
         if next_sentence_label is not None:
             '''
-            next_sentence_label: [batch_size, 2], one hot form, masked places are filled with 0
+            next_sentence_label: [batch_size]
             seq_relationship_score: [batch_size, 2]
 
             next_sentence_loss: [batch_size]
@@ -692,6 +700,73 @@ class BertForNextSentencePrediction(object):
 
         return return_op
 
+'''-----------------------------------------------------------------------------------------------'''
+
+
+'''
+Downstream tasks:
+--------------------------------------------------------------------------------------------------'''
+class BertForSequenceClassification(object):
+    """BERT model for classification.
+    This module is composed of the BERT model with a linear layer on top of
+    the pooled output.
+
+    Params:
+        `config`: a BertConfig class instance with the configuration to build a new model.
+        `num_labels`: the number of classes for the classifier. Default = 2.
+
+    Inputs:
+        `input_ids`: a torch.LongTensor of shape [batch_size, sequence_length]
+            with the word token indices in the vocabulary(see the tokens preprocessing logic in the scripts
+            `extract_features.py`, `run_classifier.py` and `run_squad.py`)
+        `token_type_ids`: an optional torch.LongTensor of shape [batch_size, sequence_length] with the token
+            types indices selected in [0, 1]. Type 0 corresponds to a `sentence A` and type 1 corresponds to
+            a `sentence B` token (see BERT paper for more details).
+        `attention_mask`: an optional torch.LongTensor of shape [batch_size, sequence_length] with indices
+            selected in [0, 1]. It's a mask to be used if the input sequence length is smaller than the max
+            input sequence length in the current batch. It's the mask that we typically use for attention when
+            a batch has varying length sentences.
+        `labels`: labels for the classification output: torch.LongTensor of shape [batch_size]
+            with indices selected in [0, ..., num_labels].
+
+    Outputs:
+        if `labels` is not `None`:
+            Outputs the CrossEntropy classification loss of the output with the labels.
+        if `labels` is `None`:
+            Outputs the classification logits of shape [batch_size, num_labels].
+
+    Example usage:
+    ```python
+    # Already been converted into WordPiece token ids
+    input_ids = torch.LongTensor([[31, 51, 99], [15, 5, 0]])
+    input_mask = torch.LongTensor([[1, 1, 1], [1, 1, 0]])
+    token_type_ids = torch.LongTensor([[0, 0, 1], [0, 1, 0]])
+
+    config = BertConfig(vocab_size_or_config_json_file=32000, hidden_size=768,
+        num_hidden_layers=12, num_attention_heads=12, intermediate_size=3072)
+
+    num_labels = 2
+
+    model = BertForSequenceClassification(config, num_labels)
+    logits = model(input_ids, token_type_ids, input_mask)
+    ```
+    """
+    def __init__(self, config, num_labels):
+        self.num_labels = num_labels
+        self.bert = BertModel(config)
+        self.dropout = Dropout(config.hidden_dropout_prob)
+        self.classifier = Linear(config.hidden_size, num_labels)
+
+    def __call__(self, input_ids, token_type_ids=None, attention_mask=None, labels=None):
+        _, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
+        pooled_output = self.dropout(pooled_output)
+        logits = self.classifier(pooled_output) # [batch_size, num_labels]
+
+        if labels is not None:
+            loss = ht.softmaxcrossentropy_sparse_op(logits, labels, ignored_index = -1)
+            return loss, logits
+        else:
+            return logits
 '''-----------------------------------------------------------------------------------------------'''
 
 
@@ -726,7 +801,8 @@ class Linear(object):
     def __init__(self, in_features, out_features, bias=True, activation=None, kernel_initializer=ht.init.xavier_normal, bias_initializer=ht.init.zeros, input_shape=None):
         self.bias_flag = bias
         self.activation = activation
-        self.weights = kernel_initializer(name='dense_weights', shape=(in_features, out_features))
+        #self.weights = kernel_initializer(name='dense_weights', shape=(in_features, out_features))
+        self.weights = kernel_initializer(name='dense_weights', shape=(out_features, in_features))
         if self.bias_flag:
             self.bias = bias_initializer(name='dense_bias', shape=(out_features,))
         self.input_shape=input_shape
@@ -738,7 +814,8 @@ class Linear(object):
     def __call__(self, input_tensor):
         if self.input_shape is not None and len(self.input_shape)!=2:
             input_tensor = ht.array_reshape_op(input_tensor, [-1, self.in_features])
-        outputs = ht.matmul_op(input_tensor, self.weights)
+        #outputs = ht.matmul_op(input_tensor, self.weights)
+        outputs = ht.matmul_op(input_tensor, self.weights, trans_B = True)
         if self.bias_flag:
             outputs = outputs + ht.broadcastto_op(self.bias, outputs)
         if self.activation is not None:

@@ -88,6 +88,112 @@ def test_embedding_with_tf(opt_name, iters=10000, executor_ctx=ht.gpu(0)):
     np.testing.assert_allclose(out, tf_out, rtol=1e-5)
     np.testing.assert_allclose(new_embedding, tf_new_embedding, rtol=1e-5)
 
+def test_embedding_with_torch(opt_name, iters=10000, executor_ctx=ht.gpu(0), l2reg = 0, lr=0.1):
+    from time import time
+
+    np.random.seed(123)
+
+    value = np.random.rand(5, 5)
+    ids = [[0,1],[2,0]]
+    ids = np.array(ids,dtype=int)
+
+    print("Old embedding:")
+    print(value)
+    print()
+
+    label_np = np.random.randint(0,5,size=(2,2))
+
+    # torch part
+    from torch import nn
+    import torch
+    torch_embedding = nn.Embedding(5,5)
+    torch_embedding.weight = torch.nn.Parameter(torch.Tensor(value))
+    model = torch_embedding
+    
+    model.to('cuda:1')
+    torch_opts={
+        'sgd': torch.optim.SGD(model.parameters(), lr=lr, weight_decay=l2reg),
+        'adam': torch.optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=l2reg),
+    }
+
+    torch_opt = torch_opts[opt_name]
+
+    for i in range(iters):
+        torch_opt.zero_grad()
+        torch_y = model(torch.LongTensor(ids).to('cuda:1'))
+        loss = nn.CrossEntropyLoss()(torch_y.view(-1,5),torch.LongTensor(label_np).to('cuda:1').view(-1))
+        loss.backward()
+        torch_opt.step()
+
+    if opt_name == 'adam':
+        adam_state = torch_opt.state
+        key = list(adam_state.keys())[0]
+        torch_m = adam_state[key]['exp_avg'].detach().cpu().numpy()
+        torch_v = adam_state[key]['exp_avg_sq'].detach().cpu().numpy()
+
+    torch_out = torch_y.detach().cpu().numpy()
+    torch_new_embedding = model.weight.detach().cpu().numpy()
+
+    print("Pytorch:")
+    print("Loss:",loss.item())
+    #print("Output:\n",torch_out)
+    print("New embedding:\n",torch_new_embedding)
+
+    print("Weight gradient:\n",torch_embedding.weight.grad.detach().cpu().numpy())
+
+    if opt_name == 'adam':
+        print("torch_m:")
+        print(torch_m)
+        print("torch_v:")
+        print(torch_v)
+
+    print()
+
+    # hetu part
+    embedding = ht.Variable('embeddingtable', value=value)
+    index = ht.Variable(name="index")
+    y_ = ht.Variable(name='label')
+
+    ids = ht.array(ids, ctx=executor_ctx)
+    y = ht.embedding_lookup_op(embedding, index)
+    loss = ht.softmaxcrossentropy_sparse_op(y,y_,ignored_index=-1)
+    loss = ht.reduce_mean_op(loss, [0,1])
+    hetu_opts = {
+        'sgd': ht.optim.SGDOptimizer(lr,l2reg = l2reg),
+        'adam': ht.optim.AdamOptimizer(learning_rate=lr, beta1=0.9, beta2=0.999, epsilon=1e-8, l2reg = l2reg),
+    }
+    opt = hetu_opts[opt_name]
+
+    train_op = opt.minimize(loss)
+    executor = ht.Executor([y, loss, train_op], ctx=executor_ctx)
+
+    for i in range(iters):
+        out, loss_out,  _ = executor.run(feed_dict={index: ids, y_:label_np})
+
+    out = out.asnumpy()
+    loss_out = loss_out.asnumpy()
+    new_embedding = executor.config.placeholder_to_arr_map[embedding].asnumpy()
+
+    print("Hetu:")
+    print("Loss:",loss_out)
+    #print("Output:\n",out)
+    print("New embedding:\n",new_embedding)
+
+    # print("Weight gradient:")
+    # for node in executor.computing_nodes:
+    #     if node.name == 'EmbeddingLookUp_Gradient10':
+    #         grad_hetu = executor.config.node_to_arr_map[node]
+    #         print(grad_hetu.values.asnumpy())
+    #         print(grad_hetu.indices.asnumpy())
+    
+    if opt_name == 'adam':
+        print('hetu_m:')
+        print(opt.m[0].asnumpy())
+        print('hetu_v:')
+        print(opt.v[0].asnumpy())
+
+    #np.testing.assert_allclose(out, torch_out, rtol=1e-5)
+    np.testing.assert_allclose(new_embedding, torch_new_embedding, rtol=1e-5)
 
 test_embedding()
 test_embedding(ht.cpu(0))
@@ -97,3 +203,4 @@ test_embedding_with_tf(opt_name='momentum')
 test_embedding_with_tf(opt_name='nesterov', iters=1000)
 test_embedding_with_tf(opt_name='adagrad')
 test_embedding_with_tf(opt_name='adam')
+test_embedding_with_torch(opt_name = 'adam', iters=1,l2reg=0.1,lr=0.1)
