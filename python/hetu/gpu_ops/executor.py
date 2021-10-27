@@ -33,6 +33,7 @@ import os
 from time import time
 import pickle
 
+
 def path_to_lib(name):
     curr_path = os.path.dirname(os.path.abspath(os.path.expanduser(__file__)))
     lib_path = os.path.join(curr_path, '../../../build/lib/')
@@ -58,6 +59,11 @@ def new_group_comm(devices_context=None):
     else:
         comm = mpi_comm.ncclGroupInit(devices_context)
     return comm
+
+
+def get_mpi_communicate():
+    global mpi_comm
+    return mpi_comm
 
 
 def get_nccl_communicate():
@@ -191,8 +197,13 @@ class HetuConfig(object):
 
         # check context
         self.dist_strategy = dist_strategy
+        node_cur_state_map, node_tar_state_map = None, None
         if self.dist_strategy is not None:
-            ctx = self.dist_strategy.set_raw_ctxs(eval_node_list)
+            if self.dist_strategy.use_dispatch:
+                ctx = self.dist_strategy.set_raw_ctxs(eval_node_list)
+            else:
+                ctx, node_cur_state_map, node_tar_state_map = self.dist_strategy.set_raw_ctxs_n_states(
+                    eval_node_list)
         elif ctx is None:
             ctx = get_current_context()
         assert ctx, 'Default context should be determined.'
@@ -236,7 +247,8 @@ class HetuConfig(object):
             ps_rank = int(self.ps_comm.rank())
             ps_nrank = int(
                 os.environ['DMLC_NUM_WORKER']) if 'DMLC_NUM_WORKER' in os.environ else 1
-            topo_sort_register_ps(eval_node_list, self.ps_comm, self.comm_mode, self.seed, cstable_policy)
+            topo_sort_register_ps(
+                eval_node_list, self.ps_comm, self.comm_mode, self.seed, cstable_policy)
         if self.comm_mode == "Hybrid" or self.comm_mode == "AllReduce":
             self.nccl_comm = wrapped_mpi_nccl_init(devices=local_gpu_devices)
         elif context_launch:
@@ -267,11 +279,19 @@ class HetuConfig(object):
         if context_launch:
             # comm_mode is None <=> only 1 model parallel instance
             self.context = ndarray.gpu(device_id)
-            self.pipeline_rank, self.pipeline_nrank, self.pipeline_dp_rank = get_pipeline_stage_info(eval_node_list, self.context)
+            if self.pipeline is not None:
+                self.pipeline_rank, self.pipeline_nrank, self.pipeline_dp_rank = get_pipeline_stage_info(
+                    eval_node_list, self.context)
+            else:
+                self.pipeline_rank, self.pipeline_nrank, self.pipeline_dp_rank = 0, 1, self.rank
             self.p2p_stream = create_stream_handle(
                 self.context) if init_p2p_stream else None
+            if node_cur_state_map is None:
+                from ..context import parse_graph_with_dispatch
+                node_cur_state_map, node_tar_state_map = parse_graph_with_dispatch(
+                    eval_node_list)
             self.my_eval_nodes, self.param_allreduce_group, self.layer_indices = assign_context_by_traverse_nodes(
-                eval_node_list, self.context, self.nccl_comm, self.p2p_stream)
+                eval_node_list, self.context, self.nccl_comm, self.p2p_stream, node_cur_state_map, node_tar_state_map)
             for param in self.param_allreduce_group:
                 self.node_strategy[param] = 'AllReduce'
             if self.param_allreduce_group != {}:
@@ -280,7 +300,7 @@ class HetuConfig(object):
                 if self.comm_mode == 'PS':
                     self.comm_mode = 'Hybrid'
         else:
-            self.pipeline_rank , self.pipeline_nrank, self.pipeline_dp_rank = 0, 1, self.rank
+            self.pipeline_rank, self.pipeline_nrank, self.pipeline_dp_rank = 0, 1, self.rank
             self.context = ctx
 
         on_gpu = ndarray.is_gpu_ctx(self.context)
@@ -466,6 +486,21 @@ class Executor(object):
             node.event.sync()
         self.ps_comm.getLoads()
 
+    def reduceMean(self, arr, root=0):
+        # only used for loss and accuracy, etc.
+        # the communicator is formed by the context of loss
+        if 'loss' in self.config.param_allreduce_group:
+            comm = self.config.param_allreduce_group['loss']
+            if comm.local_rank == -1:
+                # in case local context is not in communicator
+                return arr
+            local_array = ndarray.array(arr, ndarray.cpu())
+            comm.dlarrayNcclReduce(local_array, local_array, root)
+            comm.stream.sync()
+            return local_array.asnumpy() / comm.nrank
+        else:
+            return arr
+
     def __del__(self):
         if self.config.comp_stream is not None:
             self.config.comp_stream.sync()
@@ -480,6 +515,7 @@ class Executor(object):
                 node.event.sync()
         if self.comm_mode in ('PS', 'Hybrid'):
             worker_finish()
+
 
 class SubExecutor(object):
     def __init__(self, name, eval_node_list, config):
@@ -509,6 +545,11 @@ class SubExecutor(object):
                     remove_send = 0
                 elif not isinstance(node, OptimizerOp):
                     self.eval_node_list.append(node)
+            self.global_eval_nodes = eval_node_list
+        elif config.p2p_stream:
+            self.run_results_indices = [eval_node_list.index(
+                node) if node in eval_node_list else -1 for node in config.my_eval_nodes]
+            self.eval_node_list = config.my_eval_nodes
             self.global_eval_nodes = eval_node_list
 
         if inference == False:
@@ -1070,11 +1111,16 @@ class SubExecutor(object):
             results = filter(lambda x: x[0] in self.global_eval_nodes,
                              zip(self.eval_node_list, results))
             results = [x[1] for x in results]
+        elif self.use_p2p:
+            new_results = [None for _ in self.global_eval_nodes]
+            for i, j in enumerate(self.run_results_indices):
+                new_results[j] = results[i]
+            results = new_results
 
         return results
 
 
-def gradients(output_node, node_list, insert_grad=None):
+def gradients(output_node, node_list, insert_grad=None, return_all=False):
     """Take gradient of output node with respect to each node in node_list.
 
     Parameters
@@ -1088,17 +1134,25 @@ def gradients(output_node, node_list, insert_grad=None):
     A list of gradient values, one for each node in node_list respectively.
 
     """
-    if isinstance(output_node, list):
-        node_to_output_grads_list = {
-            output_node[i]: [OnesLike.oneslike_op(output_node[i])] if insert_grad is None
-            else [insert_grad[i]] for i in range(len(output_node))
-        }
-    else:
-        node_to_output_grads_list = {
-            output_node: [OnesLike.oneslike_op(output_node)] if insert_grad is None else [
-                insert_grad]
-        }
+    from .ReduceMean import ReduceMeanOp
+    from .BatchNorm import Batch_NormalizationOp
+    from .LayerNorm import Layer_NormalizationOp
+    from .AddElewise import AddOp
+    from .AddConst import AddByConstOp
+    from .Sum import SumOp
+    # TODO: add support for Csrmm, Division, MatrixDot, Sigmoid, Sqrt, Tanh, Where
+    backward2forward = {}  # key: backward node; value: tuple of forward nodes
+    forward2backward = {}  # key: forward node; value: list of generated backward nodes
+    if not isinstance(output_node, list):
         output_node = [output_node]
+    if insert_grad is None:
+        insert_grad = [OnesLike.oneslike_op(
+            outnode) for outnode in output_node]
+    elif not isinstance(insert_grad, list):
+        insert_grad = [insert_grad]
+    forward2backward[None] = insert_grad
+    node_to_output_grads_list = {node: [grad]
+                                 for node, grad in zip(output_node, insert_grad)}
     node_to_output_grad = {}
     # Traverse forward graph in reverse topological order
     reverse_topo_order = reversed(find_topo_sort(output_node))
@@ -1118,15 +1172,40 @@ def gradients(output_node, node_list, insert_grad=None):
             continue
         node_to_output_grad[node] = output_grad
         input_grads_list = node.gradient(output_grad)
+        if input_grads_list is not None:
+            # TODO: not consider following nodes in forward2backward, can be improved
+            # DistGCN_15d, Division, MatrixDot, Sigmoid, Sqrt, Tanh, Where
+            if isinstance(node, (AddOp, AddByConstOp, SumOp)):
+                # these nodes don't generate new nodes
+                forward2backward[node] = []
+            else:
+                forward2backward[node] = [
+                    n for n in input_grads_list if n is not None]
+            if isinstance(node, (ReduceMeanOp, Batch_NormalizationOp, Layer_NormalizationOp)):
+                forward2backward[node].append(input_grads_list[0].inputs[0])
+            if len(node_to_output_grads_list[node]) > 1:
+                # sum op
+                forward2backward[node].append(output_grad)
         for i in range(len(node.inputs)):
             if node.inputs[i] not in node_to_output_grads_list:
                 node_to_output_grads_list[node.inputs[i]] = []
             # Calculate partial adjoint for input nodes.
             node_to_output_grads_list[node.inputs[i]].append(
                 input_grads_list[i])
+            need_target = True
+            cur_key = input_grads_list[i]
+            if cur_key not in backward2forward:
+                need_target = False
+                backward2forward[cur_key] = (node, [])
+            if not isinstance(node.inputs[i], (AddOp, AddByConstOp, SumOp)):
+                backward2forward[cur_key][1].append(
+                    (node.inputs[i], need_target))
 
     grad_node_list = [node_to_output_grad[node] for node in node_list]
-    return grad_node_list
+    if return_all:
+        return grad_node_list, backward2forward, forward2backward
+    else:
+        return grad_node_list
 
 ##################
 # Helper Methods #
@@ -1150,12 +1229,14 @@ def topo_sort_register_ps(node_list, ps_comm, comm_mode, seed, cstable_policy):
             node_type = int(node.is_embed)
             if node_type and cstable_policy is not None:
                 node_type = 2
-            node.initializer.init_on_ps(ps_comm, node.id, node_type, seed=seed + node.id, opt=opt)
+            node.initializer.init_on_ps(
+                ps_comm, node.id, node_type, seed=seed + node.id, opt=opt)
         for n in node.inputs:
             _topo_sort_register_ps(n)
 
     for node in node_list:
         _topo_sort_register_ps(node)
+
 
 def get_pipeline_stage_info(node_list, ctx):
     stage_index = {}
@@ -1180,8 +1261,8 @@ def get_pipeline_stage_info(node_list, ctx):
 
     # for a n stage pipeline, we have 2 * ( n - 1) pipeline articulation and 1 optimizer,
     # thus max(stage_index.values()) = 2n -1
-    total_stage = ( max(stage_index.values()) + 1 ) // 2
-    total_stage = max(1, total_stage) # handle corner case
+    total_stage = (max(stage_index.values()) + 1) // 2
+    total_stage = max(1, total_stage)  # handle corner case
     # find out my stage index, which is the biggest stage number in the forward pass
     my_stage = set()
     # dp rank (data parallel rank) is used to let dataloader know which part of data it should load
@@ -1305,6 +1386,7 @@ def sum_node_list(node_list, ctx):
         return node_list[0]
     else:
         return sum_op(node_list, ctx=ctx)
+
 
 def reorder_for_group(topo_order, layer_indices):
     if layer_indices is None:

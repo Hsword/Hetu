@@ -70,6 +70,31 @@ def test_ns_like_set():
     tester1.test([(2, 3, 7, 11)])
 
 
+def test_linear():
+    tester = HetuTester(ht.linear_op, 3)
+    tester.test([(7, 9), (9, 11), (11,)], atol=1e-6)
+    tester.test([(1, 13), (13, 2), (2,)], atol=1e-6)
+    tester.test([(5, 1), (1, 3), (3,)], atol=1e-6)
+    tester = HetuTester(ht.linear_op, 3, trans_A=True)
+    tester.test([(9, 7), (9, 11), (11,)], atol=1e-6)
+    tester.test([(13, 1), (13, 2), (2,)], atol=1e-6)
+    tester.test([(1, 5), (1, 3), (3,)], atol=1e-6)
+    tester = HetuTester(ht.linear_op, 3, trans_B=True)
+    tester.test([(7, 9), (11, 9), (11,)], atol=1e-6)
+    tester.test([(1, 13), (2, 13), (2,)], atol=1e-6)
+    tester.test([(5, 1), (3, 1), (3,)], atol=1e-6)
+    tester = HetuTester(ht.linear_op, 3, trans_A=True, trans_B=True)
+    tester.test([(9, 7), (11, 9), (11,)], atol=1e-6)
+    tester.test([(13, 1), (2, 13), (2,)], atol=1e-6)
+    tester.test([(1, 5), (3, 1), (3,)], atol=1e-6)
+
+
+def test_conv2d_add_bias():
+    tester = HetuTester(ht.conv2d_add_bias_op, 3)
+    tester.test([(4, 3, 28, 28), (7, 3, 5, 5), (7,)], atol=1e-5)
+    tester.test([(2, 5, 13, 13), (3, 5, 3, 3), (3,)], atol=1e-5)
+
+
 test_add_const()
 test_add_elewise()
 test_broadcast_to()
@@ -77,3 +102,5 @@ test_concatenate()
 test_concatenate_gradient()
 test_sum()
 test_ns_like_set()
+test_linear()
+test_conv2d_add_bias()

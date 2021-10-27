@@ -39,9 +39,8 @@ void MPIGetComm(MPI_Comm *comm) {
     *comm = MPI_COMM_WORLD;
 }
 
-void MPIBcast(void *buffer, int size, MPI_Datatype datatype, int root,
-              MPI_Comm comm) {
-    MPICHECK(MPI_Bcast(buffer, size, datatype, root, comm));
+void MPIBcast(void *buffer, int size, int root, MPI_Comm comm) {
+    MPICHECK(MPI_Bcast(buffer, size, MPI_BYTE, root, comm));
 }
 
 void getMPICommRank(MPI_Comm *comm, int *myRank) {
@@ -103,7 +102,7 @@ void getNcclUniqueId(ncclUniqueId *Id, MPI_Comm mpi_comm, int localRank,
                      int senderRank) {
     if (localRank == 0)
         NCCLCHECK(ncclGetUniqueId(Id));
-    MPIBcast((void *)Id, sizeof(ncclUniqueId), MPI_BYTE, senderRank, mpi_comm);
+    MPIBcast((void *)Id, sizeof(ncclUniqueId), senderRank, mpi_comm);
 }
 
 void getGroupNcclUniqueId(ncclUniqueId *Id, MPI_Comm mpi_comm, int rank,
@@ -140,6 +139,14 @@ void _ncclAllReduce(const void *sendbuff, void *recvbuff, int size,
     NCCLCHECK(ncclAllReduce((const void *)sendbuff, (void *)recvbuff, size,
                             _get_proper_datatype(datatype),
                             _get_proper_redop(op), comm, stream));
+}
+
+void _ncclReduce(const void *sendbuff, void *recvbuff, size_t count,
+                 int datatype, int op, int root, ncclComm_t comm,
+                 cudaStream_t stream) {
+    NCCLCHECK(ncclReduce(sendbuff, recvbuff, count,
+                         _get_proper_datatype(datatype), _get_proper_redop(op),
+                         root, comm, stream));
 }
 
 void _ncclBroadcast(const void *sendbuff, void *recvbuff, int size,
@@ -179,6 +186,20 @@ void dlarrayAllReduce(DLArray *input_array, DLArray *output_array, int datatype,
     cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
     _ncclAllReduce(input_data_buffer, output_data_buffer, size, datatype, op,
                    comm, stream);
+}
+
+void dlarrayReduce(DLArray *input_array, DLArray *output_array, int datatype,
+                   int op, int root, ncclComm_t comm,
+                   DLStreamHandle stream_handle) {
+    int size = 1;
+    for (int i = 0; i < input_array->ndim; i++) {
+        size = size * input_array->shape[i];
+    }
+    float *input_data_buffer = (float *)(input_array->data);
+    float *output_data_buffer = (float *)(output_array->data);
+    cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
+    _ncclReduce(input_data_buffer, output_data_buffer, size, datatype, op, root,
+                comm, stream);
 }
 
 void dlarrayBroadcast(DLArray *input_array, DLArray *output_array, int datatype,

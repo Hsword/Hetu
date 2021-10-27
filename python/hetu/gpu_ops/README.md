@@ -22,9 +22,10 @@ This directory contains executor and operators for computation and communication
 | Concat_gradientOP | ✔ | ✔ | ✔ | / |
 | ConcatenateOp | ✔ | ✖ | ✔ | / |
 | Concatenate_gradientOP | ✔ | ✖ | ✔ | / |
-| Conv2dOp | ✔ | ✔ | ✔ | / |
-| Conv2d_Gradient_of_DataOp | ✔ | ✔ | ✔ | / |
-| Conv2d_Gradient_of_FilterOp | ✔ | ✔ | ✔ | / |
+| Conv2dOp | ✔ | ✔ | ✔ | CuDNN |
+| Conv2dAddBiasOp | ✔ | ✖ | ✔ | CuDNN |
+| Conv2d_Gradient_of_DataOp | ✔ | ✔ | ✔ | CuDNN |
+| Conv2d_Gradient_of_FilterOp | ✔ | ✔ | ✔ | CuDNN |
 | Conv2d_BroadcastToOp | ✔ | ✖ | ✔ | / |
 | Conv2d_ReduceSumOp | ✔ | ✖ | ✔ | / |
 | CsrmvOp | ✔ | ✖ | ✔ | / |
@@ -44,6 +45,7 @@ This directory contains executor and operators for computation and communication
 | Layer_Normalization_GradientOp | ✔ | ✖ | ✔ | CuDNN |
 | LeakyReluOp | ✖ | ✖ | ✔ | / |
 | LeakyReluGradientOp | ✖ | ✖ | ✔ | / |
+| LinearOp | ✔ | ✖ | ✔ | CuBLAS |
 | MatrixDotOp | ✔ | ✖ | ✔ | / |
 | MatMulOp | ✔ | ✔ | ✔ | CuBLAS |
 | Max_Pool2dOp | ✔ | ✔ | ✔ | CuDNN |

@@ -92,6 +92,24 @@ class Batch_NormalizationOp(Op):
     def infer_shape(self, input_shapes):
         return input_shapes[0]
 
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == 3
+        status.copy_from(input_statuses[0], deduce_order)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == 3
+        input_statuses[0].copy_from(status, deduce_order)
+        if deduce_order:
+            if status.valid_all():
+                new_order = deduce_order_to_reduced_tensor(status)
+                input_statuses[1].set_order(new_order)
+                input_statuses[2].set_order(new_order)
+        else:
+            if status.valid_state():
+                new_state, duplicate = deduce_state_to_reduced_tensor(status)
+                input_statuses[1].set_state(new_state, duplicate)
+                input_statuses[2].set_state(new_state, duplicate)
+
 
 class Batch_Normalization_GradientOp(Op):
     def __init__(self, out_gradient, in_node, bn_scale, forward_node, eps, ctx=None):
@@ -157,6 +175,24 @@ class Batch_Normalization_GradientOp(Op):
     def infer_shape(self, input_shapes):
         return (1,)
 
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == 3
+        status.copy_from(input_statuses[0], deduce_order)
+        status.copy_from(input_statuses[1], deduce_order)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == 3
+        input_statuses[0].copy_from(status, deduce_order)
+        input_statuses[1].copy_from(status, deduce_order)
+        if deduce_order:
+            if status.valid_all():
+                new_order = deduce_order_to_reduced_tensor(status)
+                input_statuses[2].set_order(new_order)
+        else:
+            if status.valid_state():
+                new_state, duplicate = deduce_state_to_reduced_tensor(status)
+                input_statuses[2].set_state(new_state, duplicate)
+
 
 class Batch_Normalization_Gradient_of_DataOp(Op):
     def __init__(self, bn_gradient, in_arr, ctx=None):
@@ -195,6 +231,20 @@ class Batch_Normalization_Gradient_of_ScaleOp(Op):
     def infer_shape(self, input_shapes):
         return input_shapes[1]
 
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        if deduce_order:
+            if input_statuses[0].valid_all():
+                new_order = deduce_order_to_reduced_tensor(input_statuses[0])
+                status.set_order(new_order)
+        else:
+            if input_statuses[0].valid_state():
+                new_state, duplicate = deduce_state_to_reduced_tensor(
+                    input_statuses[0])
+                status.set_state(new_state, duplicate)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        pass
+
 
 class Batch_Normalization_Gradient_of_BiasOp(Op):
     def __init__(self, bn_gradient, in_bias, ctx=None):
@@ -213,6 +263,47 @@ class Batch_Normalization_Gradient_of_BiasOp(Op):
 
     def infer_shape(self, input_shapes):
         return input_shapes[1]
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        if deduce_order:
+            if input_statuses[0].valid_all():
+                new_order = deduce_order_to_reduced_tensor(input_statuses[0])
+                status.set_order(new_order)
+        else:
+            if input_statuses[0].valid_state():
+                new_state, duplicate = deduce_state_to_reduced_tensor(
+                    input_statuses[0])
+                status.set_state(new_state, duplicate)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        pass
+
+
+def deduce_order_to_reduced_tensor(input_status):
+    input_status.check_state(2, True)
+    new_order = list(input_status.order)
+    if 0 in new_order:
+        ind = new_order.index(0)
+        if (ind > 0 and new_order[ind - 1] == -1) or (ind < len(new_order) - 1 and new_order[ind + 1] == -1):
+            new_order.pop(ind)
+        else:
+            new_order[ind] = -1
+        appeared = False
+        for o in new_order:
+            if o == -1:
+                assert not appeared
+                appeared = True
+    new_order = tuple(new_order)
+    return new_order
+
+
+def deduce_state_to_reduced_tensor(input_status):
+    input_status.check_state(2, False)
+    state, duplicate = input_status.get()
+    new_state = state.copy()
+    if 0 in new_state:
+        duplicate *= new_state.pop(0)
+    return new_state, duplicate
 
 
 def batch_normalization_op(node_in, bn_scale, bn_bias, momentum=0.99, eps=0.01, ctx=None):

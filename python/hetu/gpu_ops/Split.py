@@ -59,6 +59,22 @@ class SplitOp(Op):
                 gpu_buf, self.ctx, data_type=np.uintc)
         return self.output_shape
 
+    def naive_infer_shape(self, input_shapes):
+        assert len(input_shapes) == 1
+        ori_shape = list(input_shapes[0])
+        self.begin_pos = [0 for _ in ori_shape]
+        self.output_shape = [x for x in ori_shape]
+        for axe, ind, spl in zip(self.axes, self.indices, self.splits):
+            part_size = ori_shape[axe] // spl
+            self.begin_pos[axe] = ind * part_size
+            self.output_shape[axe] = part_size if ind != spl - \
+                1 else ori_shape[axe] - self.begin_pos[axe]
+
+        if hasattr(self, 'grad_node'):
+            self.grad_node.begin_pos = self.begin_pos
+            self.grad_node.output_shape = ori_shape
+        return self.output_shape
+
 
 class SplitGradientOp(Op):
     def __init__(self, node_A, axes, indices, splits, ctx=None):

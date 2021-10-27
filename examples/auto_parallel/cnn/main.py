@@ -5,8 +5,6 @@ import numpy as np
 import argparse
 from time import time
 import torch
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 
 
 if __name__ == "__main__":
@@ -24,6 +22,8 @@ if __name__ == "__main__":
                         help='iterations executed before logging')
     parser.add_argument('--log-num', type=int,
                         default=30, help='number of logs')
+    parser.add_argument('--strategy', type=str, default='dp',
+                        help='should be dp, mp, owt')
     parser.add_argument('--validate', action='store_true',
                         help='whether to use validation')
     parser.add_argument('--timing', action='store_true',
@@ -31,6 +31,9 @@ if __name__ == "__main__":
     parser.add_argument('--imagenet', action='store_true',
                         help='whether to use imagenet')
     args = parser.parse_args()
+
+    args.strategy = args.strategy.lower()
+    assert args.strategy in ('dp', 'mp', 'owt')
 
     opt = ht.optim.SGDOptimizer(learning_rate=args.lr, l2reg=args.l2reg)
     model = {
@@ -43,6 +46,8 @@ if __name__ == "__main__":
 
     if args.imagenet:
         # use imagenet
+        import torchvision.transforms as transforms
+        import torchvision.datasets as datasets
         traindir = os.path.join('/home/public/zhl/imagenet', 'train')
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
@@ -63,6 +68,8 @@ if __name__ == "__main__":
             args.batch_size,)).astype(np.float32) for _ in range(args.log_iterations)]
 
     if args.validate:
+        import torchvision.transforms as transforms
+        import torchvision.datasets as datasets
         valdir = os.path.join('/home/public/zhl/imagenet', 'val')
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
@@ -75,26 +82,31 @@ if __name__ == "__main__":
             ])),
             batch_size=args.batch_size, shuffle=False, num_workers=0)
 
-    with ht.context('gpu:0'):
-        x = ht.placeholder_op(name='x')
-        y_ = ht.placeholder_op(name='y_')
+    x = ht.placeholder_op(name='x')
+    y_ = ht.placeholder_op(name='y_')
 
-        if args.model != 'inception-v3':
-            y = model(x)
-            loss = ht.softmaxcrossentropy_sparse_op(y, y_)
-            loss = ht.reduce_mean_op(loss, [0])
-        else:
-            y, aux = model(x)
-            loss = ht.softmaxcrossentropy_sparse_op(y, y_)
-            loss_aux = ht.softmaxcrossentropy_sparse_op(aux, y_)
-            loss = loss + 0.3 * loss_aux
-            loss = ht.reduce_mean_op(loss, [0])
+    if args.model != 'inception-v3':
+        y = model(x)
+        loss = ht.softmaxcrossentropy_sparse_op(y, y_)
+        loss = ht.reduce_mean_op(loss, [0])
+    else:
+        y, aux = model(x)
+        loss = ht.softmaxcrossentropy_sparse_op(y, y_)
+        loss_aux = ht.softmaxcrossentropy_sparse_op(aux, y_)
+        loss = loss + 0.3 * loss_aux
+        loss = ht.reduce_mean_op(loss, [0])
 
-        train_op = opt.minimize(loss)
+    train_op = opt.minimize(loss)
 
-        eval_nodes = {'train': [loss, y, train_op],
-                      'validate': [loss, y]}
-        executor = ht.Executor(eval_nodes)
+    eval_nodes = {'train': [loss, y, train_op],
+                  'validate': [loss, y]}
+    strategy = {
+        'dp': ht.dist.DataParallel(aggregate='allreduce'),
+        'mp': ht.dist.ModelParallel4CNN(),
+        'owt': ht.dist.OneWeirdTrick4CNN(),
+    }[args.strategy]
+    executor = ht.Executor(eval_nodes, dist_strategy=strategy)
+    printing = executor.rank in (0, None)
 
     # training
     running_time = 0
@@ -114,17 +126,21 @@ if __name__ == "__main__":
                 target = targets[cnt]
             loss_val, predict_y, _ = executor.run(
                 'train', feed_dict={x: image, y_: target}, convert_to_numpy_ret_vals=True)
-            loss_all += loss_val[0]
-            acc_all += np.sum(np.equal(target, np.argmax(predict_y, 1)))
+            if loss_val is not None:
+                loss_all += loss_val[0]
+                acc_all += np.sum(np.equal(target, np.argmax(predict_y, 1)))
             cnt += 1
-        loss_all /= args.log_iterations
-        acc_all /= args.log_iterations
-        print('Train loss = %f' % loss_all)
-        print('Train accuracy = %f' % acc_all)
+        loss_all, acc_all = list(executor.reduceMean([loss_all, acc_all]))
+        if printing:
+            loss_all /= args.log_iterations
+            acc_all /= args.log_iterations
+            print('Train loss = %f' % loss_all)
+            print('Train accuracy = %f' % acc_all)
         if args.timing:
             end = time()
             during_time = end - start
-            print("Running time of current epoch = %fs" % (during_time))
+            if printing:
+                print("Running time of current epoch = %fs" % (during_time))
             if i != 0:
                 running_time += during_time
         if args.validate:
@@ -136,15 +152,18 @@ if __name__ == "__main__":
                 target = target.numpy()
                 loss_val, valid_y_predicted = executor.run(
                     'validate', feed_dict={x: image, y_: target}, convert_to_numpy_ret_vals=True)
-                val_loss_all += loss_val[0]
-                acc_all += np.sum(np.equal(target, np.argmax(predict_y, 1)))
+                if printing:
+                    val_loss_all += loss_val[0]
+                    acc_all += np.sum(np.equal(target,
+                                               np.argmax(predict_y, 1)))
                 batch_num += 1
-
-            val_loss_all /= batch_num
-            val_acc_all /= batch_num
-            print("Validation loss = %f" % val_loss_all)
-            print("Validation accuracy = %f" % val_acc_all)
+            if printing:
+                val_loss_all /= batch_num
+                val_acc_all /= batch_num
+                print("Validation loss = %f" % val_loss_all)
+                print("Validation accuracy = %f" % val_acc_all)
     if args.timing:
-        print("*"*50)
-        print("Running time of total %d iterations = %fs" %
-              (args.log_num * args.log_iterations, running_time))
+        if printing:
+            print("*"*50)
+            print("Running time of total %d iterations = %fs" %
+                  (args.log_num * args.log_iterations, running_time))

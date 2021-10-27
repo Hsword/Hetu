@@ -13,12 +13,14 @@
 
 namespace ps {
 
-template<>
-class PSHandler<PsfGroup::kParameterServer> : public PSHandler<PsfGroup::kBaseGroup> {
+template <>
+class PSHandler<PsfGroup::kParameterServer>
+    : public PSHandler<PsfGroup::kBaseGroup> {
 public:
     PSHandler<PsfGroup::kParameterServer>() {
     }
-    PSHandler<PsfGroup::kParameterServer>(const PSHandler<PsfGroup::kParameterServer> &handle) {
+    PSHandler<PsfGroup::kParameterServer>(
+        const PSHandler<PsfGroup::kParameterServer> &handle) {
     }
 
     void serve(const PSFData<DensePull>::Request &request,
@@ -282,7 +284,8 @@ public:
         OptType otype = (OptType)get<8>(request);
         SArray<float> lrs = get<9>(request);
 
-        if (!try_init_with_no_conflict(k)) return;
+        if (!try_init_with_no_conflict(k))
+            return;
 
         Param<float> *newParam = nullptr;
         switch (param_type) {
@@ -305,6 +308,9 @@ public:
         auto &value_set_ =
             *const_cast<typename tmap::mapped_type &>(iter->second);
         auto write_lock = value_set_.write_guard();
+        size_t n_threads = (value_set_.size() >> 25) + 1;
+        if (n_threads > 16)
+            n_threads = 16;
         if (init_type == InitType::Constant) {
             float filled_value = static_cast<float>(init_a);
             // #pragma omp parallel for num_threads(4)
@@ -312,27 +318,57 @@ public:
                 value_set_[j] = filled_value;
         } else if (init_type == InitType::Uniform) {
             std::uniform_real_distribution<float> uniform_dist(init_a, init_b);
-            std::default_random_engine generator(seed);
-            for (size_t j = 0; j < value_set_.size(); j++) {
-                value_set_[j] = uniform_dist(generator);
+#pragma omp parallel num_threads(n_threads)
+            {
+                size_t rank = omp_get_thread_num();
+                size_t num_threads = omp_get_num_threads();
+                std::default_random_engine generator(seed + rank);
+                size_t length = value_set_.size() / num_threads;
+                size_t start = rank * length;
+                size_t ending = start + length;
+                if (rank == num_threads - 1)
+                    ending = value_set_.size();
+                for (size_t j = start; j < ending; ++j) {
+                    value_set_[j] = uniform_dist(generator);
+                }
             }
         } else if (init_type == InitType::Normal) {
             std::normal_distribution<float> normal_dist(init_a, init_b);
-            std::default_random_engine generator(seed);
-            for (size_t j = 0; j < value_set_.size(); j++) {
-                value_set_[j] = normal_dist(generator);
+#pragma omp parallel num_threads(n_threads)
+            {
+                size_t rank = omp_get_thread_num();
+                size_t num_threads = omp_get_num_threads();
+                std::default_random_engine generator(seed + rank);
+                size_t length = value_set_.size() / num_threads;
+                size_t start = rank * length;
+                size_t ending = start + length;
+                if (rank == num_threads - 1)
+                    ending = value_set_.size();
+                for (size_t j = start; j < ending; ++j) {
+                    value_set_[j] = normal_dist(generator);
+                }
             }
         } else if (init_type == InitType::TruncatedNormal) {
             std::normal_distribution<float> truncated_normal_dist(init_a,
                                                                   init_b);
             float upper_limit = init_a + 2 * init_b;
             float lower_limit = init_a - 2 * init_b;
-            std::default_random_engine generator(seed);
-            for (size_t j = 0; j < value_set_.size(); j++) {
-                float temp = truncated_normal_dist(generator);
-                while (temp > upper_limit || temp < lower_limit)
-                    temp = truncated_normal_dist(generator);
-                value_set_[j] = temp;
+#pragma omp parallel num_threads(n_threads)
+            {
+                size_t rank = omp_get_thread_num();
+                size_t num_threads = omp_get_num_threads();
+                std::default_random_engine generator(seed + rank);
+                size_t length = value_set_.size() / num_threads;
+                size_t start = rank * length;
+                size_t ending = start + length;
+                if (rank == num_threads - 1)
+                    ending = value_set_.size();
+                for (size_t j = start; j < ending; ++j) {
+                    float temp = truncated_normal_dist(generator);
+                    while (temp > upper_limit || temp < lower_limit)
+                        temp = truncated_normal_dist(generator);
+                    value_set_[j] = temp;
+                }
             }
         }
     }

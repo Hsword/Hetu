@@ -21,12 +21,12 @@ class Linear(BaseLayer):
     def __call__(self, x):
         weight_var = self.initializer(
             shape=(self.in_features, self.out_features), name=self.name+'_weight')
-        x = ht.matmul_op(x, weight_var)
         if self.bias:
             bias_var = ht.init.zeros(
-                shape=(1, self.out_features), name=self.name+'_bias')
-            bias_var = ht.broadcastto_op(bias_var, x)
-            x = x + bias_var
+                shape=(self.out_features,), name=self.name+'_bias')
+            x = ht.linear_op(x, weight_var, bias_var)
+        else:
+            x = ht.matmul_op(x, weight_var)
         if self.activation is not None:
             x = self.activation(x)
         return x

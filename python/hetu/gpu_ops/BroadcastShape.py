@@ -97,6 +97,43 @@ class BroadcastShapeOp(Op):
             self.in_dims = ndarray.array(in_dims, self.ctx, data_type=np.int32)
         return tuple(output_shape)
 
+    def naive_infer_shape(self, input_shapes):
+        assert self.target_shape is not None and self.add_axes is not None
+        assert len(input_shapes) == 1
+        input_shape = list(input_shapes[0])
+        output_shape = list(self.target_shape)
+        output_ndim = len(output_shape)
+        assert len(input_shape) <= output_ndim
+        diff = output_ndim - len(input_shape)
+        if self.add_axes:
+            assert diff == len(self.add_axes) or input_shape == [1]
+            assert all([axis < output_ndim for axis in self.add_axes])
+            in_ind = 0
+            for i in range(output_ndim):
+                if i not in self.add_axes:
+                    assert input_shape[in_ind] == output_shape[i]
+                    in_ind += 1
+            if hasattr(self, 'grad_node'):
+                self.grad_node.axes = tuple(self.add_axes)
+                self.grad_node.axes.keepdims = [False] * len(self.add_axes)
+        else:
+            axes = list(range(diff))
+            keepdims = [False] * diff
+            input_shape = [1] * diff + input_shape
+            for i in range(output_ndim):
+                if output_shape[i] == -1:
+                    output_shape[i] = input_shape[i]
+                assert output_shape[i] > 0 and isinstance(output_shape[i], int)
+                assert input_shape[i] == 1 or input_shape[i] == output_shape[i]
+                if i >= diff and input_shape[i] == 1 and output_shape[i] > 1:
+                    axes.append(i)
+                    keepdims.append(True)
+            if hasattr(self, 'grad_node'):
+                self.grad_node.axes = axes
+                self.grad_node.keepdims = keepdims
+
+        return tuple(output_shape)
+
     def backward_hook(self, config):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
 

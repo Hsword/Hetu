@@ -64,6 +64,28 @@ class BroadcastToOp(Op):
             self.in_dims = ndarray.array(in_dims, self.ctx, data_type=np.int32)
         return input_shapes[1]
 
+    def naive_infer_shape(self, input_shapes):
+        assert len(input_shapes) == 2
+        input_shape = list(input_shapes[0])
+        output_shape = list(input_shapes[1])
+        output_ndim = len(output_shape)
+        assert len(input_shape) <= output_ndim
+        diff = output_ndim - len(input_shape)
+        axes = list(range(diff))
+        keepdims = [False] * diff
+        input_shape = [1] * diff + input_shape
+        for i in range(output_ndim):
+            assert output_shape[i] > 0 and isinstance(output_shape[i], int)
+            assert input_shape[i] == 1 or input_shape[i] == output_shape[i]
+            if i >= diff and input_shape[i] == 1 and output_shape[i] > 1:
+                axes.append(i)
+                keepdims.append(True)
+        if hasattr(self, 'grad_node'):
+            self.grad_node.axes = axes
+            self.grad_node.keepdims = keepdims
+
+        return input_shapes[1]
+
     def backward_hook(self, config):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
 

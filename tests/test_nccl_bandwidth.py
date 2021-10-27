@@ -1,55 +1,71 @@
-from hetu.communicator.mpi_nccl_comm import ncclDataType_t, ncclRedOp_t, mpi_communicator
-from hetu import ndarray
+from hetu.communicator.mpi_nccl_comm import ncclDataType_t, ncclRedOp_t
+from hetu.stream import create_stream_handle
+import hetu as ht
+import argparse
 import numpy as np
-import time
+from time import time
 
 
-def test_allreduce(comm=None):
-    shape = (24, 24)
-    size = 4
-    for val in shape:
-        size *= val
-    input_arr = np.ones(shape)*comm.localRank.value
-    input_arr = ndarray.array(input_arr, ctx=ndarray.gpu(comm.localRank.value))
+def test_allreduce(arr, comm, stream, iterations=10):
+    size = 4 * np.prod(arr.shape, dtype=int)
+    duration = 0
+    for _ in range(iterations):
+        start = time()
+        comm.dlarrayNcclAllReduce(
+            arr, arr, ncclDataType_t.ncclFloat32, ncclRedOp_t.ncclSum, stream)
+        stream.sync()
+        duration += (time() - start)
 
-    start = time.time()
-    comm.dlarrayNcclAllReduce(input_arr, input_arr,
-                              ncclDataType_t.ncclFloat32, ncclRedOp_t.ncclSum)
-    comm.stream.sync()
-    end = time.time()
-
-    secs = end - start
-
-    return size, secs
-
-
-def test_p2p(comm=None, src=0, target=1):
-    shape = (1000, 30, 224, 224)
-    size = 4
-    for val in shape:
-        size *= val
-    print("MyRank: ", comm.myRank.value)
-    arr = np.ones(shape)*comm.localRank.value
-    arr = ndarray.array(arr, ctx=ndarray.gpu(comm.localRank.value))
-    start = time.time()
-    if comm.myRank.value == 0:
-        comm.dlarraySend(arr, ncclDataType_t.ncclFloat32, 1)
-    else:
-        comm.dlarrayRecv(arr, ncclDataType_t.ncclFloat32, 0)
-    comm.stream.sync()
-    end = time.time()
-
-    secs = end - start
-    # size: /Bytes
-    # dur_time: /s
-    return size, secs
+    local_duration = ht.array(np.array([duration, ]), ht.cpu())
+    comm.dlarrayNcclReduce(local_duration, local_duration,
+                           0, executor_stream=stream)
+    stream.sync()
+    if comm.rank == 0:
+        print("Algorithm bandwidth: %f GB/s" %
+              (size * iterations / local_duration.asnumpy()[0] * comm.nrank / (2 ** 30)))
 
 
-# mpirun --allow-run-as-root --tag-output -np 2 python test_nccl_bandwidth.py
+def test_p2p(arr, comm, stream, iterations=10):
+    size = 4 * np.prod(arr.shape, dtype=int)
+    duration = 0
+    for _ in range(iterations):
+        start = time()
+        if comm.rank == 0:
+            comm.dlarraySend(arr, ncclDataType_t.ncclFloat32, 1, stream)
+        else:
+            comm.dlarrayRecv(arr, ncclDataType_t.ncclFloat32, 0, stream)
+        stream.sync()
+        duration += (time() - start)
+
+    print("Algorithm bandwidth: %f GB/s" %
+          (size * iterations / duration / (2 ** 30)))
+
+
+# mpirun --allow-run-as-root --tag-output -np 4 python test_nccl_bandwidth.py
 if __name__ == "__main__":
-    comm = mpi_communicator()
-    comm = comm.ncclInit()
-    size, secs = test_p2p(comm)
-    print("band width: %.2f MB/s" % (size/(2**20)/secs))
-    size, secs = test_allreduce(comm)
-    print("band width: %.2f MB/s" % (size/(2**20)/secs))
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--devs', type=str, default=None, help='devices')
+    parser.add_argument('--p2p', action='store_true',
+                        help='test p2p or allreduce')
+    args = parser.parse_args()
+
+    devices = None
+    if args.devs is not None:
+        devices = [int(d) for d in args.devs.split(',')]
+    comm = ht.wrapped_mpi_nccl_init(devices=devices)
+    if args.devs is None:
+        devices = list(range(comm.nrank))
+
+    shape = (1, 1000, 1000, 1000)
+    ctx = ht.gpu(devices[comm.rank])
+    stream = create_stream_handle(ctx)
+    arr = ht.empty(shape, ctx=ctx)
+
+    if comm.rank == 0:
+        print('devices: {}'.format(devices))
+
+    if args.p2p:
+        assert len(devices) == 2, 'P2P must only use 2 devices.'
+        test_p2p(arr, comm, stream, 10)
+    else:
+        test_allreduce(arr, comm, stream, 10)

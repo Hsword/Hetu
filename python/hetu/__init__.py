@@ -9,5 +9,5 @@ from . import initializers as init
 from . import distribute as dist
 from . import data
 from . import layers
-from .profiler import HetuProfiler
+from .profiler import HetuProfiler, NCCLProfiler
 from .tokenizers import *

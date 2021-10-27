@@ -567,6 +567,19 @@ HETUSYS_EXTERN_C {
     int DLGpuOneHot(const DLArrayHandle input, DLArrayHandle output,
                     DLStreamHandle stream_handle);
 
+    int DLGpuLinear(const DLArrayHandle matA, bool transposeA,
+                    const DLArrayHandle matB, bool transposeB,
+                    const DLArrayHandle bias,
+                    DLArrayHandle matC,
+                    DLStreamHandle stream_handle);
+
+    int Cudnn_Conv2dAddBias(const DLArrayHandle input_x,
+                            const DLArrayHandle input_f,
+                            const DLArrayHandle bias, DLArrayHandle output,
+                            const int padding_h, const int padding_w,
+                            const int stride_h, const int stride_w,
+                            DLStreamHandle stream_handle);
+
     // Initializers
     int DLGpuNormalInit(DLArrayHandle arr, const float mean, const float stddev,
                         unsigned long long seed, DLStreamHandle stream_handle);

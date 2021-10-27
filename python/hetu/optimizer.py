@@ -1,5 +1,6 @@
 import numpy as np
 import ctypes
+from copy import copy, deepcopy
 import hetu as ht
 from . import ndarray
 from . import gpu_links as gpu_op
@@ -79,9 +80,21 @@ class Optimizer(object):
         if not var_list:
             var_list = self.get_var_list(loss)
         self.params = var_list
-        grads = ht.gradients(loss, self.params)
+        grads, self.backward2forward, self.forward2backward = ht.gradients(
+            loss, self.params, return_all=True)
         optimizer_node = OptimizerOp(grads, self)
         return optimizer_node
+
+    def __deepcopy__(self, memo):
+        assert not self.initiated, 'Should not deep copy optimizer if already initiated!'
+        new_opt = copy(self)
+        new_opt.loss = deepcopy(self.loss, memo)
+        new_opt.params = [deepcopy(node, memo) for node in self.params]
+        new_opt.backward2forward = dict([(deepcopy(k, memo), (deepcopy(n, memo) for n in v))
+                                         for k, v in self.backward2forward.items()])
+        new_opt.forward2backward = dict([(deepcopy(k, memo), (deepcopy(n, memo) for n in v))
+                                         for k, v in self.forward2backward.items()])
+        return new_opt
 
 
 class OptimizerOp(Op):

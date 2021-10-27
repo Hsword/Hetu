@@ -63,6 +63,21 @@ class TransposeOp(Op):
                 buffer, self.ctx, data_type=np.uintc)
         return res_shape
 
+    def naive_infer_shape(self, input_shapes):
+        assert len(input_shapes) == 1
+        # only support matrix transpose
+        # assert len(input_shapes[0]) == 2
+        ori_shape = list(input_shapes[0])
+        if self.perm is None:
+            self.perm = list(range(len(ori_shape))[::-1])
+            res_shape = ori_shape[::-1]
+        else:
+            assert len(self.perm) == len(ori_shape) and set(
+                self.perm) == set(range(len(self.perm)))
+            res_shape = [ori_shape[self.perm[i]]
+                         for i in range(len(ori_shape))]
+        return res_shape
+
 
 def transpose_op(node_A, perm=None, ctx=None):
     """Make a new instance of transpose and call the instance.
