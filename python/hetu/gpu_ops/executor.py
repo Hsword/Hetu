@@ -164,7 +164,7 @@ class HetuConfig(object):
         enable_lazy=True,
         cache_bound=100,
         log_path=None,
-        pipeline=None,
+        pipeline="",
         dynamic_memory=False,
         dist_strategy=None,
     ):
