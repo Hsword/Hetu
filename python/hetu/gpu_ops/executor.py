@@ -1075,7 +1075,7 @@ class SubExecutor(object):
                 elif isinstance(node, (DataD2HOp, DataD2HSparseOp)):
                     node.compute(input_vals, node_val, self.d2h_stream)
 
-                elif isinstance(node, (DropoutOp, Batch_NormalizationOp, Layer_NormalizationOp)):
+                elif isinstance(node, (DropoutOp, Batch_NormalizationOp)):
                     node.compute(input_vals, node_val,
                                  self.comp_stream, inference=self.inference)
                     if isinstance(node.event, Event):

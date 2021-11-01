@@ -4,7 +4,6 @@ import numpy as np
 from .. import ndarray
 from ..gpu_links import layer_normalization
 from ..gpu_links import layer_normalization_gradient
-from ..gpu_links import layer_normalization_inference
 
 
 class Layer_NormalizationOp(Op):
@@ -16,74 +15,56 @@ class Layer_NormalizationOp(Op):
         self.save_var = None
         self.data_shape = None
 
-    def compute(self, input_vals, output_val, stream_handle=None, inference=False):
-        if inference:
-            if self.on_cpu:
-                input_vals = [n.asnumpy() for n in input_vals]
-                data_type = input_vals[0].dtype
-                std = np.sqrt(self.save_var + self.eps, dtype=data_type)
-                centered_input = input_vals[0] - self.save_mean
-                normed_input = centered_input / std
+    def compute(self, input_vals, output_val, stream_handle=None):
+        local_shape = list(input_vals[0].shape)
+        local_shape[-1] = 1
+        local_shape = tuple(local_shape)
+        if self.on_cpu:
+            input_vals = [n.asnumpy() for n in input_vals]
+            data_type = input_vals[0].dtype
+            if self.data_shape is None:
+                self.save_mean = np.empty(local_shape, dtype=np.float32)
+                self.save_var = np.empty(local_shape, dtype=np.float32)
+                self.data_shape = local_shape
+            elif self.data_shape != local_shape:
+                del self.save_mean
+                del self.save_var
+                self.save_mean = np.empty(local_shape, dtype=np.float32)
+                self.save_var = np.empty(local_shape, dtype=np.float32)
+                self.data_shape = local_shape
+            self.save_mean[:] = input_vals[0].mean(
+                axis=-1, dtype=data_type, keepdims=True)
+            self.save_var[:] = input_vals[0].var(
+                axis=-1, dtype=data_type, keepdims=True)
+            std = np.sqrt(self.save_var + self.eps, dtype=data_type)
+            centered_input = input_vals[0] - self.save_mean
+            normed_input = centered_input / std
 
-                bc_shape = [1] * len(input_vals[0].shape)
-                bc_shape[-1] = input_vals[0].shape[-1]
+            bc_shape = [1] * len(input_vals[0].shape)
+            bc_shape[-1] = input_vals[0].shape[-1]
 
-                output_val[:] = input_vals[1].reshape(bc_shape) * normed_input + \
-                    input_vals[2].reshape(bc_shape)
+            output_val[:] = input_vals[1].reshape(bc_shape) * normed_input + \
+                input_vals[2].reshape(bc_shape)
 
-            else:
-                layer_normalization_inference(input_vals[0], input_vals[1], input_vals[2],
-                                              self.save_mean, self.save_var, output_val, self.eps, stream_handle)
         else:
-            local_shape = list(input_vals[0].shape)
-            local_shape[-1] = 1
-            local_shape = tuple(local_shape)
-            if self.on_cpu:
-                input_vals = [n.asnumpy() for n in input_vals]
-                data_type = input_vals[0].dtype
-                if self.data_shape is None:
-                    self.save_mean = np.empty(local_shape, dtype=np.float32)
-                    self.save_var = np.empty(local_shape, dtype=np.float32)
-                    self.data_shape = local_shape
-                elif self.data_shape != local_shape:
-                    del self.save_mean
-                    del self.save_var
-                    self.save_mean = np.empty(local_shape, dtype=np.float32)
-                    self.save_var = np.empty(local_shape, dtype=np.float32)
-                    self.data_shape = local_shape
-                self.save_mean[:] = input_vals[0].mean(
-                    axis=-1, dtype=data_type, keepdims=True)
-                self.save_var[:] = input_vals[0].var(
-                    axis=-1, dtype=data_type, keepdims=True)
-                std = np.sqrt(self.save_var + self.eps, dtype=data_type)
-                centered_input = input_vals[0] - self.save_mean
-                normed_input = centered_input / std
-
-                bc_shape = [1] * len(input_vals[0].shape)
-                bc_shape[-1] = input_vals[0].shape[-1]
-
-                output_val[:] = input_vals[1].reshape(bc_shape) * normed_input + \
-                    input_vals[2].reshape(bc_shape)
-
-            else:
-                if self.data_shape is None:
-                    dev_id = input_vals[0].handle.contents.ctx.device_id
-                    self.save_mean = ndarray.empty(
-                        local_shape, ctx=ndarray.gpu(dev_id))
-                    self.save_var = ndarray.empty(
-                        local_shape, ctx=ndarray.gpu(dev_id))
-                    self.data_shape = local_shape
-                elif self.data_shape != local_shape:
-                    del self.save_mean
-                    del self.save_var
-                    dev_id = input_vals[0].handle.contents.ctx.device_id
-                    self.save_mean = ndarray.empty(
-                        local_shape, ctx=ndarray.gpu(dev_id))
-                    self.save_var = ndarray.empty(
-                        local_shape, ctx=ndarray.gpu(dev_id))
-                    self.data_shape = local_shape
-                layer_normalization(input_vals[0], input_vals[1], input_vals[2],
-                                    self.save_mean, self.save_var, output_val, self.eps, stream_handle)
+            if self.data_shape is None:
+                dev_id = input_vals[0].handle.contents.ctx.device_id
+                self.save_mean = ndarray.empty(
+                    local_shape, ctx=ndarray.gpu(dev_id))
+                self.save_var = ndarray.empty(
+                    local_shape, ctx=ndarray.gpu(dev_id))
+                self.data_shape = local_shape
+            elif self.data_shape != local_shape:
+                del self.save_mean
+                del self.save_var
+                dev_id = input_vals[0].handle.contents.ctx.device_id
+                self.save_mean = ndarray.empty(
+                    local_shape, ctx=ndarray.gpu(dev_id))
+                self.save_var = ndarray.empty(
+                    local_shape, ctx=ndarray.gpu(dev_id))
+                self.data_shape = local_shape
+            layer_normalization(input_vals[0], input_vals[1], input_vals[2],
+                                self.save_mean, self.save_var, output_val, self.eps, stream_handle)
 
     def gradient(self, output_grad):
         ln_gradient_node = layer_normalization_gradient_op(
