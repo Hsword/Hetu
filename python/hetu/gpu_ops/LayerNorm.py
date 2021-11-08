@@ -168,7 +168,7 @@ class Layer_Normalization_Gradient_of_DataOp(Op):
         if self.on_cpu:
             output_val[:] = self.inputs[0].tmp_gradient_in_arr
         else:
-            self.inputs[0].tmp_gradient_in_arr.copyto(output_val)
+            self.inputs[0].tmp_gradient_in_arr.inplace_copy(output_val)
 
     def gradient(self, output_grad):
         raise NotImplementedError
@@ -186,7 +186,7 @@ class Layer_Normalization_Gradient_of_ScaleOp(Op):
         if self.on_cpu:
             output_val[:] = self.inputs[0].tmp_gradient_ln_scale
         else:
-            self.inputs[0].tmp_gradient_ln_scale.copyto(output_val)
+            self.inputs[0].tmp_gradient_ln_scale.inplace_copy(output_val)
 
     def gradient(self, output_grad):
         raise NotImplementedError
@@ -204,7 +204,7 @@ class Layer_Normalization_Gradient_of_BiasOp(Op):
         if self.on_cpu:
             output_val[:] = self.inputs[0].tmp_gradient_ln_bias
         else:
-            self.inputs[0].tmp_gradient_ln_bias.copyto(output_val)
+            self.inputs[0].tmp_gradient_ln_bias.inplace_copy(output_val)
 
     def gradient(self, output_grad):
         raise NotImplementedError

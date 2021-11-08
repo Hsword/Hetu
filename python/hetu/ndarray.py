@@ -306,6 +306,23 @@ class NDArray(object):
         target.handle = ctypes.pointer(arr)
         target.no_free = True
 
+    def inplace_copy(self, target):
+        """Move the array to target array.
+        Parameters
+        ----------
+        target : NDArray
+            The target array.
+        """
+        self.wrapped_lazy_callback()
+        arr = DLArray()
+        arr.data = self.handle.contents.data
+        arr.ctx = self.handle.contents.ctx
+        arr.ndim = self.handle.contents.ndim
+        arr.shape = self.handle.contents.shape
+        arr.stride = self.handle.contents.stride
+        target.handle = ctypes.pointer(arr)
+        target.no_free = True
+
     def broadcast_to(self, shape, target, add_axes=None):
         """Broadcast the array to target array (lazy).
         Parameters
