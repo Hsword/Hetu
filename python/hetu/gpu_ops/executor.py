@@ -828,7 +828,10 @@ class SubExecutor(object):
                     dense_shape=shape)
                 return
             if node.on_gpu:
-                if node.inplace:
+                ln_bn_grad_nodes = ["Layer_Normalization_Gradient_of_DataOp", "Layer_Normalization_Gradient_of_ScaleOp",  
+                                    "Layer_Normalization_Gradient_of_BiasOp", "Batch_Normalization_Gradient_of_DataOp",
+                                    "Batch_Normalization_Gradient_of_ScaleOp", "Batch_Normalization_Gradient_of_BiasOp"]
+                if node.inplace or node.op_type in ln_bn_grad_nodes:
                     self.node_to_arr_map[node] = ndarray.NDArray(None)
                 elif self.inference and isinstance(node, DropoutOp):
                     self.node_to_arr_map[node] = self.node_to_arr_map[node.inputs[0]]
@@ -869,7 +872,10 @@ class SubExecutor(object):
                         dense_shape=shape)
                     continue
                 if node.on_gpu:
-                    if node.inplace:
+                    ln_bn_grad_nodes = ["Layer_Normalization_Gradient_of_DataOp", "Layer_Normalization_Gradient_of_ScaleOp",  
+                                        "Layer_Normalization_Gradient_of_BiasOp", "Batch_Normalization_Gradient_of_DataOp",
+                                        "Batch_Normalization_Gradient_of_ScaleOp", "Batch_Normalization_Gradient_of_BiasOp"]
+                    if node.inplace or node.op_type in ln_bn_grad_nodes:
                         self.node_to_arr_map[node] = ndarray.NDArray(None)
                     elif self.inference and isinstance(node, DropoutOp):
                         self.node_to_arr_map[node] = self.node_to_arr_map[node.inputs[0]]
@@ -1075,7 +1081,7 @@ class SubExecutor(object):
                 elif isinstance(node, (DataD2HOp, DataD2HSparseOp)):
                     node.compute(input_vals, node_val, self.d2h_stream)
 
-                elif isinstance(node, (DropoutOp, Batch_NormalizationOp, Layer_NormalizationOp)):
+                elif isinstance(node, (DropoutOp, Batch_NormalizationOp)):
                     node.compute(input_vals, node_val,
                                  self.comp_stream, inference=self.inference)
                     if isinstance(node.event, Event):

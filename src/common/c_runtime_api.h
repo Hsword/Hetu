@@ -496,12 +496,6 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle mean_arr, const DLArrayHandle var_arr, float eps,
         DLStreamHandle stream_handle);
 
-    int DLGpuLayerNormalizationInference(
-        const DLArrayHandle in_arr, const DLArrayHandle ln_scale,
-        const DLArrayHandle ln_bias, DLArrayHandle mean_arr,
-        DLArrayHandle var_arr, DLArrayHandle out_arr, float eps,
-        DLStreamHandle stream_handle);
-
     int DLGpuInstanceNormalization2d(
         const DLArrayHandle in_arr, DLArrayHandle mean, DLArrayHandle var,
         DLArrayHandle out_arr, float eps, DLStreamHandle stream_handle);

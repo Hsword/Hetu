@@ -31,14 +31,3 @@ def layer_normalization_gradient(out_grads, in_arr, ln_scale, grad_arr, grad_sca
                                          mean_arr.handle, var_arr.handle, ctypes.c_float(
                                              eps),
                                          stream.handle if stream else None)
-
-
-def layer_normalization_inference(in_arr, ln_scale, ln_bias, mean, var, out_arr, eps, stream=None):
-    assert isinstance(in_arr, _nd.NDArray)
-    assert isinstance(ln_scale, _nd.NDArray)
-    assert isinstance(ln_bias, _nd.NDArray)
-    assert isinstance(mean, _nd.NDArray)
-    assert isinstance(var, _nd.NDArray)
-    assert isinstance(out_arr, _nd.NDArray)
-    _LIB.DLGpuLayerNormalizationInference(in_arr.handle, ln_scale.handle, ln_bias.handle, mean.handle,
-                                          var.handle, out_arr.handle, ctypes.c_float(eps), stream.handle if stream else None)
