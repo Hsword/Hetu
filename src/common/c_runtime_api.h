@@ -225,7 +225,19 @@ HETUSYS_EXTERN_C {
     int DLGpuReluGradient(const DLArrayHandle input,
                           const DLArrayHandle in_grad, DLArrayHandle output,
                           DLStreamHandle stream_handle);
+   
+     //liang
+    int DLGpuReluGradient(const DLArrayHandle input,
+                          const DLArrayHandle in_grad, DLArrayHandle output,
+                          DLStreamHandle stream_handle);
 
+
+    int DLGpuGelu(const DLArrayHandle input, DLArrayHandle output,
+                  DLStreamHandle stream_handle);
+
+    int DLGpuGeluGradient(const DLArrayHandle input,
+                          const DLArrayHandle in_grad, DLArrayHandle output,
+                          DLStreamHandle stream_handle);
     /*!
      * \brief Compute leaky relu on all array elements, and store to output.
      * \param input The input array.
@@ -496,6 +508,12 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle mean_arr, const DLArrayHandle var_arr, float eps,
         DLStreamHandle stream_handle);
 
+    int DLGpuLayerNormalizationInference(
+        const DLArrayHandle in_arr, const DLArrayHandle ln_scale,
+        const DLArrayHandle ln_bias, DLArrayHandle mean_arr,
+        DLArrayHandle var_arr, DLArrayHandle out_arr, float eps,
+        DLStreamHandle stream_handle);
+
     int DLGpuInstanceNormalization2d(
         const DLArrayHandle in_arr, DLArrayHandle mean, DLArrayHandle var,
         DLArrayHandle out_arr, float eps, DLStreamHandle stream_handle);
@@ -561,19 +579,6 @@ HETUSYS_EXTERN_C {
     int DLGpuOneHot(const DLArrayHandle input, DLArrayHandle output,
                     DLStreamHandle stream_handle);
 
-    int DLGpuLinear(const DLArrayHandle matA, bool transposeA,
-                    const DLArrayHandle matB, bool transposeB,
-                    const DLArrayHandle bias,
-                    DLArrayHandle matC,
-                    DLStreamHandle stream_handle);
-
-    int Cudnn_Conv2dAddBias(const DLArrayHandle input_x,
-                            const DLArrayHandle input_f,
-                            const DLArrayHandle bias, DLArrayHandle output,
-                            const int padding_h, const int padding_w,
-                            const int stride_h, const int stride_w,
-                            DLStreamHandle stream_handle);
-
     // Initializers
     int DLGpuNormalInit(DLArrayHandle arr, const float mean, const float stddev,
                         unsigned long long seed, DLStreamHandle stream_handle);
@@ -586,10 +591,6 @@ HETUSYS_EXTERN_C {
     // Optimizer Ops
     int AddL2Regularization(const DLArrayHandle param, DLArrayHandle grad,
                             float l2reg, DLStreamHandle stream_handle);
-    int AddL2RegularizationSparse(const DLArrayHandle param, 
-                                const DLArrayHandle grad_indices,
-                                DLArrayHandle grad_values, float l2reg, 
-                                DLStreamHandle stream_handle);
     int SGDOptimizerUpdate(DLArrayHandle param, const DLArrayHandle grad,
                            float lr, DLStreamHandle stream_handle);
     int SGDOptimizerSparseUpdate(DLArrayHandle param,
@@ -626,10 +627,6 @@ HETUSYS_EXTERN_C {
     int DeduplicateIndexedSlices(
         const DLArrayHandle origin, const DLArrayHandle inverse,
         DLArrayHandle compressed, DLStreamHandle stream_handle);
-
-    int IndexedSlices2Dense(
-        const DLArrayHandle values, const DLArrayHandle indices,
-        DLArrayHandle new_values, DLStreamHandle stream_handle);
 
     // DNNL Ops
     int DnnlMatrixMultiply(const DLArrayHandle matA, bool transposeA,

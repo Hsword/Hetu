@@ -54,8 +54,7 @@ from .CudnnSoftmaxCrossEntropyLink import *
 from .OneHotLink import *
 from .InitializersLink import *
 from .DotLink import *
-from .LinearLink import *
-from .CudnnConv2dAddBiasLink import *
+from .GeluLink import *
 
 __all__ = [
     'matrix_elementwise_add_by_const',
@@ -139,8 +138,6 @@ __all__ = [
     'CuDNN_softmax_cross_entropy',
     'CuDNN_softmax_cross_entropy_gradient',
     'one_hot',
-    'matmul_with_bias',
-    'CuDNN_conv2d_with_bias',
 
     'normal_init',
     'uniform_init',
@@ -153,5 +150,7 @@ __all__ = [
     'indexedslice_oneside_add',
     'binary_cross_entropy',
     'binary_cross_entropy_gradient',
-    'matrix_dot'
+    'matrix_dot',
+    'gelu',
+    'gelu_gradient',
 ]
