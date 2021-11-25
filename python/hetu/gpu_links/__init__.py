@@ -154,7 +154,7 @@ __all__ = [
     'indexedslice_oneside_add',
     'binary_cross_entropy',
     'binary_cross_entropy_gradient',
-    'matrix_dot'
+    'matrix_dot',
     'gelu',
-    'gelu_gradient',
+    'gelu_gradient'
 ]
