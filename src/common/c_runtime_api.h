@@ -236,15 +236,22 @@ HETUSYS_EXTERN_C {
 
     int DLGpuGelu(const DLArrayHandle input, DLArrayHandle output,
                   DLStreamHandle stream_handle);
+      /*!
+     * \brief Compute gelu, and store to output.
+     * \param input The input array.
+     * \param in_grad The input gradients value.
+     * \param output The output array.
+     * \return 0 when success, -1 when failure happens
+     */
 
     int DLGpuGeluGradient(const DLArrayHandle input,
                           const DLArrayHandle in_grad, DLArrayHandle output,
                           DLStreamHandle stream_handle);
-    /*!
-     * \brief Compute leaky relu on all array elements, and store to output.
+  /*!
+     * \brief Compute gelu gradient, and store to output.
      * \param input The input array.
-     * \param alpha The val to multiple when x < 0
-     * \param output The output value.
+     * \param in_grad The input gradients value.
+     * \param output The output array.
      * \return 0 when success, -1 when failure happens
      */
     int DLGpuLeakyRelu(const DLArrayHandle input, const float alpha,

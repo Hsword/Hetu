@@ -14,15 +14,12 @@ class GeluOp(Op):
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
-            #print("CPU")
             if DNNL_LIB['DnnlGelu']:
                 cpu_gelu(input_vals[0], output_val)
             else:
                 output_val[:] = np.maximum(input_vals[0].asnumpy(), 0)
         else:
-            #print("111111111")
             gelu(input_vals[0], output_val, stream_handle)
-        #print('11111111111')
     def gradient(self, output_grad):
         return [gelu_gradient_op(self.inputs[0], output_grad, ctx=self.raw_ctx)]
 
@@ -45,7 +42,6 @@ class GeluGradientOp(Op):
         if self.on_cpu:
             if DNNL_LIB['DnnlGelu_Gradient']:
                 cpu_gelu_gradient(input_vals[0], input_vals[1], output_val)
-            # heaviside function, 0.5 at x=0
             else:
                 output_val[:] = (np.sign(input_vals[0].asnumpy()) +
                                  1) * 0.5 * input_vals[1].asnumpy()
@@ -99,6 +95,3 @@ def gelu_gradient_op(node_A, node_B, ctx=None):
 
     """
     return GeluGradientOp(node_A, node_B, ctx=ctx)
-
-
-####liang
