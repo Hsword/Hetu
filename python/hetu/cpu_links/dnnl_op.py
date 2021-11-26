@@ -375,3 +375,15 @@ def truncated_normal_init(param, mean, stddev, seed):
     assert isinstance(param, _nd.NDArray)
     _LIB.cpu_TruncatedNormalInit(param.handle, ctypes.c_float(
         mean), ctypes.c_float(stddev), ctypes.c_ulonglong(seed))
+
+def gelu(in_arr, out_arr):
+    assert isinstance(in_arr, _nd.NDArray)
+    assert isinstance(out_arr, _nd.NDArray)
+    _LIB.DnnlGelu(in_arr.handle, out_arr.handle)
+
+
+def gelu_gradient(input, in_grad, output):
+    assert isinstance(input, _nd.NDArray)
+    assert isinstance(in_grad, _nd.NDArray)
+    assert isinstance(output, _nd.NDArray)
+    _LIB.DnnlGelu_Gradient(input.handle, in_grad.handle, output.handle)
