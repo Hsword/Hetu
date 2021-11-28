@@ -835,6 +835,9 @@ HETUSYS_EXTERN_C {
 
     int DLGpuDot(const DLArrayHandle matA, const DLArrayHandle matB,
                  DLArrayHandle output, DLStreamHandle stream_handle);
+    
+    int DLGpuArgmax(const DLArrayHandle input, DLArrayHandle output, int dim,
+                DLStreamHandle stream_handle = NULL);
 
 } // HETUSYS_EXTERN_C
 
