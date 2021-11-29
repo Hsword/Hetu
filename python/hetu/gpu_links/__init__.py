@@ -59,6 +59,7 @@ from .DotLink import *
 from .LinearLink import *
 from .CudnnConv2dAddBiasLink import *
 from .GeluLink import *
+from .TopKLink import *
 
 __all__ = [
     'matrix_elementwise_add_by_const',
@@ -163,4 +164,5 @@ __all__ = [
     'cross_entropy_gradient',
     'cross_entropy_sparse',
     'cross_entropy_sparse_gradient',
+    'topk'
 ]
