@@ -356,6 +356,19 @@ HETUSYS_EXTERN_C {
                                DLArrayHandle output_y,
                                DLStreamHandle stream_handle);
 
+    
+
+
+
+
+    int DLGpuTopK(const DLArrayHandle input,
+                    DLArrayHandle output_val,
+                    DLArrayHandle output_idx,
+                    int k,                                                                                  DLStreamHandle stream_handle);
+
+
+
+
     int CuDNN_DLGpuConv2d(
         const DLArrayHandle input_x, const DLArrayHandle input_f,
         DLArrayHandle output, const int padding_h, const int padding_w,

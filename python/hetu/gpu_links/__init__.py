@@ -54,6 +54,7 @@ from .CudnnSoftmaxCrossEntropyLink import *
 from .OneHotLink import *
 from .InitializersLink import *
 from .DotLink import *
+from .TopKLink import *
 
 __all__ = [
     'matrix_elementwise_add_by_const',
@@ -149,5 +150,6 @@ __all__ = [
     'indexedslice_oneside_add',
     'binary_cross_entropy',
     'binary_cross_entropy_gradient',
-    'matrix_dot'
+    'matrix_dot',
+    'topk'
 ]
