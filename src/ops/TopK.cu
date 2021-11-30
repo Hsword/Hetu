@@ -1,28 +1,29 @@
 #include "gpu_runtime.h"
 
-__global__ void topk_kernel(float* input, float* output_val,float* output_idx, int k, int col,                        int* record){
+__global__ void topk_kernel(float* input, float* output_val,float* output_idx, int k, int col){
     int row = blockIdx.x * blockDim.x  + threadIdx.x;
     float *start_input_val = input + row*col;
     float *start_output_val = output_val + row*k;
     float *start_output_idx = output_idx + row*k;
-    int   *start_record     = record + row*col;
-
+        
+    float tmp_val;
+    float tmp_idx;
     for(int i=0; i<k; i++){
-        float tmp_val = -10000;
-        int tmp_idx = -1;
+        tmp_val=-10000.0;
+        tmp_idx=-1;
         for(int j=0; j<col; j++){
             if(start_input_val[j] > tmp_val){
-                if(start_record[j]!=1){
-                    tmp_val = start_input_val[j];
-                    tmp_idx = j;
-                }
+                tmp_val=start_input_val[j];
+                tmp_idx=j;
             }
         }
-        start_output_val[i] = tmp_val;
-        start_output_idx[i] = tmp_idx;
-        start_record[tmp_idx] = 1;
+        start_output_val[i]=tmp_val;
+        start_output_idx[i]=tmp_idx;
+        start_input_val[(int)tmp_idx]=-10000.0;
     }
-    __syncthreads();
+    for(int i=0;i<k;i++){
+        start_input_val[int(start_output_idx[i])]=start_output_val[i];
+    }
 }
 
 int DLGpuTopK(const DLArrayHandle input, DLArrayHandle output_val, DLArrayHandle output_idx, int k, 
@@ -54,17 +55,17 @@ int DLGpuTopK(const DLArrayHandle input, DLArrayHandle output_val, DLArrayHandle
         threads.x = 1024;
     }
     
-    int* record;
-    cudaMalloc((void**)&record, sizeof(int)*ROW*COL);
-    cudaMemset(record, 0, sizeof(int)*ROW*COL);
+//    int* record;
+//    cudaMalloc((void**)&record, sizeof(int)*ROW*COL);
+//    cudaMemset(record, 0, sizeof(int)*ROW*COL);
 
     if(stream_handle){
         topk_kernel<<<blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
-                input_data, output_val_data, output_idx_data, k, COL, record
+                input_data, output_val_data, output_idx_data, k, COL
                 );
     }else{
         topk_kernel<<<blocks, threads>>>(
-                input_data, output_val_data, output_idx_data, k, COL, record
+                input_data, output_val_data, output_idx_data, k, COL
                 );
     }
     return 0;
