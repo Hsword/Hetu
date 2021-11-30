@@ -8,7 +8,7 @@ import time
 COL=100
 k=2
 ctx = ht.gpu(0)
-for i in range(1, 21):
+for i in range(8, 21):
     ROW=i*512
     shape = (ROW, COL)
     x = np.random.uniform(0, 10, size=shape).astype(np.float32)
@@ -22,10 +22,15 @@ for i in range(1, 21):
     time_end=time.time()
     print("ROW,"+str(ROW)+",hetu,"+str(time_end-time_start))
 
-    torch_x = torch.tensor(x)
+    torch_x = torch.tensor(x, device='cuda:1')
     time_start=time.time()
     for i in range(20):
         torch.topk(torch_x, 2, dim=1)
     time_end=time.time()
     print("ROW,"+str(ROW)+",torch,"+str(time_end-time_start))
+
+    del arr_x
+    del arr_output_val
+    del arr_output_idx
+    del torch_x
 

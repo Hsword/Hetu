@@ -9,7 +9,7 @@ ROW=8192
 COL=100
 
 ctx = ht.gpu(0)
-for k in range(1, 10):
+for k in range(1, 20):
     shape = (ROW, COL)
     x = np.random.uniform(0, 10, size=shape).astype(np.float32)
     arr_x = ht.array(x, ctx=ctx)
