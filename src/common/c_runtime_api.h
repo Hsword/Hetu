@@ -644,6 +644,30 @@ HETUSYS_EXTERN_C {
         DLArrayHandle expavgsq, float lr, float beta1, float beta2,
         float beta1t, float beta2t, float eps, DLStreamHandle stream_handle);
 
+    int AdamWOptimizerUpdate(
+        DLArrayHandle param, const DLArrayHandle grad, DLArrayHandle expavg,
+        DLArrayHandle expavgsq, float lr, float beta1, float beta2,
+        float beta1t, float beta2t, float eps, float weight_decay, 
+        DLStreamHandle stream_handle);
+    int AdamWOptimizerSparseUpdate(
+        DLArrayHandle param, const DLArrayHandle grad_indices,
+        const DLArrayHandle grad_values, DLArrayHandle expavg,
+        DLArrayHandle expavgsq, float lr, float beta1, float beta2,
+        float beta1t, float beta2t, float eps, float weight_decay, 
+        DLStreamHandle stream_handle);
+
+    int LambOptimizerUpdate(
+        DLArrayHandle param, const DLArrayHandle grad, DLArrayHandle expavg,
+        DLArrayHandle expavgsq, float lr, float beta1, float beta2,
+        float beta1t, float beta2t, float eps, float weight_decay, 
+        DLStreamHandle stream_handle);
+    int LambOptimizerSparseUpdate(
+        DLArrayHandle param, const DLArrayHandle grad_indices,
+        const DLArrayHandle grad_values, DLArrayHandle expavg,
+        DLArrayHandle expavgsq, float lr, float beta1, float beta2,
+        float beta1t, float beta2t, float eps, float weight_decay, 
+        DLStreamHandle stream_handle);
+
     int DeduplicateIndexedSlices(
         const DLArrayHandle origin, const DLArrayHandle inverse,
         DLArrayHandle compressed, DLStreamHandle stream_handle);
