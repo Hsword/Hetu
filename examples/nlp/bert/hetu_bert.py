@@ -564,8 +564,10 @@ class BertForPreTraining(object):
             next_sentence_loss: [batch_size]
             '''
 
-            masked_lm_loss = ht.softmaxcrossentropy_sparse_op(prediction_scores, masked_lm_labels, ignored_index=-1)
-            next_sentence_loss = ht.softmaxcrossentropy_sparse_op(seq_relationship_score, next_sentence_label, ignored_index=-1)
+            # masked_lm_loss = ht.softmaxcrossentropy_sparse_op(prediction_scores, masked_lm_labels, ignored_index=-1)
+            # next_sentence_loss = ht.softmaxcrossentropy_sparse_op(seq_relationship_score, next_sentence_label, ignored_index=-1)
+            masked_lm_loss = ht.crossentropy_sparse_op(ht.softmax_op(prediction_scores), masked_lm_labels, ignored_index=-1)
+            next_sentence_loss = ht.crossentropy_sparse_op(ht.softmax_op(seq_relationship_score), next_sentence_label,ignored_index=-1)
 
             return_op += [masked_lm_loss, next_sentence_loss]
         return return_op
@@ -630,7 +632,8 @@ class BertForMaskedLM(object):
 
             masked_lm_loss: [batch_size*seq_len]
             '''
-            masked_lm_loss = ht.softmaxcrossentropy_sparse_op(prediction_scores, masked_lm_labels, ignored_index=-1)
+            # masked_lm_loss = ht.softmaxcrossentropy_sparse_op(prediction_scores, masked_lm_labels, ignored_index=-1)
+            masked_lm_loss = ht.crossentropy_sparse_op(ht.softmax_op(prediction_scores), masked_lm_labels, ignored_index=-1)
             return_op += [masked_lm_loss]
 
         return return_op
@@ -695,7 +698,8 @@ class BertForNextSentencePrediction(object):
 
             next_sentence_loss: [batch_size]
             '''
-            next_sentence_loss = ht.softmaxcrossentropy_sparse_op(seq_relationship_score, next_sentence_label, ignored_index=-1)
+            # next_sentence_loss = ht.softmaxcrossentropy_sparse_op(seq_relationship_score, next_sentence_label, ignored_index=-1)
+            next_sentence_loss = ht.crossentropy_sparse_op(ht.softmax_op(seq_relationship_score), next_sentence_label,ignored_index=-1)
             return_op += [next_sentence_loss]
 
         return return_op
@@ -763,7 +767,8 @@ class BertForSequenceClassification(object):
         logits = self.classifier(pooled_output) # [batch_size, num_labels]
 
         if labels is not None:
-            loss = ht.softmaxcrossentropy_sparse_op(logits, labels, ignored_index = -1)
+            # loss = ht.softmaxcrossentropy_sparse_op(logits, labels, ignored_index = -1)
+            loss = ht.crossentropy_sparse_op(ht.softmax_op(logits), labels, ignored_index=-1)
             return loss, logits
         else:
             return logits
@@ -794,7 +799,7 @@ class Dropout(object):
     def __call__(self, input_tensor):
         if self.dropout_prob is None or self.dropout_prob == 0.0:
             return input_tensor
-        output = ht.dropout_op(input_tensor, 1.0 - self.dropout_prob)
+        output = ht.dropout_op(input_tensor, 1.0 - self.dropout_prob, recompute = True)
         return output
 
 class Linear(object):

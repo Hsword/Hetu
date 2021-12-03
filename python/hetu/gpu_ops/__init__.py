@@ -33,6 +33,8 @@ from .Slice import slice_op, slice_gradient_op
 from .Softmax import softmax_func, softmax_op
 from .SoftmaxCrossEntropy import softmaxcrossentropy_op
 from .SoftmaxCrossEntropySparse import softmaxcrossentropy_sparse_op
+from .CrossEntropy import crossentropy_op
+from .CrossEntropySparse import crossentropy_sparse_op
 from .Split import split_op, split_gradient_op
 from .Sqrt import sqrt_op, rsqrt_op
 from .Sum import sum_op
@@ -124,6 +126,8 @@ __all__ = [
     'softmax_op',
     'softmaxcrossentropy_op',
     'softmaxcrossentropy_sparse_op',
+    'crossentropy_op',
+    'crossentropy_sparse_op',
     'split_op',
     'split_gradient_op',
     'sqrt_op',

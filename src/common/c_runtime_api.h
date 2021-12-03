@@ -330,6 +330,29 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle input_c, DLArrayHandle output,
         DLStreamHandle stream_handle);
 
+    int DLGpuCrossEntropy(const DLArrayHandle input_y,
+        const DLArrayHandle label, DLArrayHandle output,
+        DLStreamHandle stream_handle);
+
+    int DLGpuCrossEntropyGradient(const DLArrayHandle grad,
+                                      const DLArrayHandle input_y,
+                                      const DLArrayHandle label,
+                                      DLArrayHandle output,
+                                      DLStreamHandle stream_handle);
+
+    int DLGpuCrossEntropySparse(const DLArrayHandle input_y,
+                              const DLArrayHandle label, 
+                              const int ignored_index,
+                              DLArrayHandle output,
+                              DLStreamHandle stream_handle);
+    
+    int DLGpuCrossEntropySparseGradient(const DLArrayHandle grad,
+                                      const DLArrayHandle input_y,
+                                      const DLArrayHandle label,
+                                      const int ignored_index,
+                                      DLArrayHandle output,
+                                      DLStreamHandle stream_handle);
+
     int DLGpuConv2d(const DLArrayHandle input_x, const DLArrayHandle input_f,
                     DLArrayHandle output, DLArrayHandle workspace_arr,
                     const int padding, const int stride,
@@ -551,9 +574,15 @@ HETUSYS_EXTERN_C {
                      DLArrayHandle output, unsigned long long *pseed,
                      DLStreamHandle stream_handle);
 
-    int DLGpuDropoutGradient(const DLArrayHandle grad, const float dropout,
+    
+    int DLGpuDropoutGradient_recompute(const DLArrayHandle grad, const float dropout,
                              DLArrayHandle output, unsigned long long seed,
                              DLStreamHandle stream_handle);
+    
+
+    int DLGpuDropoutGradient(const DLArrayHandle grad, const DLArrayHandle fw_output,
+                         const float dropout, DLArrayHandle output,
+                         DLStreamHandle stream_handle);
 
     int DLGpuDropout2d(const DLArrayHandle input, const float dropout,
                        DLArrayHandle output, unsigned long long *pseed,

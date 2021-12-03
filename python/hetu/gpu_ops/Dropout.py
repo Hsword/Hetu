@@ -5,16 +5,17 @@ import numpy as np
 from .._base import DNNL_LIB
 from ..cpu_links import dropout as cpu_dropout
 from ..cpu_links import dropout_gradient as cpu_dropout_gradient
-from ..gpu_links import dropout_gradient
+from ..gpu_links import dropout_gradient, dropout_gradient_recompute
 from ..gpu_links import dropout
 
 
 class DropoutOp(Op):
-    def __init__(self, node_in, keep_prob, ctx=None):
+    def __init__(self, node_in, keep_prob, recompute = True, ctx=None):
         super().__init__(DropoutOp, [node_in], ctx)
         self.seed = ctypes.c_ulonglong(0)
         self.mask = None
         self.keep_prob = keep_prob
+        self.recompute = recompute
 
     def compute(self, input_vals, output_val, stream_handle=None, inference=False):
         if inference == False:
@@ -33,13 +34,17 @@ class DropoutOp(Op):
                         output_val, self.seed, stream_handle)
 
     def gradient(self, output_grad):
-        return [dropout_gradient_op(output_grad, self.keep_prob, self, ctx=self.raw_ctx)]
+        if self.recompute:
+            return [dropout_gradient_recompute_op(output_grad, self.keep_prob, self, ctx=self.raw_ctx)]
+        else:
+            return [dropout_gradient_op(output_grad, self.keep_prob, self, ctx=self.raw_ctx)]
+
 
     def infer_shape(self, input_shapes):
         return input_shapes[0]
 
 
-class Dropout_GradientOp(Op):
+class Dropout_Gradient_recomputeOp(Op):
     def __init__(self, node_in, keep_prob, forward_node, ctx=None):
         super().__init__(Dropout_GradientOp, [node_in], ctx)
         self.forward_node = forward_node
@@ -54,7 +59,7 @@ class Dropout_GradientOp(Op):
                 output_val[:] = dropout_np_gradient(
                     input_vals[0].asnumpy(), self.keep_prob, self.forward_node.mask)
         else:
-            dropout_gradient(input_vals[0], 1 - self.keep_prob,
+            dropout_gradient_recompute(input_vals[0], 1 - self.keep_prob,
                              output_val, self.seed, stream_handle)
 
     def gradient(self, output_grad):
@@ -64,7 +69,31 @@ class Dropout_GradientOp(Op):
         return input_shapes[0]
 
 
-def dropout_op(node_in, keep_prob, ctx=None):
+class Dropout_GradientOp(Op):
+    def __init__(self, node_in, keep_prob, forward_node, ctx=None):
+        super().__init__(Dropout_GradientOp, [node_in, forward_node], ctx)
+        self.forward_node = forward_node
+        self.keep_prob = keep_prob
+
+    def compute(self, input_vals, output_val, stream_handle=None):
+        if self.on_cpu:
+            if DNNL_LIB['cpu_Dropout_Gradient']:
+                cpu_dropout_gradient(input_vals[0], self.keep_prob, output_val)
+            else:
+                output_val[:] = dropout_np_gradient(
+                    input_vals[0].asnumpy(), self.keep_prob, self.forward_node.mask)
+        else:
+            dropout_gradient(input_vals[0], input_vals[1], 1 - self.keep_prob,
+                             output_val, stream_handle)
+
+    def gradient(self, output_grad):
+        raise NotImplementedError
+
+    def infer_shape(self, input_shapes):
+        return input_shapes[0]
+
+
+def dropout_op(node_in, keep_prob, recompute = True, ctx=None):
     """Drops elements of input variable randomly.
     Parameters:
     ----
@@ -76,7 +105,7 @@ def dropout_op(node_in, keep_prob, ctx=None):
     ----
     A new Node instance created by Op.
     """
-    return DropoutOp(node_in, keep_prob, ctx=ctx)
+    return DropoutOp(node_in, keep_prob, recompute = recompute, ctx=ctx)
 
 
 def dropout_gradient_op(node_in, keep_prob, forward_node, ctx=None):
@@ -93,6 +122,19 @@ def dropout_gradient_op(node_in, keep_prob, forward_node, ctx=None):
     """
     return Dropout_GradientOp(node_in, keep_prob, forward_node, ctx=ctx)
 
+def dropout_gradient_recompute_op(node_in, keep_prob, forward_node, ctx=None):
+    """Gradient node of dropout operation.
+    Parameters:
+    ----
+    node_in : Node
+        Input variable.
+    keep_prob : float
+        Probability of the results to be kept.
+    Returns:
+    ----
+    A new Node instance created by Op.
+    """
+    return Dropout_Gradient_recomputeOp(node_in, keep_prob, forward_node, ctx=ctx)
 
 def dropout_np(inputs, keep_prob, out_arr, mask):
     return mask*inputs*(1/keep_prob)
