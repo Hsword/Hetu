@@ -44,7 +44,8 @@ int DLGpuDropout(const DLArrayHandle input, const float dropout,
     return 0;
 }
 
-int DLGpuDropoutGradient(const DLArrayHandle grad, const float dropout,
+
+int DLGpuDropoutGradient_recompute(const DLArrayHandle grad, const float dropout,
                          DLArrayHandle output, unsigned long long seed,
                          DLStreamHandle stream_handle = NULL) {
     size_t size = 1;
@@ -70,6 +71,50 @@ int DLGpuDropoutGradient(const DLArrayHandle grad, const float dropout,
     } else {
         dropout_kernel<<<blocks, threads>>>(grad_data, output_data, seed,
                                             dropout, size);
+    }
+    return 0;
+}
+
+
+__global__ void dropout_gradient_kernel(const float *grad, const float *fw_output,
+                                float *output,const float rate,
+                                size_t size) {
+    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
+    if (ind >= size)
+        return;
+    float fw_out = fw_output[ind];
+    float keep_mask = (float)(fw_out > 1e-10 || fw_out < -1e-10);
+    output[ind] = grad[ind] * keep_mask / (1 - rate);
+}
+
+
+int DLGpuDropoutGradient(const DLArrayHandle grad, const DLArrayHandle fw_output,
+                         const float dropout, DLArrayHandle output,
+                         DLStreamHandle stream_handle = NULL) {
+    size_t size = 1;
+    for (index_t i = 0; i < grad->ndim; i++) {
+        size *= grad->shape[i];
+    }
+    const float *grad_data = (const float *)grad->data;
+    const float *fw_output_data = (const float *)fw_output->data;
+    float *output_data = (float *)output->data;
+
+    dim3 blocks;
+    dim3 threads;
+    if (size <= 1024) {
+        threads.x = size;
+        blocks.x = 1;
+    } else {
+        threads.x = 1024;
+        blocks.x = (size + 1023) / 1024;
+    }
+    if (stream_handle) {
+        dropout_gradient_kernel<<<blocks, threads, 0,
+                         *(cudaStream_t *)stream_handle->handle>>>(
+            grad_data, fw_output_data, output_data, dropout, size);
+    } else {
+        dropout_gradient_kernel<<<blocks, threads>>>(grad_data, fw_output_data, 
+                        output_data, dropout, size);
     }
     return 0;
 }

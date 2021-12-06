@@ -416,3 +416,120 @@ class AdamOptimizer(Optimizer):
                         self.tensors[i][:] = prev_param - \
                             self.learning_rate * mc / \
                             (np.sqrt(vc) + self.epsilon)
+
+
+class AdamWOptimizer(Optimizer):
+    def __init__(self, learning_rate=0.01, beta1=0.9, beta2=0.999, epsilon=1e-7, weight_decay=0):
+        super(AdamWOptimizer, self).__init__(learning_rate)
+        self.beta1 = beta1
+        self.beta1_t = 1.0
+        self.beta2 = beta2
+        self.beta2_t = 1.0
+        self.epsilon = epsilon
+        self.weight_decay = weight_decay
+        self.name = "AdamW"
+
+    def get_config(self):
+        return (ctypes.c_int(5), (ctypes.c_float * 5)(self.learning_rate, self.beta1, self.beta2, self.epsilon, self.weight_decay), ctypes.c_int(5))
+
+    def initiate_states(self, config):
+        super().initiate_states(config)
+        self.m = []
+        self.v = []
+        for t in self.tensors:
+            self.m.append(None if t is None else ndarray.array(
+                np.zeros(t.shape), t.ctx))
+            self.v.append(None if t is None else ndarray.array(
+                np.zeros(t.shape), t.ctx))
+
+    def update(self, grads, stream_handle=None):
+        assert self.initiated is True
+        params_size = len(self.tensors)
+        assert params_size == len(grads)
+        self.beta1_t *= self.beta1
+        self.beta2_t *= self.beta2
+        for i in range(params_size):
+            if grads[i] == None:
+                continue
+            if self.params[i].on_gpu:
+                assert isinstance(self.tensors[i], ndarray.NDArray)
+                assert isinstance(
+                    grads[i], (ndarray.NDArray, ndarray.IndexedSlices))
+                assert isinstance(self.m[i], ndarray.NDArray)
+                assert isinstance(self.v[i], ndarray.NDArray)
+                gpu_op.adamw_update(self.tensors[i], grads[i], self.m[i], self.v[i], self.learning_rate, self.beta1,
+                                   self.beta2, self.beta1_t, self.beta2_t, self.epsilon, self.weight_decay, stream_handle)
+            else:
+                if isinstance(grads[i], ndarray.IndexedSlices):
+                    raise NotImplementedError
+                else:
+                    prev_param = self.tensors[i].asnumpy()
+                    grad = grads[i].asnumpy()
+                    self.m[i][:] = self.beta1 * \
+                        self.m[i].asnumpy() + (1 - self.beta1) * grad
+                    self.v[i][:] = self.beta2 * self.v[i].asnumpy() + \
+                        (1 - self.beta2) * grad * grad
+                    mc = self.m[i].asnumpy() / (1 - self.beta1_t)
+                    vc = self.v[i].asnumpy() / (1 - self.beta2_t)
+                    update = mc / (np.sqrt(vc) + self.epsilon)
+                    self.tensors[i][:] = prev_param - \
+                        self.learning_rate * (update + self.weight_decay * self.tensors[i])
+
+class LambOptimizer(Optimizer):
+    def __init__(self, learning_rate=0.01, beta1=0.9, beta2=0.999, epsilon=1e-7, weight_decay=0):
+        super(AdamWOptimizer, self).__init__(learning_rate)
+        self.beta1 = beta1
+        self.beta1_t = 1.0
+        self.beta2 = beta2
+        self.beta2_t = 1.0
+        self.epsilon = epsilon
+        self.weight_decay = weight_decay
+        self.name = "Lamb"
+
+    def get_config(self):
+        return (ctypes.c_int(5), (ctypes.c_float * 5)(self.learning_rate, self.beta1, self.beta2, self.epsilon, self.weight_decay), ctypes.c_int(5))
+
+    def initiate_states(self, config):
+        super().initiate_states(config)
+        self.m = []
+        self.v = []
+        for t in self.tensors:
+            self.m.append(None if t is None else ndarray.array(
+                np.zeros(t.shape), t.ctx))
+            self.v.append(None if t is None else ndarray.array(
+                np.zeros(t.shape), t.ctx))
+
+    def update(self, grads, stream_handle=None):
+        assert self.initiated is True
+        params_size = len(self.tensors)
+        assert params_size == len(grads)
+        self.beta1_t *= self.beta1
+        self.beta2_t *= self.beta2
+        for i in range(params_size):
+            if grads[i] == None:
+                continue
+            if self.params[i].on_gpu:
+                assert isinstance(self.tensors[i], ndarray.NDArray)
+                assert isinstance(
+                    grads[i], (ndarray.NDArray, ndarray.IndexedSlices))
+                assert isinstance(self.m[i], ndarray.NDArray)
+                assert isinstance(self.v[i], ndarray.NDArray)
+                gpu_op.lamb_update(self.tensors[i], grads[i], self.m[i], self.v[i], self.learning_rate, self.beta1,
+                                   self.beta2, self.beta1_t, self.beta2_t, self.epsilon, self.weight_decay, stream_handle)
+            else:
+                if isinstance(grads[i], ndarray.IndexedSlices):
+                    raise NotImplementedError
+                else:
+                    prev_param = self.tensors[i].asnumpy()
+                    grad = grads[i].asnumpy()
+                    self.m[i][:] = self.beta1 * \
+                        self.m[i].asnumpy() + (1 - self.beta1) * grad
+                    self.v[i][:] = self.beta2 * self.v[i].asnumpy() + \
+                        (1 - self.beta2) * grad * grad
+                    mc = self.m[i].asnumpy() / (1 - self.beta1_t)
+                    vc = self.v[i].asnumpy() / (1 - self.beta2_t)
+                    update = mc / (np.sqrt(vc) + self.epsilon)
+                    norm2_param = np.sqrt(np.sum(np.power(self.tensors[i], 2)))
+                    norm2_update = np.sqrt(np.sum(np.power(update, 2)))
+                    self.tensors[i][:] = prev_param - \
+                        self.learning_rate * norm2_param / norm2_update * (update + self.weight_decay * self.tensors[i])

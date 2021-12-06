@@ -36,8 +36,8 @@ config = BertConfig(vocab_size=30522,
                     num_attention_heads=12, 
                     intermediate_size=3072, 
                     max_position_embeddings=512, 
-                    attention_probs_dropout_prob=0.0,
-                    hidden_dropout_prob=0.0,
+                    # attention_probs_dropout_prob=0.0,
+                    # hidden_dropout_prob=0.0,
                     batch_size=18)
 
 model = BertForPreTraining(config=config)
