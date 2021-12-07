@@ -2,7 +2,6 @@ from __future__ import absolute_import
 import numpy as np
 from .Node import Op
 from .._base import DNNL_LIB
-from .Softmax import softmax_func
 from ..gpu_links import cross_entropy
 from ..gpu_links import cross_entropy_gradient
 
@@ -58,7 +57,7 @@ class CrossEntropyGradientOp(Op):
             y_ = input_vals[2].asnumpy()
             output_val[:] = - y_ / y * np.expand_dims(grad, -1)
         else:
-            crossentropy_gradient_op(
+            cross_entropy_gradient(
                 input_vals[0], input_vals[1], input_vals[2], output_val, stream_handle)
 
     def gradient(self, output_grad):
