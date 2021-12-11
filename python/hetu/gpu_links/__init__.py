@@ -54,7 +54,12 @@ from .CudnnSoftmaxCrossEntropyLink import *
 from .OneHotLink import *
 from .InitializersLink import *
 from .DotLink import *
-from .TopKLink import *
+from .TopKIdxLink import *
+from .TopKValLink import *
+from .ScatterLink import *
+from .MinusElewiseLink import *
+from .CloneLink import *
+from .MaxLink import *
 
 __all__ = [
     'matrix_elementwise_add_by_const',
@@ -151,5 +156,10 @@ __all__ = [
     'binary_cross_entropy',
     'binary_cross_entropy_gradient',
     'matrix_dot',
-    'topk'
+    'topk_idx',
+    'topk_val',
+    'scatter',
+    'matrix_elementwise_minus',
+    'clone',
+    'max'
 ]

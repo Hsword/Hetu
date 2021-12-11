@@ -18,7 +18,8 @@ for i in range(1, 20):
     arr_output_idx = ht.empty(output_shape, ctx=ctx)
     time_start=time.time()
     for i in range(20):
-        gpu_op.topk(arr_x, arr_output_val, arr_output_idx, k)
+        gpu_op.topk_idx(arr_x, arr_output_idx, k)
+        gpu_op.topk_val(arr_x, arr_output_idx, arr_output_val, k)
     time_end=time.time()
     print("COL,"+str(COL)+",hetu,"+str(time_end-time_start))
 

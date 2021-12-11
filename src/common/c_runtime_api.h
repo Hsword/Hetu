@@ -361,10 +361,36 @@ HETUSYS_EXTERN_C {
 
 
 
-    int DLGpuTopK(const DLArrayHandle input,
-                    DLArrayHandle output_val,
+    int DLGpuTopKIdx(const DLArrayHandle input,
                     DLArrayHandle output_idx,
                     int k,                                                                                  DLStreamHandle stream_handle);
+
+
+    int DLGpuTopKVal(const DLArrayHandle input,
+                    DLArrayHandle output_idx,
+                    DLArrayHandle output_val,
+                    int k,                                                                                  DLStreamHandle stream_handle);
+
+    int DLGpuScatter(const DLArrayHandle target,
+                    int dim,
+                    DLArrayHandle index,
+                    DLArrayHandle src,
+                    DLStreamHandle stream_handle);
+    
+    int DLGpuMinusElewise(const DLArrayHandle input1,
+                    DLArrayHandle input2,
+                    DLArrayHandle output,
+                    DLStreamHandle stream_handle);
+    
+    int DLGpuClone(const DLArrayHandle input, 
+                    DLArrayHandle output,
+                    DLStreamHandle stream_handle);
+        
+    int DLGpuMax(const DLArrayHandle input,
+                    DLArrayHandle output_idx,
+                    DLArrayHandle output_val,
+                    int dim,
+                    DLStreamHandle stream_handle);
 
 
 
