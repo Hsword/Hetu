@@ -62,6 +62,10 @@ from .DistGCN_15d import distgcn_15d_op
 from .PipelineSend import pipeline_send_op
 from .PipelineReceive import pipeline_receive_op
 from .Dispatch import dispatch
+from .TopKIdx import topk_idx_op
+from .TopKVal import topk_val_op
+from .Scatter import scatter_op
+
 
 __all__ = [
     'Executor',
@@ -171,4 +175,7 @@ __all__ = [
     'pipeline_send_op',
     'pipeline_receive_op',
     'dispatch',
+    'topk_idx_op',
+    'topk_val_op',
+    'scatter_op'
 ]

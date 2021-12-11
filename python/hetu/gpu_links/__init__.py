@@ -59,7 +59,12 @@ from .DotLink import *
 from .LinearLink import *
 from .CudnnConv2dAddBiasLink import *
 from .GeluLink import *
-from .TopKLink import *
+from .TopKIdxLink import *
+from .TopKValLink import *
+from .ScatterLink import *
+from .MinusElewiseLink import *
+from .CloneLink import *
+from .MaxLink import *
 
 __all__ = [
     'matrix_elementwise_add_by_const',
@@ -164,5 +169,10 @@ __all__ = [
     'cross_entropy_gradient',
     'cross_entropy_sparse',
     'cross_entropy_sparse_gradient',
-    'topk'
+    'topk_idx',
+    'topk_val',
+    'scatter',
+    'matrix_elementwise_minus',
+    'clone',
+    'max'
 ]

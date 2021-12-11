@@ -8,7 +8,7 @@ import time
 COL=100
 k=2
 ctx = ht.gpu(0)
-for i in range(8, 21):
+for i in range(1, 21):
     ROW=i*512
     shape = (ROW, COL)
     x = np.random.uniform(0, 10, size=shape).astype(np.float32)
@@ -18,7 +18,12 @@ for i in range(8, 21):
     arr_output_idx = ht.empty(output_shape, ctx=ctx)
     time_start=time.time()
     for i in range(20):
-        gpu_op.topk(arr_x, arr_output_val, arr_output_idx, k)
+        gpu_op.topk_idx(arr_x, arr_output_idx, k)
+        gpu_op.topk_val(arr_x, arr_output_idx, arr_output_val, k)
+        torch.topk(torch_x, 2, dim=1)
+    for i in range(20):
+        gpu_op.topk_idx(arr_x, arr_output_idx, k)
+        gpu_op.topk_val(arr_x, arr_output_idx, arr_output_val, k)
     time_end=time.time()
     print("ROW,"+str(ROW)+",hetu,"+str(time_end-time_start))
 
