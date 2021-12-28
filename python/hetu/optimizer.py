@@ -477,7 +477,7 @@ class AdamWOptimizer(Optimizer):
 
 class LambOptimizer(Optimizer):
     def __init__(self, learning_rate=0.01, beta1=0.9, beta2=0.999, epsilon=1e-7, weight_decay=0):
-        super(AdamWOptimizer, self).__init__(learning_rate)
+        super(LambOptimizer, self).__init__(learning_rate)
         self.beta1 = beta1
         self.beta1_t = 1.0
         self.beta2 = beta2
