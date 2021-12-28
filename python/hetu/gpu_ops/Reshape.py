@@ -49,7 +49,7 @@ class Array_ReshapeOp(Op):
                 array_reshape(input_vals[0], output_val, stream_handle)
 
     def gradient(self, output_grad):
-        return [array_reshape_gradient_op(self.inputs[0], output_grad, ctx=self.raw_ctx)]
+        return [array_reshape_gradient_op(self, output_grad, ctx=self.raw_ctx)]
 
     def infer_shape(self, input_shapes):
 
@@ -58,6 +58,7 @@ class Array_ReshapeOp(Op):
         input_shape = input_shapes[0]
         for i in range(len(input_shape)):
             input_size *= input_shape[i]
+        self.input_shape = input_shape
 
         # check if there exists -1 in output_shape
         idx = -1
@@ -112,27 +113,28 @@ class Array_ReshapeOp(Op):
 
 class Array_Reshape_GradientOp(Op):
     def __init__(self, node_in, node_out, ctx=None):
-        super().__init__(Array_Reshape_GradientOp, [node_in, node_out], ctx)
+        super().__init__(Array_Reshape_GradientOp, [node_out], ctx)
+        self.node_in = node_in
 
     def compute(self, input_vals, output_val, stream_handle=None):
         # the size of input_array
-        shapeIn = input_vals[0].shape
+        shapeIn = self.node_in.input_shape
         if self.on_cpu:
             if DNNL_LIB['cpu_Reshape']:
-                cpu_reshape(input_vals[1], output_val)
+                cpu_reshape(input_vals[0], output_val)
             else:
-                output_val[:] = input_vals[1].asnumpy().reshape(shapeIn)
+                output_val[:] = input_vals[0].asnumpy().reshape(shapeIn)
         else:
             if self.inplace:
-                input_vals[1].reshape(shapeIn, output_val)
+                input_vals[0].reshape(shapeIn, output_val)
             else:
-                array_reshape(input_vals[1], output_val, stream_handle)
+                array_reshape(input_vals[0], output_val, stream_handle)
 
     def gradient(self, output_grad):
         raise NotImplementedError
 
     def infer_shape(self, input_shapes):
-        return input_shapes[0]
+        return self.node_in.input_shape
 
     def backward_hook(self, config):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
