@@ -51,6 +51,8 @@ from .DropoutLink import *
 from .Dropout2dLink import *
 from .CudnnSoftmaxLink import *
 from .CudnnSoftmaxCrossEntropyLink import *
+from .CrossEntropyLink import *
+from .CrossEntropySparseLink import *
 from .OneHotLink import *
 from .InitializersLink import *
 from .DotLink import *
@@ -156,5 +158,9 @@ __all__ = [
     'binary_cross_entropy_gradient',
     'matrix_dot',
     'gelu',
-    'gelu_gradient'
+    'gelu_gradient',
+    'cross_entropy',
+    'cross_entropy_gradient',
+    'cross_entropy_sparse',
+    'cross_entropy_sparse_gradient',
 ]
