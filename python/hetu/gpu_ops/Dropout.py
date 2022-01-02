@@ -10,12 +10,15 @@ from ..gpu_links import dropout
 
 
 class DropoutOp(Op):
-    def __init__(self, node_in, keep_prob, recompute = True, ctx=None):
+    def __init__(self, node_in, keep_prob, recompute = True, inplace = False, ctx=None):
         super().__init__(DropoutOp, [node_in], ctx)
         self.seed = ctypes.c_ulonglong(0)
         self.mask = None
         self.keep_prob = keep_prob
         self.recompute = recompute
+        self.inplace = inplace
+        if inplace and not recompute:
+            assert(False, 'Inplace Dropout requires recomputing during Backward!')
 
     def compute(self, input_vals, output_val, stream_handle=None, inference=False):
         if inference == False:
@@ -30,8 +33,13 @@ class DropoutOp(Op):
                     output_val[:] = dropout_np(
                         input_vals[0].asnumpy(), self.keep_prob, output_val, self.mask)
             else:
-                dropout(input_vals[0], 1 - self.keep_prob,
-                        output_val, self.seed, stream_handle)
+                if self.inplace:
+                    dropout(input_vals[0], 1 - self.keep_prob,
+                            input_vals[0], self.seed, stream_handle)
+                    input_vals[0].inplace_copy(output_val)
+                else:
+                    dropout(input_vals[0], 1 - self.keep_prob,
+                            output_val, self.seed, stream_handle)
 
     def gradient(self, output_grad):
         if self.recompute:
@@ -46,7 +54,7 @@ class DropoutOp(Op):
 
 class Dropout_Gradient_recomputeOp(Op):
     def __init__(self, node_in, keep_prob, forward_node, ctx=None):
-        super().__init__(Dropout_GradientOp, [node_in], ctx)
+        super().__init__(Dropout_Gradient_recomputeOp, [node_in], ctx)
         self.forward_node = forward_node
         self.seed = forward_node.seed
         self.keep_prob = keep_prob
@@ -60,7 +68,7 @@ class Dropout_Gradient_recomputeOp(Op):
                     input_vals[0].asnumpy(), self.keep_prob, self.forward_node.mask)
         else:
             dropout_gradient_recompute(input_vals[0], 1 - self.keep_prob,
-                             output_val, self.seed, stream_handle)
+                            output_val, self.seed, stream_handle)
 
     def gradient(self, output_grad):
         raise NotImplementedError
@@ -93,7 +101,7 @@ class Dropout_GradientOp(Op):
         return input_shapes[0]
 
 
-def dropout_op(node_in, keep_prob, recompute = True, ctx=None):
+def dropout_op(node_in, keep_prob, recompute = True, inplace = False, ctx=None):
     """Drops elements of input variable randomly.
     Parameters:
     ----
@@ -105,7 +113,7 @@ def dropout_op(node_in, keep_prob, recompute = True, ctx=None):
     ----
     A new Node instance created by Op.
     """
-    return DropoutOp(node_in, keep_prob, recompute = recompute, ctx=ctx)
+    return DropoutOp(node_in, keep_prob, recompute = recompute, inplace = inplace, ctx=ctx)
 
 
 def dropout_gradient_op(node_in, keep_prob, forward_node, ctx=None):
