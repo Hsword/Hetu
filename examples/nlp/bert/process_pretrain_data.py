@@ -275,9 +275,11 @@ if __name__ == "__main__":
     max_predictions_per_seq = 20
     
     vocab_path = "./datasets/bert-base-uncased-vocab.txt"
-    dataset = load_dataset('../bookcorpus', cache_dir = "./cached_data")
+    dataset = load_dataset('../bookcorpus', cache_dir = "./cached_data1")
+    #dataset = load_dataset('../wikipedia', cache_dir = "./cached_data1")
     
     print("total number of documents {} ".format(dataset['train'].shape[0]))
+    exit(0)
     random_seed = 123
     rng = random.Random(random_seed)
     tokenizer = hetu.BertTokenizer(vocab_file=vocab_path, do_lower_case = do_lower_case)
