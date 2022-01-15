@@ -4,14 +4,13 @@ import math
 import logging
 import hetu as ht
 from hetu_bert_ccfbdci_2128 import BertForPreTraining_mp, BertConfig
-from load_data import DataLoader
+from load_data import DataLoader_example_data_for_bert
 import numpy as np
 import time
 import torch
 from tqdm import tqdm
 
 '''
-python process_pretrain_data.py (could be stopped manually after 200 documents if full bookcorpus is not wanted)
 heturun -c config2.yml python train_hetu_bert_ccfbdci_2128.py
 '''
 
@@ -34,7 +33,7 @@ batch_size = config.batch_size
 seq_len = config.max_position_embeddings
 vocab_size = config.vocab_size
 
-dataloader = DataLoader(dataset='bookcorpus', doc_num=200, save_gap=200, batch_size = batch_size)
+dataloader = DataLoader_example_data_for_bert(batch_size = batch_size)
 data_names = ['input_ids','token_type_ids','attention_mask','masked_lm_labels','next_sentence_label']
 
 with ht.context(ht.gpu(0)):
