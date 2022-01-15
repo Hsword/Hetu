@@ -32,8 +32,8 @@ _CITATION = """\
 }
 """
 _PROJECT_URL = "https://github.com/soskek/bookcorpus/issues/27"
-_DOWNLOAD_URL = "https://the-eye.eu/public/AI/pile_preliminary_components/books1.tar.gz"
-# _DOWNLOAD_URL = "../bert/datasets/books_doc_format.tar.gz"
+# _DOWNLOAD_URL = "https://the-eye.eu/public/AI/pile_preliminary_components/books1.tar.gz"
+_DOWNLOAD_URL = "../bert/datasets/books_doc_format.tar.gz"
 
 class BookCorpusOpenConfig(datasets.BuilderConfig):
     """BuilderConfig for BookCorpus."""
