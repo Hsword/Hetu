@@ -36,7 +36,7 @@ class GLUEDownloader:
             assert task_name == 'sst-2'
             task_name = 'SST'
         wget.download(
-            'https://gist.githubusercontent.com/W4ngatang/60c2bdb54d156a41194446737ce03e2e/raw/1502038877f6a88c225a34450793fbc3ea87eaba/download_glue_data.py',
+            'https://gist.githubusercontent.com/roclark/9ab385e980c5bdb9e15ecad5963848e0/raw/c9dcc44a6e1336d2411e3333c25bcfd507c39c81/download_glue_data.py',
             out=self.save_path,
         )
         sys.path.append(self.save_path)
@@ -44,7 +44,3 @@ class GLUEDownloader:
         download_glue_data.main(
             ['--data_dir', self.save_path, '--tasks', task_name])
         sys.path.pop()
-
-if __name__ == '__main__':
-    downloader = GLUEDownloader('./datasets')
-    downloader.download('sst-2')
