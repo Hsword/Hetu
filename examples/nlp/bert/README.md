@@ -3,7 +3,9 @@ In this directory we provide implementations for BERT model on PyTorch and Hetu.
 
 ## Dataset Preparing
 We support wikicorpus_en and bookcorpus dataset for BERT pretraining, and support GLUE dataset for finetuning, including 
-sst-2, cola, mrpc. Data downloading and preprocessing scripts are based on https://github.com/NVIDIA/DeepLearningExamples/tree/master/PyTorch/LanguageModeling/BERT. To download, verify, extract the datasets, create the shards in hdf5 format for pretraining, and preprocess all GLUE data for finetuing, run:
+sst-2, cola, mrpc. Data downloading and preprocessing scripts are based on https://github.com/NVIDIA/DeepLearningExamples/tree/master/PyTorch/LanguageModeling/BERT. 
+
+To download, verify, extract the datasets, create the shards in `.hdf5` format for pretraining, and preprocess all GLUE data for finetuing, run:
 ```bash
 sh ./scripts/create_datasets_from_start.sh
 ```
@@ -11,10 +13,11 @@ Bookcorpus server are usually overloaded, so downloading bookcorpus maybe time-c
 ```bash
 sh ./scripts/create_datasets_from_start.sh wiki_only
 ```
-Users are free to modify ./scripts/create_datasets_from_start.sh to run specified scripts according to needs.
+Users are free to modify `./scripts/create_datasets_from_start.sh` to run specified scripts according to needs.
 
 ## Pretraining and Finetuning BERT model
-All scripts for pretraining or finetuning BERT model are in ./scripts directory. Users are free to modify hyperparameters in shell file.
+All scripts for pretraining or finetuning BERT model are in `./scripts` directory. Users are free to modify hyperparameters in shell file.
+
 To pretrain Hetu BERT base or BERT large model, run:
 ```bash
 sh ./scripts/train_hetu_bert_base.sh
