@@ -9,12 +9,9 @@ from torch.optim import SGD
 import numpy as np
 from pytorch_bert import BertForSequenceClassification
 from bert_config import BertConfig
-from load_data import DataLoader4Glue
+from load_data import DataLoaderForGlue
 import time
-
-''' Usage example:
-    In dir Hetu/examples/nlp/bert/: python test_glue_pytorch_bert.py
-'''
+import argparse
 
 def params_from_official_pytorch_pretrained_model(state_dict):
     weights_path = './pretrained_params/bert-base-uncased/pytorch_model.bin'
@@ -59,51 +56,47 @@ def setup_seed(seed):
 
 setup_seed(123)
 
-cuda_condition = torch.cuda.is_available()
-device = torch.device("cuda:4" if cuda_condition else "cpu")
-#task_name = 'cola'
-task_name = 'sst-2'
-if task_name in ['sst-2','cola', 'mrpc']:
-    num_labels = 2
-elif task_name in ['mnli']:
-    num_labels = 3
 
-def finetune():
-    num_epochs = 4
-    lr = 5e-5
+def finetune(args):
+    cuda_condition = torch.cuda.is_available()
+    device = torch.device("cuda:%d"%args.gpu_id if cuda_condition else "cpu")
+    task_name = args.task_name
+    if task_name in ['sst-2','cola', 'mrpc']:
+        num_labels = 2
+    elif task_name in ['mnli']:
+        num_labels = 3
 
-    config = BertConfig(vocab_size=30522, 
-                        hidden_size=768,
-                        num_hidden_layers=12, 
-                        num_attention_heads=12, 
-                        intermediate_size=3072, 
-                        max_position_embeddings=512, 
-                        attention_probs_dropout_prob=0.0,
-                        hidden_dropout_prob=0.0,
-                        batch_size=16)
+    num_epochs = args.epochs
+    lr = args.lr
+
+    config = BertConfig(vocab_size=args.vocab_size, 
+                        hidden_size=args.hidden_size,
+                        num_hidden_layers=args.num_hidden_layers, 
+                        num_attention_heads=args.num_attention_heads, 
+                        intermediate_size=args.hidden_size*4, 
+                        max_position_embeddings=args.seq_length, 
+                        attention_probs_dropout_prob=args.dropout_prob,
+                        hidden_dropout_prob=args.dropout_prob,
+                        batch_size=args.train_batch_size,
+                        hidden_act=args.hidden_act)
 
     model = BertForSequenceClassification(config=config, num_labels=num_labels)
     model.to(device)
 
-    batch_size = config.batch_size
-    seq_len = config.max_position_embeddings
-    vocab_size = config.vocab_size
+    dataloader = DataLoaderForGlue(task_name=task_name, batch_size = config.batch_size)
 
-    dataloader = DataLoader4Glue(task_name=task_name, batch_size = batch_size)
-    data_names = ['input_ids','token_type_ids','attention_mask','label_ids']
-
-    dataloader_dev = DataLoader4Glue(task_name=task_name, batch_size = batch_size, datatype='dev')
+    dataloader_dev = DataLoaderForGlue(task_name=task_name, batch_size = config.batch_size, datatype='dev')
 
     #initialize parameters
     for m in model.modules():
         if isinstance(m, (nn.Linear, nn.Embedding)):
             nn.init.xavier_normal_(m.weight)
 
-    #save parameters
-    params = model.state_dict()
-    for key, val in params.items():
-        params[key] = val.cpu().numpy()
-    torch.save(params, "pytorch_params_glue.file") 
+    # #save parameters
+    # params = model.state_dict()
+    # for key, val in params.items():
+    #     params[key] = val.cpu().numpy()
+    # torch.save(params, "pytorch_params_glue.file") 
 
     start_model = 'random'
 
@@ -121,13 +114,10 @@ def finetune():
 
     # model.load_state_dict(state_dict)
 
-    opt = Adam(model.parameters(), lr=lr, betas=(0.9,0.999), eps=1e-8, weight_decay = 0.01)
+    opt = Adam(model.parameters(), lr=lr, betas=(0.9,0.999), eps=1e-8, weight_decay = args.adam_weight_decay)
     opt_name = 'Adam'
     # opt = SGD(model.parameters(), lr=lr)
     # opt_name = 'SGD'
-
-    dataloader.make_epoch_data()
-    dataloader_dev.make_epoch_data()
 
     for ep in range(num_epochs):
         for i in range(dataloader.batch_num):
@@ -183,26 +173,30 @@ def finetune():
         torch.save(model.state_dict(), save_path+save_file) 
         print('Saved model to %s.'%(save_path+save_file))
 
-def validate():
-    config = BertConfig(vocab_size=30522, 
-                        hidden_size=768,
-                        num_hidden_layers=12, 
-                        num_attention_heads=12, 
-                        intermediate_size=3072, 
-                        max_position_embeddings=512, 
+def validate(args):
+    cuda_condition = torch.cuda.is_available()
+    device = torch.device("cuda:%d"%args.gpu_id if cuda_condition else "cpu")
+    task_name = args.task_name
+    if task_name in ['sst-2','cola', 'mrpc']:
+        num_labels = 2
+    elif task_name in ['mnli']:
+        num_labels = 3
+
+    config = BertConfig(vocab_size=args.vocab_size, 
+                        hidden_size=args.hidden_size,
+                        num_hidden_layers=args.num_hidden_layers, 
+                        num_attention_heads=args.num_attention_heads, 
+                        intermediate_size=args.hidden_size*4, 
+                        max_position_embeddings=args.seq_length, 
                         attention_probs_dropout_prob=0.0,
                         hidden_dropout_prob=0.0,
-                        batch_size=16)
+                        batch_size=args.train_batch_size,
+                        hidden_act=args.hidden_act)
 
     model = BertForSequenceClassification(config=config, num_labels=num_labels)
     model.to(device)
 
-    batch_size = config.batch_size
-    seq_len = config.max_position_embeddings
-    vocab_size = config.vocab_size
-
-    dataloader = DataLoader4Glue(task_name=task_name, batch_size = batch_size, datatype='dev')
-    data_names = ['input_ids','token_type_ids','attention_mask','label_ids']
+    dataloader = DataLoaderForGlue(task_name=task_name, batch_size = config.batch_size, datatype='dev')
 
     start_model = 'random'
 
@@ -221,7 +215,6 @@ def validate():
     model.load_state_dict(state_dict)
 
     # validate model on dev set
-    dataloader.make_epoch_data()
     acc_list=[]
     for i in range(dataloader.batch_num):
         start_time = time.time()
@@ -247,6 +240,50 @@ def validate():
     print('\tDev accuracy after epoch %d is %.4f'%(load_finetune_ep, np.mean(np.array(acc_list))))    
 
 if __name__ == '__main__':
-    finetune()
-    #validate()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--gpu_id', type=int, default=0, help='Id of GPU to run.'
+    )
+    parser.add_argument(
+        "--train_batch_size", type=int, default=16, help="Training batch size"
+    )
+    parser.add_argument(
+        "--task_name", type=str, default='sst-2', help="Glue task to finetune."
+    )
+    parser.add_argument(
+        "--vocab_size", type=int, default=30522, help="Total number of vocab"
+    )
+    parser.add_argument(
+        "--hidden_size", type=int, default=768, help="Hidden size of transformer model",
+    )
+    parser.add_argument(
+        "--num_hidden_layers", type=int, default=12, help="Number of layers"
+    )
+    parser.add_argument(
+        "-a",
+        "--num_attention_heads",
+        type=int,
+        default=12,
+        help="Number of attention heads",
+    )
+    parser.add_argument(
+        "-s", "--seq_length", type=int, default=128, help="Maximum sequence len"
+    )
+    parser.add_argument("-e", "--epochs", type=int,
+                        default=10, help="Number of epochs")
+    parser.add_argument("--lr", type=float, default=1e-5,
+                        help="Learning rate of adam")
+    parser.add_argument(
+        "--adam_weight_decay", type=float, default=0.01, help="Weight_decay of adam"
+    )
+    parser.add_argument(
+        "--hidden_act", type=str, default='gelu', help="Hidden activation to use."
+    )
+    parser.add_argument(
+        "--dropout_prob", type=float, default=0.1, help="Dropout rate."
+    )
+    args = parser.parse_args()
+
+    finetune(args)
+    #validate(args)
 

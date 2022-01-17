@@ -264,8 +264,6 @@ class BertIntermediate(object):
             self.intermediate_act_fn = ht.relu_op
         elif config.hidden_act == "gelu":
             self.intermediate_act_fn = ht.gelu_op
-            print("Gelu activation is not implemented yet.")
-            assert(False)
         linear_input_shape = [config.batch_size, config.max_position_embeddings, config.hidden_size]
         self.dense = Linear(config.hidden_size, config.intermediate_size, activation = self.intermediate_act_fn, input_shape=linear_input_shape)
 
@@ -330,8 +328,6 @@ class BertPredictionHeadTransform(object):
             self.hidden_act = ht.relu_op
         elif config.hidden_act == "gelu":
             self.hidden_act = ht.gelu_op
-            print("Gelu activation is not implemented yet.")
-            assert(False)
         linear_input_shape = [config.batch_size, config.max_position_embeddings, config.hidden_size]
         self.dense_act = Linear(config.hidden_size, config.hidden_size, activation=self.hidden_act, input_shape=linear_input_shape)
         self.LayerNorm = BertLayerNorm(config.hidden_size, eps=1e-12)
