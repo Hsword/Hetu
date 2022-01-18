@@ -6,9 +6,9 @@ from ..gpu_links import cross_entropy_sparse
 from ..gpu_links import cross_entropy_sparse_gradient
 
 
-class SoftmaxCrossEntropySparseOp(Op):
+class CrossEntropySparseOp(Op):
     def __init__(self, node_y, node_y_, ignored_index, ctx=None):
-        super().__init__(SoftmaxCrossEntropySparseOp, [node_y, node_y_], ctx)
+        super().__init__(CrossEntropySparseOp, [node_y, node_y_], ctx)
         self.ignored_index = ignored_index
 
     def compute(self, input_vals, output_val, stream_handle=None):
@@ -19,7 +19,7 @@ class SoftmaxCrossEntropySparseOp(Op):
 
     def gradient(self, output_grad):
         grad_A = crossentropy_sparse_gradient_op(
-            output_grad, self.inputs[0], self.inputs[1], self.ignored_index, ctx=output_grad.ctx)
+            output_grad, self.inputs[0], self.inputs[1], self.ignored_index, ctx=self.raw_ctx)
         return [grad_A, None]
 
     def infer_shape(self, input_shapes):
@@ -29,9 +29,9 @@ class SoftmaxCrossEntropySparseOp(Op):
         return input_shapes[0][:-1]
 
 
-class SoftmaxCrossEntropySparseGradientOp(Op):
+class CrossEntropySparseGradientOp(Op):
     def __init__(self, node_grad, node_y, node_y_, ignored_index, ctx=None):
-        super().__init__(SoftmaxCrossEntropySparseGradientOp,
+        super().__init__(CrossEntropySparseGradientOp,
                          [node_grad, node_y, node_y_], ctx)
         self.ignored_index = ignored_index
 
@@ -48,8 +48,8 @@ class SoftmaxCrossEntropySparseGradientOp(Op):
 
 
 def crossentropy_sparse_op(node_y, node_y_, ignored_index=-1, ctx=None):
-    return SoftmaxCrossEntropySparseOp(node_y, node_y_, ignored_index, ctx=ctx)
+    return CrossEntropySparseOp(node_y, node_y_, ignored_index, ctx=ctx)
 
 
 def crossentropy_sparse_gradient_op(node_grad, node_y, node_y_, ignored_index, ctx=None):
-    return SoftmaxCrossEntropySparseGradientOp(node_grad, node_y, node_y_, ignored_index, ctx=ctx)
+    return CrossEntropySparseGradientOp(node_grad, node_y, node_y_, ignored_index, ctx=ctx)

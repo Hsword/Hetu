@@ -26,6 +26,7 @@ from .Opposite import opposite_op
 from .Pad import pad_op, pad_gradient_op
 from .ReduceSumAxisZero import reducesumaxiszero_op
 from .Relu import relu_op, relu_gradient_op
+from .Gelu import gelu_op, gelu_gradient_op
 from .LeakyRelu import leaky_relu_op, leaky_relu_gradient_op
 from .Reshape import array_reshape_op, array_reshape_gradient_op
 from .Sigmoid import sigmoid_op
@@ -115,6 +116,8 @@ __all__ = [
     'reducesumaxiszero_op',
     'relu_op',
     'relu_gradient_op',
+    'gelu_op',
+    'gelu_gradient_op',
     'leaky_relu_op',
     'leaky_relu_gradient_op',
     'array_reshape_op',

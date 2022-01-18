@@ -166,7 +166,7 @@ class Op(object):
         # previously we use array reshape lazy callback to do this, which is deprecated (not efficient)
         if not self.lazy_execution:
             for node in self.inputs:
-                if node.op_type not in ["Array_ReshapeOp", "Array_Reshape_GradientOp"]:
+                if node.op_type not in ["Array_ReshapeOp", "Array_Reshape_GradientOp", "BroadcastToOp", "DropoutOp"]:
                     node.inplace = False
 
         # insert data transfer op if needed
