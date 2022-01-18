@@ -13,6 +13,12 @@ Bookcorpus server are usually overloaded, so downloading bookcorpus maybe time-c
 ```bash
 sh ./scripts/create_datasets_from_start.sh wiki_only
 ```
+To download both bookcorpus and wikicorpus_en dataset, user may have to repeatedly run the following scripts until the required number of files are downloaded:
+```bash
+sh ./scripts/create_datasets_from_start.sh wiki_books
+```
+Note: Ensure a complete Wikipedia download. If in any case, the download breaks, remove the output file wikicorpus_en.xml.bz2 and start again. If a partially downloaded file exists, the script assumes successful download which causes the extraction to fail.
+
 Users are free to modify `./scripts/create_datasets_from_start.sh` to run specified scripts according to needs.
 
 ## Pretraining and Finetuning BERT model
