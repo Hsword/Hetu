@@ -3,4 +3,4 @@
 workdir=$(cd $(dirname $0); pwd)
 mainpy=${workdir}/../run_hetu.py
 
-python ${mainpy} --model wdl_adult --val
+heturun -w 1 python ${mainpy} --model wdl_adult --val

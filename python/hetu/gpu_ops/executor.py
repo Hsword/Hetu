@@ -217,8 +217,9 @@ class HetuConfig(object):
             # with context usage
             launchMPI, launchPS, self.node_strategy, devices = get_launch_config_by_traverse_nodes(
                 eval_node_list, ctx)
+            gpu_devices = [dev for dev in devices if ndarray.is_gpu_ctx(dev)]
             local_gpu_devices = sorted(
-                [dev.device_id for dev in devices if dev.local and ndarray.is_gpu_ctx(dev)])
+                [dev.device_id for dev in gpu_devices if dev.local])
             if not launchMPI and not launchPS:
                 self.comm_mode = None
             elif launchMPI and (not launchPS or self.use_preduce):
@@ -228,7 +229,7 @@ class HetuConfig(object):
             else:
                 self.comm_mode = 'Hybrid'
             # in pipeline or model parallel we have to initialize another p2p stream
-            init_p2p_stream = len(devices) != len(ctx)
+            init_p2p_stream = len(gpu_devices) != ctx.worker_num
 
         # variables initialization
         self.seed = seed if seed is not None else np.int64(time())
@@ -1402,6 +1403,10 @@ def reorder_for_group(topo_order, layer_indices):
     # 2. reorder pipeline send/recv ops according to grouping indices
     has_pipeline_ops = set([layer_indices[x] for x in layer_indices if isinstance(
         x, (PipelineSendOp, PipelineReceiveOp))])
+    if len(has_pipeline_ops) == 0:
+        # if no pipeline send/recv, no reorder; a workaround for PS
+        # TODO: better plan?
+        return topo_order
     labels = {}
     for node in topo_order:
         if isinstance(node, (DataH2DOp, DataD2HOp, DataD2HSparseOp)):

@@ -17,7 +17,7 @@ set(HETU_PS ON)
 
 # whether to compile geometric module (for GNNs)
 # pybind11(*), metis(*) required
-set(HETU_GEOMETRIC ON)
+set(HETU_GEOMETRIC OFF)
 
 # whether to compile cache module (for PS)
 # to enable this, you must turn HETU_PS on
@@ -25,8 +25,8 @@ set(HETU_GEOMETRIC ON)
 set(HETU_CACHE ON)
 
 # whether to compile Hetu ML Module
-set(HETU_ML ON)
-set(HETU_PARALLEL_ML ON)
+set(HETU_ML OFF)
+set(HETU_PARALLEL_ML OFF)
 
 ######################
 ### Set paths ########
