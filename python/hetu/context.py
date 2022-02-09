@@ -111,7 +111,7 @@ class DeviceGroup(object):
         return hash(self) == hash(other)
 
     def get_sorted(self):
-        return DeviceGroup(sorted(self._contexts, key=lambda x: hash(x.hostname) + hash(x.device_id)))
+        return DeviceGroup(sorted(self._workers, key=lambda x: hash(x.hostname) + hash(x.device_id)))
 
 
 class ContextStack(object):
@@ -979,7 +979,7 @@ def assign_context_by_traverse_nodes(node_list, ctx, mpi_comm, p2p_stream, node_
             # in case users wants to reduce loss and accuracy to one worker
             loss_node = node.optimizer.loss
             assert mp_index_map[loss_node] < 0, 'Currently loss cannot occur in model parallel.'
-            if loss_node.raw_ctx.worker_num > 1:
+            if loss_node.raw_ctx.worker_num > 1 and mpi_comm is not None:
                 allreduce_devices = loss_node.raw_ctx.get_sorted()
                 if allreduce_devices not in comm_groups:
                     if len(allreduce_devices) == mpi_comm.nrank:

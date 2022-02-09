@@ -121,7 +121,7 @@ class DataParallel(Strategy):
         if aggregate is None:
             aggregate = 'ps' if self.settings.enable_PS else 'allreduce'
         aggregate = aggregate.lower()
-        assert aggregate in ('allreduce', 'ps', 'parallax')
+        assert aggregate in ('allreduce', 'ps', 'hybrid')
         self.aggregate = aggregate
 
         # TODO: check communicators; check in a method, or in executor, or in base class?

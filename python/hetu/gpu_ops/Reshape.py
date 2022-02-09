@@ -84,7 +84,7 @@ class Array_ReshapeOp(Op):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
 
     def get_output_shape(self):
-        output_shape = self.output_shape.copy()
+        output_shape = list(self.output_shape)
         if hasattr(self, 'splits'):
             if self.raw_ctx is None or not self.raw_ctx.is_mp():
                 del self.splits

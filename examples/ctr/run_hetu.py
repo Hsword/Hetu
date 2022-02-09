@@ -1,10 +1,7 @@
 import hetu as ht
-from hetu.launcher import launch
 
-import os
 import os.path as osp
 import numpy as np
-import yaml
 import time
 import argparse
 from tqdm import tqdm
@@ -62,34 +59,9 @@ def worker(args):
                 y_test_val, test_y_predicted))
         return np.mean(test_loss), np.mean(test_acc), np.mean(test_auc)
 
-    def get_current_shard(data):
-        if args.comm is not None:
-            part_size = data.shape[0] // nrank
-            start = part_size * rank
-            end = start + part_size if rank != nrank - 1 else data.shape[0]
-            return data[start:end]
-        else:
-            return data
-
     batch_size = 128
     dataset = args.dataset
     model = args.model
-    device_id = 0
-
-    if args.comm == 'PS':
-        rank = ht.get_worker_communicate().rank()
-        nrank = int(os.environ['DMLC_NUM_WORKER'])
-        device_id = rank % 8
-    elif args.comm == 'Hybrid':
-        comm = ht.wrapped_mpi_nccl_init()
-        device_id = comm.dev_id
-        rank = comm.rank
-        nrank = int(os.environ['DMLC_NUM_WORKER'])
-    elif args.comm == 'AllReduce':
-        comm = ht.wrapped_mpi_nccl_init()
-        device_id = comm.dev_id
-        rank = comm.rank
-        nrank = comm.nrank
 
     if dataset == 'criteo':
         # define models for criteo
@@ -104,35 +76,35 @@ def worker(args):
             from models.load_data import process_sampled_criteo_data
             dense, sparse, labels = process_sampled_criteo_data()
         if isinstance(dense, tuple):
-            dense_input = ht.dataloader_op([[get_current_shard(dense[0]), batch_size, 'train'], [
-                                           get_current_shard(dense[1]), batch_size, 'validate']])
-            sparse_input = ht.dataloader_op([[get_current_shard(sparse[0]), batch_size, 'train'], [
-                                            get_current_shard(sparse[1]), batch_size, 'validate']])
-            y_ = ht.dataloader_op([[get_current_shard(labels[0]), batch_size, 'train'], [
-                                  get_current_shard(labels[1]), batch_size, 'validate']])
+            dense_input = ht.dataloader_op([[dense[0], batch_size, 'train'], [
+                                           dense[1], batch_size, 'validate']])
+            sparse_input = ht.dataloader_op([[sparse[0], batch_size, 'train'], [
+                                            sparse[1], batch_size, 'validate']])
+            y_ = ht.dataloader_op([[labels[0], batch_size, 'train'], [
+                                  labels[1], batch_size, 'validate']])
         else:
             dense_input = ht.dataloader_op(
-                [[get_current_shard(dense), batch_size, 'train']])
+                [[dense, batch_size, 'train']])
             sparse_input = ht.dataloader_op(
-                [[get_current_shard(sparse), batch_size, 'train']])
+                [[sparse, batch_size, 'train']])
             y_ = ht.dataloader_op(
-                [[get_current_shard(labels), batch_size, 'train']])
+                [[labels, batch_size, 'train']])
     elif dataset == 'adult':
         from models.load_data import load_adult_data
         x_train_deep, x_train_wide, y_train, x_test_deep, x_test_wide, y_test = load_adult_data()
         dense_input = [
             ht.dataloader_op([
-                [get_current_shard(x_train_deep[:, i]), batch_size, 'train'],
-                [get_current_shard(x_test_deep[:, i]), batch_size, 'validate'],
+                [x_train_deep[:, i], batch_size, 'train'],
+                [x_test_deep[:, i], batch_size, 'validate'],
             ]) for i in range(12)
         ]
         sparse_input = ht.dataloader_op([
-            [get_current_shard(x_train_wide), batch_size, 'train'],
-            [get_current_shard(x_test_wide), batch_size, 'validate'],
+            [x_train_wide, batch_size, 'train'],
+            [x_test_wide, batch_size, 'validate'],
         ])
         y_ = ht.dataloader_op([
-            [get_current_shard(y_train), batch_size, 'train'],
-            [get_current_shard(y_test), batch_size, 'validate'],
+            [y_train, batch_size, 'train'],
+            [y_test, batch_size, 'validate'],
         ])
     else:
         raise NotImplementedError
@@ -145,14 +117,15 @@ def worker(args):
         print('Validation enabled...')
         eval_nodes['validate'] = [loss, prediction, y_]
     executor_log_path = osp.join(osp.dirname(osp.abspath(__file__)), 'logs')
-    executor = ht.Executor(eval_nodes, ctx=ht.gpu(device_id),
-                           comm_mode=args.comm, cstable_policy=args.cache, bsp=args.bsp, cache_bound=args.bound, seed=123, log_path=executor_log_path)
+    strategy = ht.dist.DataParallel(aggregate=args.comm)
+    executor = ht.Executor(eval_nodes, dist_strategy=strategy, cstable_policy=args.cache,
+                           bsp=args.bsp, cache_bound=args.bound, seed=123, log_path=executor_log_path)
 
     if args.all and dataset == 'criteo':
         print('Processing all data...')
         file_path = '%s_%s' % ({None: 'local', 'PS': 'ps', 'Hybrid': 'hybrid', 'AllReduce': 'allreduce'}[
                                args.comm], args.raw_model)
-        file_path += '%d.log' % rank if args.comm else '.log'
+        file_path += '%d.log' % executor.rank if args.comm else '.log'
         file_path = osp.join(osp.dirname(
             osp.abspath(__file__)), 'logs', file_path)
         log_file = open(file_path, 'w')
@@ -209,8 +182,6 @@ if __name__ == '__main__':
                         help="bsp 0, asp -1, ssp > 0")
     parser.add_argument("--cache", default=None, help="cache policy")
     parser.add_argument("--bound", default=100, help="cache bound")
-    parser.add_argument("--config", type=str, default=osp.join(osp.dirname(
-        osp.abspath(__file__)), "./settings/local_s1_w4.yml"), help="configuration for ps")
     parser.add_argument("--nepoch", type=int, default=-1,
                         help="num of epochs, each train 1/10 data")
     args = parser.parse_args()
@@ -220,18 +191,4 @@ if __name__ == '__main__':
     args.dataset = args.model.split('_')[-1]
     args.raw_model = args.model
     args.model = model
-    if args.comm is None:
-        worker(args)
-    elif args.comm == 'Hybrid':
-        settings = yaml.load(open(args.config).read(), Loader=yaml.FullLoader)
-        value = settings['shared']
-        os.environ['DMLC_ROLE'] = 'worker'
-        for k, v in value.items():
-            os.environ[k] = str(v)
-        worker(args)
-    elif args.comm == 'PS':
-        launch(worker, args)
-    elif args.comm == 'AllReduce':
-        worker(args)
-    else:
-        raise NotImplementedError
+    worker(args)

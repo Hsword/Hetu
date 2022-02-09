@@ -1,0 +1,1 @@
+* The scripts in this directory, except for `*_wdl_adult.sh` scripts, are deprecated. We have implemented `heturun` command to launch distributed deep learning tasks. Please refer to `*_wdl_adult.sh` scripts for the usage of `heturun`.
