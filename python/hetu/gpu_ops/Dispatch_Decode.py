@@ -113,8 +113,6 @@ class DispatchDecodeGradientGateOp(Op):
 
 
     def infer_shape(self, input_shapes):
-#        print("decode_grad_gate_input_shapes[0]:", input_shapes[0])
-#        print("decode_grad_gate_input_shapes[1]:", input_shapes[1])
         return input_shapes[-1] # shape of gate
 
     def gradient(self, output_grad):
