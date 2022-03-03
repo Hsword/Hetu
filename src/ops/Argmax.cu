@@ -8,8 +8,8 @@ __global__ void argmax_kernel(const float *input, float *output, size_t befor_di
         return;
     }
     size_t start_ptr = ind_x * reduce_dim_size * after_dim_size + ind_y;
-    size_t offset = after_dim_size;
-    size_t offset_cnt = reduce_dim_size;
+    // size_t offset = after_dim_size;
+    // size_t offset_cnt = reduce_dim_size;
     
     size_t output_ptr = ind_x * after_dim_size + ind_y;
     
@@ -37,17 +37,15 @@ __global__ void argmax_kernel(const float *input, float *output, size_t befor_di
 }
 
 int DLGpuArgmax(const DLArrayHandle input, DLArrayHandle output, int dim,
-                DLStreamHandle stream_handle = NULL) {
+                DLStreamHandle stream_handle) {
     assert(input->ndim == output->ndim - 1);
     size_t befor_dim_size, reduce_dim_size, after_dim_size;
     befor_dim_size = reduce_dim_size = after_dim_size = 1;
     for (int i = 0; i < input->ndim; ++i) {
         if(i < dim) befor_dim_size *= input->shape[i];
-        else if (i == dim) reduce_dim_size == input->shape[i];
+        else if (i == dim) reduce_dim_size = input->shape[i];
         else after_dim_size *= input->shape[i];
     }
-    size_t reduce_dim_size = input->shape[dim];
-
     const float *input_data = (const float *)input->data;
     float *output_data = (float *)output->data;
 

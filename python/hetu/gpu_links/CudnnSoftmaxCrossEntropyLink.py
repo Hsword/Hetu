@@ -9,6 +9,8 @@ def CuDNN_softmax_cross_entropy(y, y_, out, stream=None):
     assert isinstance(y, _nd.NDArray)
     assert isinstance(y_, _nd.NDArray)
     assert isinstance(out, _nd.NDArray)
+#    print("cudnn_softmax_x_ent_y.shape=",y.shape)
+#    print("cudnn_softmax_x_ent_y_.shape=",y_.shape)
     _LIB.CuDNN_DLGpuSoftmaxEntropy(
         y.handle, y_.handle, out.handle, stream.handle if stream else None)
 

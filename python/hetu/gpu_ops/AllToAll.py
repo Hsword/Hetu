@@ -2,7 +2,6 @@ from __future__ import absolute_import
 import numpy as np
 from .Node import Op
 from .. import ndarray
-from ..gpu_links import nccl_alltoall
 from ..stream import create_event_handle
 
 

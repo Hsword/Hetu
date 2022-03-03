@@ -27,6 +27,7 @@ class SoftmaxCrossEntropyOp(Op):
         else:
             if self.use_cudnn:
                 CuDNN_softmax_cross_entropy(y, y_, output_val, stream_handle)
+#softmax_cross_entropy(y, y_, output_val, stream_handle)
             else:
                 softmax_cross_entropy(y, y_, output_val, stream_handle)
 

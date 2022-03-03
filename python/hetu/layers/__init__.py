@@ -9,3 +9,6 @@ from .relu import Relu
 from .reshape import Reshape
 from .sequence import Sequence
 from .sum import SumLayers
+from .TopGate import TopKGate
+from .BalanceGate import BalanceAssignmentGate
+from .moe_layer import Expert, MoELayer

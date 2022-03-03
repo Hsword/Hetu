@@ -8,6 +8,8 @@ from .. import ndarray as _nd
 def CuDNN_softmax(in_arr, out_arr, stream=None):
     assert isinstance(in_arr, _nd.NDArray)
     assert isinstance(out_arr, _nd.NDArray)
+#    print("softmax_fwd_in_arr_shape=", in_arr.shape)
+#    print("softmax_fwd_out_arr_shape=", out_arr.shape)
     _LIB.CuDNN_DLGpuSoftmax(in_arr.handle, out_arr.handle,
                             stream.handle if stream else None)
 
@@ -16,5 +18,9 @@ def CuDNN_softmax_gradient(y_arr, grad_arr, out_arr, stream=None):
     assert isinstance(y_arr, _nd.NDArray)
     assert isinstance(grad_arr, _nd.NDArray)
     assert isinstance(out_arr, _nd.NDArray)
+#    print("softmax_bwd_y_arr_shape=", y_arr.shape)
+#    print("softmax_bwd_grad_arr_shape", grad_arr.shape)
+#    print("out_arr_shape", out_arr.shape)
     _LIB.CuDNN_DLGpuSoftmaxGradient(
         y_arr.handle, grad_arr.handle, out_arr.handle, stream.handle if stream else None)
+#    print("22222222222222222222222")
