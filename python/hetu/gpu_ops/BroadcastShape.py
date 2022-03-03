@@ -45,7 +45,6 @@ class BroadcastShapeOp(Op):
         assert len(input_shape) <= output_ndim
         diff = output_ndim - len(input_shape)
         if self.add_axes:
-#print("input_shapes[0]:", input_shapes[0])
             assert diff == len(self.add_axes) or input_shape == [1]
             assert all([axis < output_ndim for axis in self.add_axes])
             in_ind = 0

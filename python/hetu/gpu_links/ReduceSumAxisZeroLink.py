@@ -8,8 +8,6 @@ from .. import ndarray as _nd
 def reduce_sum_axis_zero(in_arr, out_arr, workspace_arr, stream=None):
     assert isinstance(in_arr, _nd.NDArray)
     assert isinstance(out_arr, _nd.NDArray)
-#    print("in_arr.shape=",in_arr.shape)
-#    print("out_arr.shape=",out_arr.shape)
     _LIB.DLGpuReduceSumAxisZero(
         in_arr.handle, out_arr.handle, stream.handle if stream else None)
 

@@ -48,7 +48,6 @@ class ReduceSumOp(Op):
         assert len(input_shapes) == 1
         input_shape = list(input_shapes[0])
         
-#print(self.temp_name, input_shapes[0])
         if hasattr(self, 'grad_node'):
             self.grad_node.target_shape = tuple(input_shape)
             add_axes = []

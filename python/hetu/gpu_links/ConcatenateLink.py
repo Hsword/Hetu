@@ -7,7 +7,6 @@ from .. import ndarray as _nd
 
 def concatenate(in_arrs, out_arr, axis=0, stream=None):
     assert isinstance(out_arr, _nd.NDArray)
-#    print("concat_output_shape: ", out_arr.shape)
     offset = 0
     for arr in in_arrs:
         assert isinstance(arr, _nd.NDArray)

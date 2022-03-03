@@ -725,7 +725,6 @@ class SubExecutor(object):
                 elif len(grouping_nodes) > 0:
                     make_group()
                 input_shapes = [self.node_to_shape_map[n] for n in node.inputs]
-#print("node_name:", node.name)
                 cur_shape = node.infer_shape(input_shapes)
                 self.node_to_shape_map[node] = cur_shape if cur_shape is None else tuple(
                     cur_shape)
@@ -946,8 +945,6 @@ class SubExecutor(object):
                 self.config.d2h_stream.sync()
             if self.config.nccl_stream is not None:
                 self.nccl_stream.sync()"""
-#if node.ctx == ht.gpu(0):
-#               print(node.name)
             if self.dynamic_memory:
                 # allocate memory for the node when dynamic_memory == True
                 if self.node_ref_cnt[node] is None or need_reallocation:

@@ -9,8 +9,6 @@ def softmax_cross_entropy(in_arr_a, in_arr_b, out_arr, stream=None):
     assert isinstance(in_arr_a, _nd.NDArray)
     assert isinstance(in_arr_b, _nd.NDArray)
     assert isinstance(out_arr, _nd.NDArray)
-#    print("softmax_xent_in_arr_a.shape=", in_arr_a.shape)
-#    print("softmax_xent_in_arr_b.shape=", in_arr_b.shape)
     _LIB.DLGpuSoftmaxCrossEntropy(
         in_arr_a.handle, in_arr_b.handle, out_arr.handle, stream.handle if stream else None)
 
