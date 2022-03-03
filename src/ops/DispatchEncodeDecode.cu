@@ -114,11 +114,9 @@ int DLGpuDispatchEncodeTop1(const DLArrayHandle input, DLArrayHandle indices_s, 
     threads.x = 1024;
     blocks.x = 128;
 
-//printf("here!!!!\n");
 
 
     if(stream_handle){
-  //      printf("here2\n");
         encode_forward<<<blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
                 input_data, indices_s_data, location_s_data, output_data, capacity, samples, model_dim);
     }else{

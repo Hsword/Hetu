@@ -170,7 +170,6 @@ class AddOp(Op):
                 else:
                     self.compute = self._compute_on_gpu_broadcast_to_1
                 self.check_reset = True
-#output = input_shapes[0]
         return output
 
     def forward_hook(self, config):

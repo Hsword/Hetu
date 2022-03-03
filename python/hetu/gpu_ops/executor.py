@@ -1035,14 +1035,6 @@ class SubExecutor(object):
                 end_node(n)
             grouping_nodes.clear()
         for node in self.computing_nodes:
-            """if self.config.comp_stream is not None:
-                self.config.comp_stream.sync()
-            if self.config.h2d_stream is not None:
-                self.config.h2d_stream.sync()
-            if self.config.d2h_stream is not None:
-                self.config.d2h_stream.sync()
-            if self.config.nccl_stream is not None:
-                self.nccl_stream.sync()"""
             if self.dynamic_memory:
                 # allocate memory for the node when dynamic_memory == True
                 if self.node_ref_cnt[node] is None or need_reallocation:

@@ -57,16 +57,10 @@ class MoELayer(BaseLayer):
             arange_array_val = np.arange(self.num_tokens).astype(np.float32)
             self.arange_array = ht.Variable(value=arange_array_val, name='arange_array',trainable=False)
 
-        
-        print("name: ",self.name, " num_local_experts: ", self.num_local_experts, " num_tokens: ", self.num_tokens, " embed_dim: ", self.embed_dim, " all2all_size: ", self.all2all_size)
-
-
     def __call__(self, x):
         if self.name == 'MoELayer':
             reshaped_input = ht.array_reshape_op(x, [-1, self.embed_dim]) 
             l_aux, indices_s, location_s,gates_s, capacity =self.gate(reshaped_input)
-#            ones_helper = ht.oneslike_op(gates_s[0])
-#            dispatch_input = reshaped_input
                        
             if self.top==1:
                 dispatch_input =  ht.dispatch_encode_op(reshaped_input, indices_s, location_s, capacity, self.num_local_experts*self.all2all_size)
