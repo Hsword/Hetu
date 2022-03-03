@@ -60,7 +60,16 @@ from .Dispatch import dispatch
 from .TopKIdx import topk_idx_op
 from .TopKVal import topk_val_op
 from .Scatter import scatter_op
-
+from .Cumsum import cumsum_with_bias_op
+from .AllToAll import alltoall_op
+from .Dispatch_Encode import dispatch_encode_op
+from .Dispatch_Encode import dispatch_encode_gradient_op
+from .Dispatch_Decode import dispatch_decode_gradient_data_op
+from .Dispatch_Decode import dispatch_decode_gradient_gate_op
+from .Dispatch_Decode import dispatch_decode_op
+from .BalanceAssignment import balance_assignment_op
+from .Indexing import indexing_op
+from .Scatter1D import scatter1d_op, scatter1d_grad_op
 
 __all__ = [
     'Executor',
@@ -166,5 +175,16 @@ __all__ = [
     'dispatch',
     'topk_idx_op',
     'topk_val_op',
-    'scatter_op'
+    'scatter_op',
+    'cumsum_with_bias_op',
+    'alltoall_op',
+    'dispatch_encode_op',
+    'dispatch_decode_op',
+    'dispatch_encode_gradient_op',
+    'dispatch_decode_gradient_data_op',
+    'dispatch_decode_gradient_gate_op',
+    'balance_assignment_op',
+    'indexing_op',
+    'scatter1d_op',
+    'scatter1d_grad_op'
 ]

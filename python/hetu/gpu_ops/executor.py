@@ -9,6 +9,7 @@ from ..cpu_links import array_set as cpu_array_set
 from .Variable import PlaceholderOp  # add for optimizer
 from ..dataloader import DataloaderOp, GNNDataLoaderOp
 from .AllReduceCommunicate import AllReduceCommunicateOp
+from .AllToAll import AllToAllOp
 from .ParameterServerCommunicate import ParameterServerCommunicateOp, ParameterServerSparsePullOp, parameterServerSparsePull_op
 from .Sum import sum_op
 from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp
@@ -31,6 +32,8 @@ from functools import reduce
 import ctypes
 import os
 from time import time
+
+import hetu as ht
 
 def path_to_lib(name):
     curr_path = os.path.dirname(os.path.abspath(os.path.expanduser(__file__)))
@@ -722,6 +725,7 @@ class SubExecutor(object):
                 elif len(grouping_nodes) > 0:
                     make_group()
                 input_shapes = [self.node_to_shape_map[n] for n in node.inputs]
+#print("node_name:", node.name)
                 cur_shape = node.infer_shape(input_shapes)
                 self.node_to_shape_map[node] = cur_shape if cur_shape is None else tuple(
                     cur_shape)
@@ -934,6 +938,16 @@ class SubExecutor(object):
                 node.event.record(p2p_stream)
             grouping_nodes.clear()
         for node in self.computing_nodes:
+            """if self.config.comp_stream is not None:
+                self.config.comp_stream.sync()
+            if self.config.h2d_stream is not None:
+                self.config.h2d_stream.sync()
+            if self.config.d2h_stream is not None:
+                self.config.d2h_stream.sync()
+            if self.config.nccl_stream is not None:
+                self.nccl_stream.sync()"""
+#if node.ctx == ht.gpu(0):
+#               print(node.name)
             if self.dynamic_memory:
                 # allocate memory for the node when dynamic_memory == True
                 if self.node_ref_cnt[node] is None or need_reallocation:
@@ -943,7 +957,6 @@ class SubExecutor(object):
                     if n not in self.node_to_arr_map:
                         self.node_memory_plan(n)
                         self.node_ref_cnt[n] = self.node_outdeg_map[n]
-
             if node.on_cpu and isinstance(self.node_to_arr_map[node], ndarray.NDArray):
                 if DNNL_LIB['cpu_ArraySet'] and not isinstance(node, DataD2HOp):
                     cpu_array_set(self.node_to_arr_map[node], 0.0)
@@ -977,7 +990,7 @@ class SubExecutor(object):
                     # Please take care at this part.
                     node.compute(input_vals, node_val, self.d2h_stream)
 
-                elif isinstance(node, AllReduceCommunicateOp):
+                elif isinstance(node, (AllReduceCommunicateOp, AllToAllOp)):
                     node.compute(input_vals, node_val, self.nccl_stream)
 
                 elif isinstance(node, DataH2DOp):

@@ -7,6 +7,7 @@ from ..gpu_links import reduce_sum
 class ReduceSumOp(Op):
     def __init__(self, node_A, axes, keepdims=False, ctx=None):
         super().__init__(ReduceSumOp, [node_A], ctx)
+        self.temp_name = node_A.name
         if axes is not None:
             if isinstance(axes, int):
                 axes = [axes]
@@ -46,6 +47,8 @@ class ReduceSumOp(Op):
         assert self.axes is not None and self.keepdims is not None
         assert len(input_shapes) == 1
         input_shape = list(input_shapes[0])
+        
+#print(self.temp_name, input_shapes[0])
         if hasattr(self, 'grad_node'):
             self.grad_node.target_shape = tuple(input_shape)
             add_axes = []

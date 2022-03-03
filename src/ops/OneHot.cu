@@ -17,7 +17,6 @@ __global__ void onehot_kernel(const float *input, float *output,
 
 int DLGpuOneHot(const DLArrayHandle input, DLArrayHandle output,
                 DLStreamHandle stream_handle = NULL) {
-    assert(input->ndim == output->ndim - 1);
     size_t insize = 1;
     for (int i = 0; i < input->ndim; ++i) {
         insize *= input->shape[i];

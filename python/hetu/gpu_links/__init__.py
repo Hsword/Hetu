@@ -60,6 +60,11 @@ from .ScatterLink import *
 from .MinusElewiseLink import *
 from .CloneLink import *
 from .MaxLink import *
+from .CumSumLink import *
+from .DispatchEncode import *
+from .DispatchDecode import *
+from .IndexingLink import *
+from .Scatter1DLink import *
 
 __all__ = [
     'matrix_elementwise_add_by_const',
@@ -161,5 +166,18 @@ __all__ = [
     'scatter',
     'matrix_elementwise_minus',
     'clone',
-    'max'
+    'max',
+    'cumsum_with_bias',
+    'dispatch_encode_top1',
+    'dispatch_encode_top2',
+    'dispatch_decode_top1',
+    'dispatch_encode_top2',
+    'indexing',
+    'indexing_grad',
+    'scatter1d',
+    'scatter1d_grad',
+    'dispatch_encode_top1_gradient',
+    'dispatch_decode_top1_gradient_data',
+    'dispatch_decode_top1_gradient_gate',
+    'dispatch_decode_top2_gradient_data'
 ]

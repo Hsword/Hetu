@@ -11,6 +11,7 @@ class Array_ReshapeOp(Op):
     def __init__(self, node_A, output_shape, ctx=None):
         super().__init__(Array_ReshapeOp, [node_A], ctx)
         self.output_shape = output_shape
+#print(node_A.name, "??????")
 
     def compute(self, input_vals, output_val, stream_handle=None):
 

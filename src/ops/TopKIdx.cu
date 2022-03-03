@@ -26,7 +26,7 @@ __global__ void topkidx_kernel(float* input, float* output_idx, int k, int col){
 }
 
 int DLGpuTopKIdx(const DLArrayHandle input, DLArrayHandle output_idx, int k, 
-        DLStreamHandle stream_handle = NULL){
+        DLStreamHandle stream_handle){
     assert(output_idx->ndim == 2); 
     assert(input->ndim == 2); // In MoE we need to find the topk of 2-d tensor on the last dimention
     int ROW = input->shape[0];

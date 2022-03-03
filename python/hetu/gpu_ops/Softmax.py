@@ -39,6 +39,8 @@ class SoftmaxOp(Op):
         return [softmax_gradient_op(self, output_grad, ctx=self.raw_ctx)]
 
     def infer_shape(self, input_shapes):
+#    print(input_shapes[0])
+#        assert 1==-1
         assert len(input_shapes) == 1
         return input_shapes[0]
 

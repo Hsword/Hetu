@@ -40,6 +40,7 @@ class BroadcastToOp(Op):
         keepdims = [False] * diff
         input_shape = [1] * diff + input_shape
         for i in range(output_ndim):
+#print("input_shape[",i,"]=",input_shape[i],"  output_shape[",i,"]=",output_shape[i])
             assert output_shape[i] > 0 and isinstance(output_shape[i], int)
             assert input_shape[i] == 1 or input_shape[i] == output_shape[i]
             if i >= diff and input_shape[i] == 1 and output_shape[i] > 1:
