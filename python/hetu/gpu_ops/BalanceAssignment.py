@@ -7,39 +7,6 @@ import hetu as ht
 
 def balanced_assignment_cpu(scores, max_iterations):
     pass
-""" scores=scores.T
-    num_workers, num_jobs = scores.size()
-    jobs_per_worker = num_jobs/num_workers
-    value=deepcopy(scores)
-
-    iterations = 0
-    eps = (scores.max() - scores.min())/50
-    if eps<1e-4:
-        eps = 1e-4
-
-    cost = np.zeros((1, num_jobs))
-    jobs_with_bids = np.zeros(num_workers, bool)
-    while not jobs_with_bids.all():
-        top_values, top_index = torch.topk(val, k=jobs_per_worker+1, dim=1)#np
-        bid_increments = top_values[:, :-1]-top_values[:, -1:]+eps
-        bids=torch.scatter(torch.zeros(num_workers, num_jobs), dim=1, index=top_index[:, :-1], src=bid_increments)
-
-        if 0<iterations<max_iterations:
-            bids[top_bidders, jobs_with_bids]=eps
-
-        top_bids, top_bidders=bids.max(dim=0)
-        jobs_with_bids=top_bids>0
-
-        top_bidders=top_bidders[jobs_with_bids]
-        cost=cost+top_bids
-        value=scores-cost
-
-        if iterations<max_iterations:
-            value[top_bidders, jobs_with_bids]=1e12
-        else:
-            value[top_bidders, jobs_with_bids]=scores[top_bidders, jobs_with_bids]
-        oterations+=1
-    return top_index[:,:-1].reshape(-1)"""
     
 def balanced_assignment_gpu(scores, output, max_iterations, stream_handle):
     ctx = scores.ctx

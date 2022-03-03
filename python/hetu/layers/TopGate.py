@@ -66,7 +66,6 @@ class TopKGate(BaseLayer):
         self.initializer = initializer
         self.name = name
 
-        print("TOPGATE: ", "embed_dim: ", self.embed_dim, " num_experts: ", self.num_experts)
 
     def __call__(self, x):
         weight_var = self.initializer(
