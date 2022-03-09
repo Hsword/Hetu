@@ -491,10 +491,7 @@ HETUSYS_EXTERN_C {
                                   DLStreamHandle stream_handle);
 
     int DLGpuTranspose(const DLArrayHandle input, DLArrayHandle output,
-                       int *perm, DLStreamHandle stream_handle);
-    int DLGpuTransposeSimple(const DLArrayHandle input, DLArrayHandle output,
-                             const DLArrayHandle gpu_buffer,
-                             DLStreamHandle stream_handle);
+                       const int *permutation, const int64_t *src_dims, DLStreamHandle stream_handle);
 
     int CuSparse_DLGpuCsrmv(
         const DLArrayHandle data_handle, const DLArrayHandle row_handle,
@@ -573,13 +570,7 @@ HETUSYS_EXTERN_C {
     int DLGpuDropout(const DLArrayHandle input, const float dropout,
                      DLArrayHandle output, unsigned long long *pseed,
                      DLStreamHandle stream_handle);
-
     
-    int DLGpuDropoutGradient_recompute(const DLArrayHandle grad, const float dropout,
-                             DLArrayHandle output, unsigned long long seed,
-                             DLStreamHandle stream_handle);
-    
-
     int DLGpuDropoutGradient(const DLArrayHandle grad, const DLArrayHandle fw_output,
                          const float dropout, DLArrayHandle output,
                          DLStreamHandle stream_handle);

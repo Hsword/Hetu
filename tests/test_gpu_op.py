@@ -1309,25 +1309,6 @@ def test_reduce_mean():
     unit_test((2, 3, 1, 5, 6), [1, 2, 4])
 
 
-def test_dropout_recompute():
-    ctx = ht.gpu(0)
-    # shapeX = (16, 8, 99, 64)
-    shapeX = (10,)
-    x = np.random.uniform(0, 10, size=shapeX).astype(np.float32)
-    arr_x = ht.array(x, ctx=ctx)
-    arr_y = ht.empty(shapeX, ctx=ctx)
-    dropout_rate = 0.6
-    import ctypes
-    seed = ctypes.c_ulonglong(0)
-    print(x)
-    gpu_op.dropout(arr_x, dropout_rate, arr_y, seed)
-    print(arr_y.asnumpy())
-    print(seed)
-    gpu_op.dropout_gradient_recompute(arr_x, dropout_rate, arr_y, seed)
-    print(arr_y.asnumpy())
-    print(seed)
-
-
 def test_dropout():
     ctx = ht.gpu(0)
     shapeX = (200,500)
@@ -1491,7 +1472,6 @@ test_broadcast_shape()
 test_reduce_sum()
 test_reduce_mean()
 test_dropout()
-test_dropout_recompute()
 test_dropout2d()
 test_instance_norm2d()
 test_instance_norm2d_gradient()

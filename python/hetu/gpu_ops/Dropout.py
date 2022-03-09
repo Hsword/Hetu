@@ -5,9 +5,7 @@ import numpy as np
 from .._base import DNNL_LIB
 from ..cpu_links import dropout as cpu_dropout
 from ..cpu_links import dropout_gradient as cpu_dropout_gradient
-from ..gpu_links import dropout_gradient, dropout_gradient_recompute
-from ..gpu_links import dropout
-
+from ..gpu_links import dropout_gradient, dropout
 
 class DropoutOp(Op):
     def __init__(self, node_in, keep_prob, recompute = True, inplace = False, ctx=None):
@@ -67,8 +65,7 @@ class Dropout_Gradient_recomputeOp(Op):
                 output_val[:] = dropout_np_gradient(
                     input_vals[0].asnumpy(), self.keep_prob, self.forward_node.mask)
         else:
-            dropout_gradient_recompute(input_vals[0], 1 - self.keep_prob,
-                             output_val, self.seed, stream_handle)
+            dropout(input_vals[0], 1 - self.keep_prob, output_val, self.seed, stream_handle)
 
     def gradient(self, output_grad):
         raise NotImplementedError
