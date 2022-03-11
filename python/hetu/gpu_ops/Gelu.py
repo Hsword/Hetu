@@ -17,9 +17,12 @@ class GeluOp(Op):
             if DNNL_LIB['DnnlGelu']:
                 cpu_gelu(input_vals[0], output_val)
             else:
-                output_val[:] = np.maximum(input_vals[0].asnumpy(), 0)
+                from scipy.stats import norm
+                x = input_vals[0].asnumpy()
+                output_val[:] = x*norm.cdf(x)
         else:
             gelu(input_vals[0], output_val, stream_handle)
+            
     def gradient(self, output_grad):
         return [gelu_gradient_op(self.inputs[0], output_grad, ctx=self.raw_ctx)]
 
@@ -43,8 +46,14 @@ class GeluGradientOp(Op):
             if DNNL_LIB['DnnlGelu_Gradient']:
                 cpu_gelu_gradient(input_vals[0], input_vals[1], output_val)
             else:
-                output_val[:] = (np.sign(input_vals[0].asnumpy()) +
-                                 1) * 0.5 * input_vals[1].asnumpy()
+                from scipy.stats import norm
+                M_2_SQRTPI = 2/np.sqrt(np.pi) 
+                M_SQRT1_2 = np.sqrt(1/2)
+                kBeta = M_2_SQRTPI * M_SQRT1_2 * 0.5   
+                x = input_vals[0].asnumpy() 
+                cdf = norm.cdf(x)
+                pdf = np.exp((-0.5)*x*x)*kBeta
+                output[:] = input_vals[1].asnumpy() *(cdf + x*pdf)
         else:
             gelu_gradient(input_vals[0], input_vals[1],
                           output_val, stream_handle)

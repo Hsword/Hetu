@@ -1,4 +1,4 @@
-include_directories(header common memory_pool)
+include_directories(header common memory_pool cub)
 include_directories(SYSTEM ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 
 aux_source_directory(common COMMON_SRC)

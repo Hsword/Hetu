@@ -41,6 +41,8 @@ DNNL_LIB = {
     'DnnlMaxPool_Gradient': False,
     'DnnlRelu': False,
     'DnnlRelu_Gradient': False,
+    'DnnlGelu': False,
+    'DnnlGelu_Gradient': False,
     'DnnlBatchNorm': False,
     'DnnlBatchNorm_Gradient': False,
     'DnnlBatchNorm_Inference': False,

@@ -1,331 +1,1681 @@
+#include <cub.cuh>
+#include <math_constants.h>
+#include <assert.h>
 #include "gpu_runtime.h"
 
-__global__ void minus_mean_n_square_kernel(const float *in_arr,
-                                           const float *mean, float *out_arr,
-                                           int last_dim, size_t size) {
-    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= size)
-        return;
-    float temp = in_arr[ind] - mean[ind / last_dim];
-    out_arr[ind] = temp * temp;
+constexpr int kWarpSize = 32;
+#define CUDA_1D_KERNEL_LOOP_T(type, i, n)                                                      \
+  for (type i = blockIdx.x * blockDim.x + threadIdx.x, step = blockDim.x * gridDim.x; i < (n); \
+       i += step)
+       
+template<typename T>
+struct SumOp {
+  __device__ __forceinline__ T operator()(const T& a, const T& b) const { return a + b; }
+};
+
+template<typename T>
+struct MaxOp {
+  __device__ __forceinline__ T operator()(const T& a, const T& b) const { return max(a, b); }
+};
+
+template<template<typename> class ReductionOp, typename T, int thread_group_width = kWarpSize>
+__inline__ __device__ T WarpAllReduce(T val) {
+  for (int mask = thread_group_width / 2; mask > 0; mask /= 2) {
+    val = ReductionOp<T>()(val, __shfl_xor_sync(0xffffffff, val, mask));
+  }
+  return val;
 }
 
-__global__ void rescale_kernel(const float *in_arr, const float *mean_arr,
-                               const float *var_arr, const float *ln_scale,
-                               const float *ln_bias, float *out_arr,
-                               int last_dim, float eps, size_t size) {
-    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= size)
-        return;
-    size_t mo_ind = ind / last_dim;
-    size_t ln_ind = ind % last_dim;
-    out_arr[ind] = (in_arr[ind] - mean_arr[mo_ind])
-                       / sqrtf(var_arr[mo_ind] + eps) * ln_scale[ln_ind]
-                   + ln_bias[ln_ind];
+template<template<typename> class ReductionOp, typename T, int block_size>
+__inline__ __device__ T BlockAllReduce(T val) {
+  typedef cub::BlockReduce<T, block_size> BlockReduce;
+  __shared__ typename BlockReduce::TempStorage temp_storage;
+  __shared__ T result_broadcast;
+  T result = BlockReduce(temp_storage).Reduce(val, ReductionOp<T>());
+  if (threadIdx.x == 0) { result_broadcast = result; }
+  __syncthreads();
+  return result_broadcast;
 }
 
-int DLGpuLayerNormalization(const DLArrayHandle in_arr,
-                            const DLArrayHandle ln_scale,
+template<typename T>
+__inline__ __device__ T Div(T a, T b);
+
+template<>
+__inline__ __device__ float Div<float>(float a, float b) {
+#ifdef OF_LAYER_NORM_USE_FAST_MATH
+  return __fdividef(a, b);
+#else
+  return a / b;
+#endif
+}
+
+template<>
+__inline__ __device__ double Div<double>(double a, double b) {
+  return a / b;
+}
+
+template<typename T>
+__inline__ __device__ T Rsqrt(T x);
+
+template<>
+__inline__ __device__ float Rsqrt<float>(float x) {
+#ifdef OF_LAYER_NORM_USE_FAST_MATH
+  return __frsqrt_rn(x);
+#else
+  return rsqrt(x);
+#endif
+}
+
+template<>
+__inline__ __device__ double Rsqrt<double>(double x) {
+  return rsqrt(x);
+}
+
+template<class Func>
+inline cudaError_t GetNumBlocks(Func func, int64_t block_size, size_t dynamic_smem_size,
+                                int64_t max_blocks, int64_t waves, int* num_blocks) {
+  int dev;
+  {
+    cudaError_t err = cudaGetDevice(&dev);
+    if (err != cudaSuccess) { return err; }
+  }
+  int sm_count;
+  {
+    cudaError_t err = cudaDeviceGetAttribute(&sm_count, cudaDevAttrMultiProcessorCount, dev);
+    if (err != cudaSuccess) { return err; }
+  }
+  int max_active_blocks;
+  {
+    cudaError_t err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_active_blocks, func,
+                                                                    block_size, dynamic_smem_size);
+  }
+  *num_blocks =
+      std::max<int>(1, std::min<int64_t>(max_blocks, sm_count * max_active_blocks * waves));
+  return cudaSuccess;
+}
+
+template<typename T>
+struct DefaultComputeType {
+  using type = T;
+};
+
+template<>
+struct DefaultComputeType<half> {
+  using type = float;
+};
+
+#if CUDA_VERSION >= 11000
+template<>
+struct DefaultComputeType<nv_bfloat16> {
+  using type = float;
+};
+#endif  // CUDA_VERSION >= 11000
+
+template<typename T, int N>
+struct GetPackType {
+  using type = typename std::aligned_storage<N * sizeof(T), N * sizeof(T)>::type;
+};
+
+template<typename T, int N>
+using PackType = typename GetPackType<T, N>::type;
+
+template<typename T, int N>
+union Pack {
+  static_assert(sizeof(PackType<T, N>) == sizeof(T) * N, "");
+  __device__ Pack() {
+    // do nothing
+  }
+  PackType<T, N> storage;
+  T elem[N];
+};
+
+template<typename SRC, typename DST>
+struct DirectLoad {
+  DirectLoad(const SRC* src, int64_t row_size) : src(src), row_size(row_size) {}
+  template<int N>
+  __device__ void load(DST* dst, int64_t row, int64_t col) const {
+    Pack<SRC, N> pack;
+    const int64_t offset = (row * row_size + col) / N;
+    pack.storage = *(reinterpret_cast<const PackType<SRC, N>*>(src) + offset);
+#pragma unroll
+    for (int i = 0; i < N; ++i) { dst[i] = static_cast<DST>(pack.elem[i]); }
+  }
+  const SRC* src;
+  int64_t row_size;
+};
+
+template<typename SRC, typename DST>
+struct DirectStore {
+  DirectStore(DST* dst, int64_t row_size) : dst(dst), row_size(row_size) {}
+  template<int N>
+  __device__ void store(const SRC* src, int64_t row, int64_t col) {
+    Pack<DST, N> pack;
+    const int64_t offset = (row * row_size + col) / N;
+#pragma unroll
+    for (int i = 0; i < N; ++i) { pack.elem[i] = static_cast<DST>(src[i]); }
+    *(reinterpret_cast<PackType<DST, N>*>(dst) + offset) = pack.storage;
+  }
+  DST* dst;
+  int64_t row_size;
+};
+
+template<typename T>
+inline __device__ void WelfordCombine(T val, T* mean, T* m2, T* count) {
+  // Use Welford Online algorithem to compute mean and variance
+  // For more details you can refer to:
+  // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
+  *count += 1;
+  T delta1 = val - *mean;
+  *mean += Div(delta1, *count);
+  T delta2 = val - *mean;
+  *m2 += delta1 * delta2;
+}
+
+template<typename T>
+inline __device__ void WelfordCombine(T b_mean, T b_m2, T b_count, T* mean, T* m2, T* count) {
+  if (b_count == 0) { return; }
+  T new_count = *count + b_count;
+  T nb_over_n = Div(b_count, new_count);
+  T delta = b_mean - *mean;
+  *mean += delta * nb_over_n;
+  *m2 += b_m2 + delta * delta * (*count) * nb_over_n;
+  *count = new_count;
+}
+
+template<typename T, int thread_group_width = kWarpSize>
+__inline__ __device__ void WelfordWarpReduce(T thread_mean, T thread_m2, T thread_count, T* mean,
+                                             T* m2, T* count) {
+  *mean = thread_mean;
+  *m2 = thread_m2;
+  *count = thread_count;
+  for (int mask = thread_group_width / 2; mask > 0; mask /= 2) {
+    T b_mean = __shfl_down_sync(0xffffffff, *mean, mask);
+    T b_m2 = __shfl_down_sync(0xffffffff, *m2, mask);
+    T b_count = __shfl_down_sync(0xffffffff, *count, mask);
+    WelfordCombine(b_mean, b_m2, b_count, mean, m2, count);
+  }
+}
+
+template<typename T, int thread_group_width = kWarpSize>
+__inline__ __device__ void WelfordWarpAllReduce(T thread_mean, T thread_m2, T thread_count, T* mean,
+                                                T* m2, T* count) {
+  WelfordWarpReduce<T, thread_group_width>(thread_mean, thread_m2, thread_count, mean, m2, count);
+  *mean = __shfl_sync(0xffffffff, *mean, 0, thread_group_width);
+  *m2 = __shfl_sync(0xffffffff, *m2, 0, thread_group_width);
+  *count = __shfl_sync(0xffffffff, *count, 0, thread_group_width);
+}
+
+template<typename T>
+__inline__ __device__ void WelfordBlockAllReduce(T thread_mean, T thread_m2, T thread_count,
+                                                 T* result_mean, T* result_m2, T* result_count) {
+  __shared__ T mean_shared[kWarpSize];
+  __shared__ T m2_shared[kWarpSize];
+  __shared__ T count_shared[kWarpSize];
+  __shared__ T mean_result_broadcast;
+  __shared__ T m2_result_broadcast;
+  __shared__ T count_result_broadcast;
+  const int lid = threadIdx.x % kWarpSize;
+  const int wid = threadIdx.x / kWarpSize;
+  T warp_mean = 0;
+  T warp_m2 = 0;
+  T warp_count = 0;
+  WelfordWarpReduce(thread_mean, thread_m2, thread_count, &warp_mean, &warp_m2, &warp_count);
+  __syncthreads();
+  if (lid == 0) {
+    mean_shared[wid] = warp_mean;
+    m2_shared[wid] = warp_m2;
+    count_shared[wid] = warp_count;
+  }
+  __syncthreads();
+  if (wid == 0) {
+    if (threadIdx.x < blockDim.x / kWarpSize) {
+      warp_mean = mean_shared[lid];
+      warp_m2 = m2_shared[lid];
+      warp_count = count_shared[lid];
+    } else {
+      warp_mean = static_cast<T>(0);
+      warp_m2 = static_cast<T>(0);
+      warp_count = static_cast<T>(0);
+    }
+    __syncwarp();
+    T block_mean = 0;
+    T block_m2 = 0;
+    T block_count = 0;
+    WelfordWarpReduce(warp_mean, warp_m2, warp_count, &block_mean, &block_m2, &block_count);
+    if (lid == 0) {
+      mean_result_broadcast = block_mean;
+      m2_result_broadcast = block_m2;
+      count_result_broadcast = block_count;
+    }
+  }
+  __syncthreads();
+  *result_mean = mean_result_broadcast;
+  *result_m2 = m2_result_broadcast;
+  *result_count = count_result_broadcast;
+}
+
+template<typename LOAD, typename STORE, typename ComputeType, int pack_size, int cols_per_thread,
+         int thread_group_width, int rows_per_access, bool padding>
+__global__ void LayerNormWarpImpl(LOAD load, STORE store, const int64_t rows, const int64_t cols,
+                                  const double epsilon, ComputeType* mean,
+                                  ComputeType* inv_variance) {
+  static_assert(cols_per_thread % pack_size == 0, "");
+  static_assert(thread_group_width <= kWarpSize, "");
+  static_assert(kWarpSize % thread_group_width == 0, "");
+  constexpr int num_packs = cols_per_thread / pack_size;
+  assert(cols <= cols_per_thread * thread_group_width);
+  ComputeType buf[rows_per_access][cols_per_thread];
+  const int64_t global_thread_group_id = blockIdx.x * blockDim.y + threadIdx.y;
+  const int64_t num_global_thread_group = gridDim.x * blockDim.y;
+  const int64_t lane_id = threadIdx.x;
+  const int64_t step = num_global_thread_group * rows_per_access;
+  for (int64_t row = global_thread_group_id * rows_per_access; row < rows; row += step) {
+    ComputeType thread_mean[rows_per_access];
+    ComputeType thread_m2[rows_per_access];
+    ComputeType thread_count[rows_per_access];
+#pragma unroll
+    for (int row_id = 0; row_id < rows_per_access; ++row_id) {
+      thread_mean[row_id] = 0;
+      thread_m2[row_id] = 0;
+      thread_count[row_id] = 0;
+      ComputeType* row_buf = buf[row_id];
+#pragma unroll
+      for (int pack_id = 0; pack_id < num_packs; ++pack_id) {
+        const int col = (pack_id * thread_group_width + lane_id) * pack_size;
+        const int pack_offset = pack_id * pack_size;
+        if (!padding || col < cols) {
+          load.template load<pack_size>(row_buf + pack_offset, row + row_id, col);
+#pragma unroll
+          for (int i = 0; i < pack_size; ++i) {
+            WelfordCombine(row_buf[pack_offset + i], thread_mean + row_id, thread_m2 + row_id,
+                           thread_count + row_id);
+          }
+        } else {
+#pragma unroll
+          for (int i = 0; i < pack_size; ++i) { row_buf[pack_offset + i] = 0; }
+        }
+      }
+    }
+    ComputeType warp_mean[rows_per_access];
+    ComputeType warp_m2[rows_per_access];
+    ComputeType warp_count[rows_per_access];
+#pragma unroll
+    for (int row_id = 0; row_id < rows_per_access; ++row_id) {
+      int global_row_id = row + row_id;
+      ComputeType* row_buf = buf[row_id];
+      WelfordWarpAllReduce<ComputeType, thread_group_width>(
+          thread_mean[row_id], thread_m2[row_id], thread_count[row_id], warp_mean + row_id,
+          warp_m2 + row_id, warp_count + row_id);
+      ComputeType row_mean = warp_mean[row_id];
+      ComputeType row_variance =
+          max(Div(warp_m2[row_id], warp_count[row_id]), static_cast<ComputeType>(0.0));
+      ComputeType row_inv_var = Rsqrt(row_variance + static_cast<ComputeType>(epsilon));
+      if (lane_id == 0) {
+        mean[global_row_id] = row_mean;
+        inv_variance[global_row_id] = row_inv_var;
+      }
+#pragma unroll
+      for (int i = 0; i < cols_per_thread; ++i) {
+        row_buf[i] = (row_buf[i] - row_mean) * row_inv_var;
+      }
+#pragma unroll
+      for (int i = 0; i < num_packs; ++i) {
+        const int col = (i * thread_group_width + lane_id) * pack_size;
+        if (!padding || col < cols) {
+          store.template store<pack_size>(row_buf + i * pack_size, global_row_id, col);
+        }
+      }
+    }
+  }
+}
+
+template<typename LOAD, typename STORE, typename ComputeType, int pack_size, int cols_per_thread,
+         int thread_group_width, int rows_per_access, bool padding>
+inline cudaError_t LaunchLayerNormWarpImpl(cudaStream_t stream, LOAD load, STORE store,
+                                           const int64_t rows, const int64_t cols,
+                                           const double epsilon, ComputeType* mean,
+                                           ComputeType* inv_variance) {
+  constexpr int block_size = 128;
+  constexpr int waves = 32;
+  static_assert(block_size % thread_group_width == 0, "");
+  constexpr int thread_groups_per_block = block_size / thread_group_width;
+  dim3 block_dim(thread_group_width, thread_groups_per_block);
+  const int64_t num_blocks =
+      (rows / rows_per_access + thread_groups_per_block - 1) / thread_groups_per_block;
+  int grid_dim_x;
+  {
+    cudaError_t err =
+        GetNumBlocks(LayerNormWarpImpl<LOAD, STORE, ComputeType, pack_size, cols_per_thread,
+                                       thread_group_width, rows_per_access, padding>,
+                     block_size, 0, num_blocks, waves, &grid_dim_x);
+    if (err != cudaSuccess) { return err; }
+  }
+  LayerNormWarpImpl<LOAD, STORE, ComputeType, pack_size, cols_per_thread, thread_group_width,
+                    rows_per_access, padding>
+      <<<grid_dim_x, block_dim, 0, stream>>>(load, store, rows, cols, epsilon, mean, inv_variance);
+  return cudaPeekAtLastError();
+}
+
+template<typename LOAD, typename STORE, typename ComputeType, int pack_size, int cols_per_thread,
+         int thread_group_width, int rows_per_access>
+inline cudaError_t DispatchLayerNormWarpImplPadding(cudaStream_t stream, LOAD load, STORE store,
+                                                    const int64_t rows, const int64_t cols,
+                                                    const double epsilon, ComputeType* mean,
+                                                    ComputeType* inv_variance) {
+  if (cols == cols_per_thread * thread_group_width) {
+    return LaunchLayerNormWarpImpl<LOAD, STORE, ComputeType, pack_size, cols_per_thread,
+                                   thread_group_width, rows_per_access, false>(
+        stream, load, store, rows, cols, epsilon, mean, inv_variance);
+  } else {
+    return LaunchLayerNormWarpImpl<LOAD, STORE, ComputeType, pack_size, cols_per_thread,
+                                   thread_group_width, rows_per_access, true>(
+        stream, load, store, rows, cols, epsilon, mean, inv_variance);
+  }
+}
+
+template<typename LOAD, typename STORE, typename ComputeType, int pack_size>
+typename std::enable_if<pack_size == 1, cudaError_t>::type DispatchLayerNormWarpImplCols(
+    cudaStream_t stream, LOAD load, STORE store, const int64_t rows, const int64_t cols,
+    const double epsilon, ComputeType* mean, ComputeType* inv_variance) {
+  if (cols <= 0) { return cudaErrorInvalidValue; }
+#define DEFINE_ONE_ELIF(thread_group_width)                                                   \
+  else if (cols <= (thread_group_width)*pack_size) {                                          \
+    if (rows % 2 == 0) {                                                                      \
+      return DispatchLayerNormWarpImplPadding<LOAD, STORE, ComputeType, pack_size, pack_size, \
+                                              thread_group_width, 2>(                         \
+          stream, load, store, rows, cols, epsilon, mean, inv_variance);                      \
+    } else {                                                                                  \
+      return DispatchLayerNormWarpImplPadding<LOAD, STORE, ComputeType, pack_size, pack_size, \
+                                              thread_group_width, 1>(                         \
+          stream, load, store, rows, cols, epsilon, mean, inv_variance);                      \
+    }                                                                                         \
+  }
+  DEFINE_ONE_ELIF(1)
+  DEFINE_ONE_ELIF(2)
+  DEFINE_ONE_ELIF(4)
+  DEFINE_ONE_ELIF(8)
+  DEFINE_ONE_ELIF(16)
+  DEFINE_ONE_ELIF(32)
+#undef DEFINE_ONE_ELIF
+#define DEFINE_ONE_ELIF(col)                                                                     \
+  else if (cols <= (col)*kWarpSize) {                                                            \
+    return DispatchLayerNormWarpImplPadding<LOAD, STORE, ComputeType, pack_size, col, kWarpSize, \
+                                            1>(stream, load, store, rows, cols, epsilon, mean,   \
+                                               inv_variance);                                    \
+  }
+  DEFINE_ONE_ELIF(2)
+  DEFINE_ONE_ELIF(3)
+  DEFINE_ONE_ELIF(4)
+  DEFINE_ONE_ELIF(5)
+  DEFINE_ONE_ELIF(6)
+  DEFINE_ONE_ELIF(7)
+  DEFINE_ONE_ELIF(8)
+  DEFINE_ONE_ELIF(9)
+  DEFINE_ONE_ELIF(10)
+  DEFINE_ONE_ELIF(11)
+  DEFINE_ONE_ELIF(12)
+  DEFINE_ONE_ELIF(13)
+  DEFINE_ONE_ELIF(14)
+  DEFINE_ONE_ELIF(15)
+  DEFINE_ONE_ELIF(16)
+  DEFINE_ONE_ELIF(17)
+  DEFINE_ONE_ELIF(18)
+  DEFINE_ONE_ELIF(19)
+  DEFINE_ONE_ELIF(20)
+  DEFINE_ONE_ELIF(21)
+  DEFINE_ONE_ELIF(22)
+  DEFINE_ONE_ELIF(23)
+  DEFINE_ONE_ELIF(24)
+  DEFINE_ONE_ELIF(25)
+  DEFINE_ONE_ELIF(26)
+  DEFINE_ONE_ELIF(27)
+  DEFINE_ONE_ELIF(28)
+  DEFINE_ONE_ELIF(29)
+  DEFINE_ONE_ELIF(30)
+  DEFINE_ONE_ELIF(31)
+  DEFINE_ONE_ELIF(32)
+#undef DEFINE_ONE_ELIF
+  else {
+    return cudaErrorInvalidValue;
+  }
+}
+
+template<typename LOAD, typename STORE, typename ComputeType, int pack_size>
+typename std::enable_if<pack_size == 2, cudaError_t>::type DispatchLayerNormWarpImplCols(
+    cudaStream_t stream, LOAD load, STORE store, const int64_t rows, const int64_t cols,
+    const double epsilon, ComputeType* mean, ComputeType* inv_variance) {
+  if (cols <= 0) { return cudaErrorInvalidValue; }
+#define DEFINE_ONE_ELIF(thread_group_width)                                                   \
+  else if (cols <= (thread_group_width)*pack_size) {                                          \
+    if (rows % 2 == 0) {                                                                      \
+      return DispatchLayerNormWarpImplPadding<LOAD, STORE, ComputeType, pack_size, pack_size, \
+                                              thread_group_width, 2>(                         \
+          stream, load, store, rows, cols, epsilon, mean, inv_variance);                      \
+    } else {                                                                                  \
+      return DispatchLayerNormWarpImplPadding<LOAD, STORE, ComputeType, pack_size, pack_size, \
+                                              thread_group_width, 1>(                         \
+          stream, load, store, rows, cols, epsilon, mean, inv_variance);                      \
+    }                                                                                         \
+  }
+  DEFINE_ONE_ELIF(1)
+  DEFINE_ONE_ELIF(2)
+  DEFINE_ONE_ELIF(4)
+  DEFINE_ONE_ELIF(8)
+  DEFINE_ONE_ELIF(16)
+  DEFINE_ONE_ELIF(32)
+#undef DEFINE_ONE_ELIF
+#define DEFINE_ONE_ELIF(col)                                                                     \
+  else if (cols <= (col)*kWarpSize) {                                                            \
+    return DispatchLayerNormWarpImplPadding<LOAD, STORE, ComputeType, pack_size, col, kWarpSize, \
+                                            1>(stream, load, store, rows, cols, epsilon, mean,   \
+                                               inv_variance);                                    \
+  }
+  DEFINE_ONE_ELIF(4)
+  DEFINE_ONE_ELIF(6)
+  DEFINE_ONE_ELIF(8)
+  DEFINE_ONE_ELIF(10)
+  DEFINE_ONE_ELIF(12)
+  DEFINE_ONE_ELIF(14)
+  DEFINE_ONE_ELIF(16)
+  DEFINE_ONE_ELIF(18)
+  DEFINE_ONE_ELIF(20)
+  DEFINE_ONE_ELIF(22)
+  DEFINE_ONE_ELIF(24)
+  DEFINE_ONE_ELIF(26)
+  DEFINE_ONE_ELIF(28)
+  DEFINE_ONE_ELIF(30)
+  DEFINE_ONE_ELIF(32)
+#undef DEFINE_ONE_ELIF
+  else {
+    return cudaErrorInvalidValue;
+  }
+}
+template<typename LOAD, typename STORE, typename ComputeType, int pack_size>
+typename std::enable_if<pack_size == 4, cudaError_t>::type DispatchLayerNormWarpImplCols(
+    cudaStream_t stream, LOAD load, STORE store, const int64_t rows, const int64_t cols,
+    const double epsilon, ComputeType* mean, ComputeType* inv_variance) {
+  if (cols <= 0) { return cudaErrorInvalidValue; }
+#define DEFINE_ONE_ELIF(thread_group_width)                                                   \
+  else if (cols <= (thread_group_width)*pack_size) {                                          \
+    if (rows % 2 == 0) {                                                                      \
+      return DispatchLayerNormWarpImplPadding<LOAD, STORE, ComputeType, pack_size, pack_size, \
+                                              thread_group_width, 2>(                         \
+          stream, load, store, rows, cols, epsilon, mean, inv_variance);                      \
+    } else {                                                                                  \
+      return DispatchLayerNormWarpImplPadding<LOAD, STORE, ComputeType, pack_size, pack_size, \
+                                              thread_group_width, 1>(                         \
+          stream, load, store, rows, cols, epsilon, mean, inv_variance);                      \
+    }                                                                                         \
+  }
+  DEFINE_ONE_ELIF(1)
+  DEFINE_ONE_ELIF(2)
+  DEFINE_ONE_ELIF(4)
+  DEFINE_ONE_ELIF(8)
+  DEFINE_ONE_ELIF(16)
+  DEFINE_ONE_ELIF(32)
+#undef DEFINE_ONE_ELIF
+#define DEFINE_ONE_ELIF(col)                                                                     \
+  else if (cols <= (col)*kWarpSize) {                                                            \
+    return DispatchLayerNormWarpImplPadding<LOAD, STORE, ComputeType, pack_size, col, kWarpSize, \
+                                            1>(stream, load, store, rows, cols, epsilon, mean,   \
+                                               inv_variance);                                    \
+  }
+  DEFINE_ONE_ELIF(8)
+  DEFINE_ONE_ELIF(12)
+  DEFINE_ONE_ELIF(16)
+  DEFINE_ONE_ELIF(20)
+  DEFINE_ONE_ELIF(24)
+  DEFINE_ONE_ELIF(28)
+  DEFINE_ONE_ELIF(32)
+#undef DEFINE_ONE_ELIF
+  else {
+    return cudaErrorInvalidValue;
+  }
+}
+
+template<typename LOAD, typename STORE, typename ComputeType>
+struct DispatchLayerNormWarpImplPackSize {
+  cudaError_t operator()(cudaStream_t stream, LOAD load, STORE store, const int64_t rows,
+                         const int64_t cols, const double epsilon, ComputeType* mean,
+                         ComputeType* inv_variance) {
+    if (cols % 4 == 0) {
+      return DispatchLayerNormWarpImplCols<LOAD, STORE, ComputeType, 4>(
+          stream, load, store, rows, cols, epsilon, mean, inv_variance);
+    } else if (cols % 2 == 0) {
+      return DispatchLayerNormWarpImplCols<LOAD, STORE, ComputeType, 2>(
+          stream, load, store, rows, cols, epsilon, mean, inv_variance);
+    } else {
+      return DispatchLayerNormWarpImplCols<LOAD, STORE, ComputeType, 1>(
+          stream, load, store, rows, cols, epsilon, mean, inv_variance);
+    }
+  }
+};
+
+template<typename LOAD, typename STORE, typename ComputeType>
+inline cudaError_t DispatchLayerNormWarpImpl(cudaStream_t stream, LOAD load, STORE store,
+                                             const int64_t rows, const int64_t cols,
+                                             const double epsilon, ComputeType* mean,
+                                             ComputeType* inv_variance) {
+  return DispatchLayerNormWarpImplPackSize<LOAD, STORE, ComputeType>()(
+      stream, load, store, rows, cols, epsilon, mean, inv_variance);
+}
+
+template<typename LOAD, typename STORE, typename ComputeType, int pack_size, int block_size>
+__global__ void LayerNormBlockSMemImpl(LOAD load, STORE store, const int64_t rows,
+                                       const int64_t cols, const double epsilon, ComputeType* mean,
+                                       ComputeType* inv_variance) {
+  extern __shared__ __align__(sizeof(double)) unsigned char shared_buf[];
+  auto* buf = reinterpret_cast<ComputeType*>(shared_buf);
+  const int tid = threadIdx.x;
+  assert(cols % pack_size == 0);
+  const int num_packs = static_cast<int>(cols) / pack_size;
+  for (int64_t row = blockIdx.x; row < rows; row += gridDim.x) {
+    ComputeType thread_mean = 0;
+    ComputeType thread_m2 = 0;
+    ComputeType thread_count = 0;
+    for (int pack_id = tid; pack_id < num_packs; pack_id += block_size) {
+      ComputeType pack[pack_size];
+      load.template load<pack_size>(pack, row, pack_id * pack_size);
+#pragma unroll
+      for (int i = 0; i < pack_size; ++i) {
+        buf[i * num_packs + pack_id] = pack[i];
+        WelfordCombine(pack[i], &thread_mean, &thread_m2, &thread_count);
+      }
+    }
+    ComputeType row_mean = 0;
+    ComputeType row_m2 = 0;
+    ComputeType row_count = 0;
+    WelfordBlockAllReduce<ComputeType>(thread_mean, thread_m2, thread_count, &row_mean, &row_m2,
+                                       &row_count);
+    ComputeType row_variance = max(Div(row_m2, row_count), static_cast<ComputeType>(0.0));
+    ComputeType row_inv_var = Rsqrt(row_variance + static_cast<ComputeType>(epsilon));
+    if (threadIdx.x == 0) {
+      mean[row] = row_mean;
+      inv_variance[row] = row_inv_var;
+    }
+    for (int pack_id = tid; pack_id < num_packs; pack_id += block_size) {
+      ComputeType pack[pack_size];
+#pragma unroll
+      for (int i = 0; i < pack_size; ++i) {
+        pack[i] = (buf[i * num_packs + pack_id] - row_mean) * row_inv_var;
+      }
+      store.template store<pack_size>(pack, row, pack_id * pack_size);
+    }
+  }
+}
+
+template<typename LOAD, typename STORE, typename ComputeType, int pack_size, int block_size>
+inline cudaError_t LaunchLayerNormBlockSMemImpl(cudaStream_t stream, LOAD load, STORE store,
+                                                int smem, const int64_t rows, const int64_t cols,
+                                                const double epsilon, ComputeType* mean,
+                                                ComputeType* inv_variance) {
+  constexpr int waves = 32;
+  int grid_dim_x;
+  {
+    cudaError_t err =
+        GetNumBlocks(LayerNormBlockSMemImpl<LOAD, STORE, ComputeType, pack_size, block_size>,
+                     block_size, smem, rows, waves, &grid_dim_x);
+    if (err != cudaSuccess) { return err; }
+  }
+  LayerNormBlockSMemImpl<LOAD, STORE, ComputeType, pack_size, block_size>
+      <<<grid_dim_x, block_size, smem, stream>>>(load, store, rows, cols, epsilon, mean,
+                                                 inv_variance);
+  return cudaPeekAtLastError();
+}
+
+template<typename LOAD, typename STORE, typename ComputeType, int pack_size>
+inline cudaError_t TryDispatchLayerNormBlockSMemImplBlockSize(
+    cudaStream_t stream, LOAD load, STORE store, const int64_t rows, const int64_t cols,
+    const double epsilon, ComputeType* mean, ComputeType* inv_variance, bool* success) {
+  constexpr int block_size_conf_1 = 128;
+  constexpr int block_size_conf_2 = 256;
+  constexpr int block_size_conf_3 = 512;
+  constexpr int block_size_conf_4 = 1024;
+  const size_t smem = cols * sizeof(ComputeType);
+  int max_active_blocks_conf_1;
+
+  {
+    cudaError_t err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+        &max_active_blocks_conf_1,
+        LayerNormBlockSMemImpl<LOAD, STORE, ComputeType, pack_size, block_size_conf_1>,
+        block_size_conf_1, smem);
+    if (err != cudaSuccess) { return err; }
+  }
+  if (max_active_blocks_conf_1 <= 0) {
+    *success = false;
+    return cudaSuccess;
+  }
+  int max_active_blocks_conf_4;
+  {
+    cudaError_t err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+        &max_active_blocks_conf_4,
+        LayerNormBlockSMemImpl<LOAD, STORE, ComputeType, pack_size, block_size_conf_4>,
+        block_size_conf_4, smem);
+    if (err != cudaSuccess) { return err; }
+  }
+
+  if (max_active_blocks_conf_4 == max_active_blocks_conf_1) {
+    *success = true;
+    return LaunchLayerNormBlockSMemImpl<LOAD, STORE, ComputeType, pack_size, block_size_conf_4>(
+        stream, load, store, smem, rows, cols, epsilon, mean, inv_variance);
+  }
+  int max_active_blocks_conf_3;
+  {
+    cudaError_t err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+        &max_active_blocks_conf_3,
+        LayerNormBlockSMemImpl<LOAD, STORE, ComputeType, pack_size, block_size_conf_3>,
+        block_size_conf_3, smem);
+    if (err != cudaSuccess) { return err; }
+  }
+
+  if (max_active_blocks_conf_3 == max_active_blocks_conf_1) {
+    *success = true;
+    return LaunchLayerNormBlockSMemImpl<LOAD, STORE, ComputeType, pack_size, block_size_conf_3>(
+        stream, load, store, smem, rows, cols, epsilon, mean, inv_variance);
+  }
+  int max_active_blocks_conf_2;
+  {
+    cudaError_t err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+        &max_active_blocks_conf_2,
+        LayerNormBlockSMemImpl<LOAD, STORE, ComputeType, pack_size, block_size_conf_2>,
+        block_size_conf_2, smem);
+    if (err != cudaSuccess) { return err; }
+  }
+
+  if (max_active_blocks_conf_2 == max_active_blocks_conf_1) {
+    *success = true;
+    return LaunchLayerNormBlockSMemImpl<LOAD, STORE, ComputeType, pack_size, block_size_conf_2>(
+        stream, load, store, smem, rows, cols, epsilon, mean, inv_variance);
+  }
+  *success = true;
+  return LaunchLayerNormBlockSMemImpl<LOAD, STORE, ComputeType, pack_size, block_size_conf_1>(
+      stream, load, store, smem, rows, cols, epsilon, mean, inv_variance);
+}
+
+template<typename LOAD, typename STORE, typename ComputeType>
+struct TryDispatchLayerNormBlockSMemImplPackSize {
+  cudaError_t operator()(cudaStream_t stream, LOAD load, STORE store, const int64_t rows,
+                         const int64_t cols, const double epsilon, ComputeType* mean,
+                         ComputeType* inv_variance, bool* success) {
+    if (cols % 4 == 0) {
+      return TryDispatchLayerNormBlockSMemImplBlockSize<LOAD, STORE, ComputeType, 4>(
+          stream, load, store, rows, cols, epsilon, mean, inv_variance, success);
+    } else if (cols % 2 == 0) {
+      return TryDispatchLayerNormBlockSMemImplBlockSize<LOAD, STORE, ComputeType, 2>(
+          stream, load, store, rows, cols, epsilon, mean, inv_variance, success);
+    } else {
+      return TryDispatchLayerNormBlockSMemImplBlockSize<LOAD, STORE, ComputeType, 1>(
+          stream, load, store, rows, cols, epsilon, mean, inv_variance, success);
+    }
+  }
+};
+
+template<typename LOAD, typename STORE, typename ComputeType>
+inline cudaError_t TryDispatchLayerNormBlockSMemImpl(cudaStream_t stream, LOAD load, STORE store,
+                                                     const int64_t rows, const int64_t cols,
+                                                     const double epsilon, ComputeType* mean,
+                                                     ComputeType* inv_variance, bool* success) {
+  return TryDispatchLayerNormBlockSMemImplPackSize<LOAD, STORE, ComputeType>()(
+      stream, load, store, rows, cols, epsilon, mean, inv_variance, success);
+}
+
+template<typename LOAD, typename STORE, typename ComputeType, int pack_size, int block_size>
+__global__ void LayerNormBlockUncachedImpl(LOAD load, STORE store, const int64_t rows,
+                                           const int64_t cols, const double epsilon,
+                                           ComputeType* mean, ComputeType* inv_variance) {
+  const int tid = threadIdx.x;
+  assert(cols % pack_size == 0);
+  const int num_packs = static_cast<int>(cols) / pack_size;
+  for (int64_t row = blockIdx.x; row < rows; row += gridDim.x) {
+    ComputeType thread_mean = 0;
+    ComputeType thread_m2 = 0;
+    ComputeType thread_count = 0;
+    for (int pack_id = tid; pack_id < num_packs; pack_id += block_size) {
+      ComputeType pack[pack_size];
+      load.template load<pack_size>(pack, row, pack_id * pack_size);
+#pragma unroll
+      for (int i = 0; i < pack_size; ++i) {
+        WelfordCombine(pack[i], &thread_mean, &thread_m2, &thread_count);
+      }
+    }
+    ComputeType row_mean = 0;
+    ComputeType row_m2 = 0;
+    ComputeType row_count = 0;
+    WelfordBlockAllReduce<ComputeType>(thread_mean, thread_m2, thread_count, &row_mean, &row_m2,
+                                       &row_count);
+    ComputeType row_variance = max(Div(row_m2, row_count), static_cast<ComputeType>(0.0));
+    ComputeType row_inv_var = Rsqrt(row_variance + static_cast<ComputeType>(epsilon));
+    if (threadIdx.x == 0) {
+      mean[row] = row_mean;
+      inv_variance[row] = row_inv_var;
+    }
+    for (int pack_id = tid; pack_id < num_packs; pack_id += block_size) {
+      ComputeType pack[pack_size];
+      const int pack_offset = pack_id * pack_size;
+      load.template load<pack_size>(pack, row, pack_offset);
+#pragma unroll
+      for (int i = 0; i < pack_size; ++i) { pack[i] = (pack[i] - row_mean) * row_inv_var; }
+      store.template store<pack_size>(pack, row, pack_offset);
+    }
+  }
+}
+
+template<typename LOAD, typename STORE, typename ComputeType, int pack_size>
+inline cudaError_t LaunchLayerNormBlockUncachedImpl(cudaStream_t stream, LOAD load, STORE store,
+                                                    const int64_t rows, const int64_t cols,
+                                                    const double epsilon, ComputeType* mean,
+                                                    ComputeType* inv_variance) {
+  constexpr int block_size = 1024;
+  constexpr int waves = 32;
+  int grid_dim_x;
+  {
+    cudaError_t err =
+        GetNumBlocks(LayerNormBlockUncachedImpl<LOAD, STORE, ComputeType, pack_size, block_size>,
+                     block_size, 0, rows, waves, &grid_dim_x);
+    if (err != cudaSuccess) { return err; }
+  }
+  LayerNormBlockUncachedImpl<LOAD, STORE, ComputeType, pack_size, block_size>
+      <<<grid_dim_x, block_size, 0, stream>>>(load, store, rows, cols, epsilon, mean, inv_variance);
+  return cudaPeekAtLastError();
+}
+
+template<typename LOAD, typename STORE, typename ComputeType>
+struct DispatchLayerNormBlockUncachedImplPackSize {
+  cudaError_t operator()(cudaStream_t stream, LOAD load, STORE store, const int64_t rows,
+                         const int64_t cols, const double epsilon, ComputeType* mean,
+                         ComputeType* inv_variance) {
+    if (cols % 4 == 0) {
+      return LaunchLayerNormBlockUncachedImpl<LOAD, STORE, ComputeType, 4>(
+          stream, load, store, rows, cols, epsilon, mean, inv_variance);
+    } else if (cols % 2 == 0) {
+      return LaunchLayerNormBlockUncachedImpl<LOAD, STORE, ComputeType, 2>(
+          stream, load, store, rows, cols, epsilon, mean, inv_variance);
+    } else {
+      return LaunchLayerNormBlockUncachedImpl<LOAD, STORE, ComputeType, 1>(
+          stream, load, store, rows, cols, epsilon, mean, inv_variance);
+    }
+  }
+};
+
+template<typename LOAD, typename STORE, typename ComputeType>
+inline cudaError_t DispatchLayerNormBlockUncachedImpl(cudaStream_t stream, LOAD load, STORE store,
+                                                      const int64_t rows, const int64_t cols,
+                                                      const double epsilon, ComputeType* mean,
+                                                      ComputeType* inv_variance) {
+  return DispatchLayerNormBlockUncachedImplPackSize<LOAD, STORE, ComputeType>()(
+      stream, load, store, rows, cols, epsilon, mean, inv_variance);
+}
+
+template<typename LOAD, typename STORE, typename ComputeType>
+cudaError_t DispatchLayerNorm(cudaStream_t stream, LOAD load, STORE store, const int64_t rows,
+                  const int64_t cols, const double epsilon, ComputeType* mean,
+                  ComputeType* inv_variance) {
+  if (cols <= 1024) {
+    return DispatchLayerNormWarpImpl<LOAD, STORE, ComputeType>(stream, load, store, rows, cols,
+                                                               epsilon, mean, inv_variance);
+  } else {
+    bool dispatch_smem_impl_success;
+    {
+      cudaError_t err = TryDispatchLayerNormBlockSMemImpl<LOAD, STORE, ComputeType>(
+          stream, load, store, rows, cols, epsilon, mean, inv_variance,
+          &dispatch_smem_impl_success);
+      if (err != cudaSuccess) { return err; }
+    }
+    if (!dispatch_smem_impl_success) {
+      return DispatchLayerNormBlockUncachedImpl<LOAD, STORE, ComputeType>(
+          stream, load, store, rows, cols, epsilon, mean, inv_variance);
+    }
+    return cudaSuccess;
+  }
+}
+
+/*
+LayerNormGrad dx:
+normalized = (x - mean) * inv_var
+sum_stats1 = sum(scaled_dy)
+sum_stats2 = sum(scaled_dy * normalized)
+dx = cols * dy - sum_stats1 - normalized * sum_stats2
+dx *= inv_var / cols
+*/
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType,
+         int pack_size, int cols_per_thread, int thread_group_width, int rows_per_access,
+         bool padding>
+__global__ void LayerNormGradWarpImpl(LOAD_X load_x, LOAD_SCALED_DY load_scaled_dy, STORE store,
+                                      const ComputeType* mean, const ComputeType* inv_variance,
+                                      const int64_t rows, const int64_t cols) {
+  static_assert(cols_per_thread % pack_size == 0, "");
+  constexpr int pack_per_thread = cols_per_thread / pack_size;
+  assert(cols <= cols_per_thread * thread_group_width);
+  static_assert(thread_group_width <= kWarpSize, "");
+  static_assert(kWarpSize % thread_group_width == 0, "");
+  ComputeType normalized_buf[rows_per_access][cols_per_thread];
+  ComputeType dy_buf[rows_per_access][cols_per_thread];
+  const ComputeType one_over_cols = static_cast<ComputeType>(1.0) / static_cast<ComputeType>(cols);
+  const int64_t global_thread_group_id = blockIdx.x * blockDim.y + threadIdx.y;
+  const int64_t num_global_thread_group = gridDim.x * blockDim.y;
+  const int lane_id = threadIdx.x;
+  const int64_t step = num_global_thread_group * rows_per_access;
+  for (int64_t row = global_thread_group_id * rows_per_access; row < rows; row += step) {
+    ComputeType sum_stats1[rows_per_access];
+    ComputeType sum_stats2[rows_per_access];
+    ComputeType inv_variance_buf[rows_per_access];
+#pragma unroll
+    for (int row_id = 0; row_id < rows_per_access; ++row_id) {
+      const int global_row_id = row + row_id;
+      ComputeType mean_val = mean[global_row_id];
+      inv_variance_buf[row_id] = inv_variance[global_row_id];
+      sum_stats1[row_id] = 0;
+      sum_stats2[row_id] = 0;
+      ComputeType* row_normalized_buf = normalized_buf[row_id];
+      ComputeType* row_dy_buf = dy_buf[row_id];
+#pragma unroll
+      for (int pack_id = 0; pack_id < pack_per_thread; ++pack_id) {
+        const int col = (pack_id * thread_group_width + lane_id) * pack_size;
+        const int pack_offset = pack_id * pack_size;
+        if (!padding || col < cols) {
+          load_x.template load<pack_size>(row_normalized_buf + pack_offset, global_row_id, col);
+          load_scaled_dy.template load<pack_size>(row_dy_buf + pack_offset, global_row_id, col);
+#pragma unroll
+          for (int i = 0; i < pack_size; ++i) {
+            const int col_id = pack_offset + i;
+            // row_normalized_buf store x
+            row_normalized_buf[col_id] =
+                (row_normalized_buf[col_id] - mean_val) * inv_variance_buf[row_id];
+            sum_stats1[row_id] += row_dy_buf[col_id];
+            sum_stats2[row_id] += row_dy_buf[col_id] * row_normalized_buf[col_id];
+          }
+        }
+      }
+    }
+    ComputeType warp_sum_stats1[rows_per_access];
+    ComputeType warp_sum_stats2[rows_per_access];
+#pragma unroll
+    for (int row_id = 0; row_id < rows_per_access; ++row_id) {
+      warp_sum_stats1[row_id] =
+          WarpAllReduce<SumOp, ComputeType, thread_group_width>(sum_stats1[row_id]);
+      warp_sum_stats2[row_id] =
+          WarpAllReduce<SumOp, ComputeType, thread_group_width>(sum_stats2[row_id]);
+    }
+#pragma unroll
+    for (int row_id = 0; row_id < rows_per_access; ++row_id) {
+      const int global_row_id = row + row_id;
+      ComputeType* row_normalized_buf = normalized_buf[row_id];
+      ComputeType* row_dy_buf = dy_buf[row_id];
+      const ComputeType inv_variance_over_cols = inv_variance_buf[row_id] * one_over_cols;
+#pragma unroll
+      for (int pack_id = 0; pack_id < pack_per_thread; ++pack_id) {
+        const int col = (pack_id * thread_group_width + lane_id) * pack_size;
+        if (!padding || col < cols) {
+          for (int i = 0; i < pack_size; ++i) {
+            const int col_id = pack_id * pack_size + i;
+            row_dy_buf[col_id] = (cols * row_dy_buf[col_id] - warp_sum_stats1[row_id]
+                                  - row_normalized_buf[col_id] * warp_sum_stats2[row_id])
+                                 * inv_variance_over_cols;
+          }
+          store.template store<pack_size>(row_dy_buf + pack_id * pack_size, global_row_id, col);
+        }
+      }
+    }
+  }
+}
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType,
+         int pack_size, int cols_per_thread, int thread_group_width, int rows_per_access,
+         bool padding>
+inline cudaError_t LaunchLayerNormGradWarpImpl(cudaStream_t stream, LOAD_X load_x,
+                                               LOAD_SCALED_DY load_scaled_dy, STORE store,
+                                               const ComputeType* mean,
+                                               const ComputeType* inv_variance, const int64_t rows,
+                                               const int64_t cols) {
+  constexpr int block_size = 128;
+  constexpr int waves = 32;
+  static_assert(block_size % thread_group_width == 0, "");
+  constexpr int thread_groups_per_block = block_size / thread_group_width;
+  dim3 block_dim(thread_group_width, thread_groups_per_block);
+  const int64_t num_blocks =
+      (rows / rows_per_access + thread_groups_per_block - 1) / thread_groups_per_block;
+  int grid_dim_x;
+  {
+    cudaError_t err = GetNumBlocks(
+        LayerNormGradWarpImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, pack_size,
+                              cols_per_thread, thread_group_width, rows_per_access, padding>,
+        block_size, 0, num_blocks, waves, &grid_dim_x);
+    if (err != cudaSuccess) { return err; }
+  }
+  LayerNormGradWarpImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, pack_size, cols_per_thread,
+                        thread_group_width, rows_per_access, padding>
+      <<<grid_dim_x, block_dim, 0, stream>>>(load_x, load_scaled_dy, store, mean, inv_variance,
+                                             rows, cols);
+  return cudaPeekAtLastError();
+}
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType,
+         int pack_size, int cols_per_thread, int thread_group_width, int rows_per_access>
+inline cudaError_t DispatchLayerNormGradWarpImplPadding(cudaStream_t stream, LOAD_X load_x,
+                                                        LOAD_SCALED_DY load_scaled_dy, STORE store,
+                                                        const ComputeType* mean,
+                                                        const ComputeType* inv_variance,
+                                                        const int64_t rows, const int64_t cols) {
+  if (cols == cols_per_thread * thread_group_width) {
+    return LaunchLayerNormGradWarpImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, pack_size,
+                                       cols_per_thread, thread_group_width, rows_per_access, false>(
+        stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);
+  } else {
+    return LaunchLayerNormGradWarpImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, pack_size,
+                                       cols_per_thread, thread_group_width, rows_per_access, true>(
+        stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);
+  }
+}
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType,
+         int pack_size>
+typename std::enable_if<pack_size == 1, cudaError_t>::type DispatchLayerNormGradWarpImplCols(
+    cudaStream_t stream, LOAD_X load_x, LOAD_SCALED_DY load_scaled_dy, STORE store,
+    const ComputeType* mean, const ComputeType* inv_variance, const int64_t rows,
+    const int64_t cols) {
+  if (cols <= 0) { return cudaErrorInvalidValue; }
+#define DEFINE_ONE_ELIF(thread_group_width)                                                     \
+  else if (cols <= (thread_group_width)*pack_size) {                                            \
+    if (rows % 2 == 0) {                                                                        \
+      return DispatchLayerNormGradWarpImplPadding<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType,   \
+                                                  pack_size, pack_size, thread_group_width, 2>( \
+          stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);               \
+    } else {                                                                                    \
+      return DispatchLayerNormGradWarpImplPadding<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType,   \
+                                                  pack_size, pack_size, thread_group_width, 1>( \
+          stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);               \
+    }                                                                                           \
+  }
+  DEFINE_ONE_ELIF(1)
+  DEFINE_ONE_ELIF(2)
+  DEFINE_ONE_ELIF(4)
+  DEFINE_ONE_ELIF(8)
+  DEFINE_ONE_ELIF(16)
+  DEFINE_ONE_ELIF(32)
+#undef DEFINE_ONE_ELIF
+#define DEFINE_ONE_ELIF(col)                                                                \
+  else if (cols <= (col)*kWarpSize) {                                                       \
+    return DispatchLayerNormGradWarpImplPadding<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, \
+                                                pack_size, col, kWarpSize, 1>(              \
+        stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);             \
+  }
+  DEFINE_ONE_ELIF(2)
+  DEFINE_ONE_ELIF(3)
+  DEFINE_ONE_ELIF(4)
+  DEFINE_ONE_ELIF(5)
+  DEFINE_ONE_ELIF(6)
+  DEFINE_ONE_ELIF(7)
+  DEFINE_ONE_ELIF(8)
+  DEFINE_ONE_ELIF(9)
+  DEFINE_ONE_ELIF(10)
+  DEFINE_ONE_ELIF(11)
+  DEFINE_ONE_ELIF(12)
+  DEFINE_ONE_ELIF(13)
+  DEFINE_ONE_ELIF(14)
+  DEFINE_ONE_ELIF(15)
+  DEFINE_ONE_ELIF(16)
+  DEFINE_ONE_ELIF(17)
+  DEFINE_ONE_ELIF(18)
+  DEFINE_ONE_ELIF(19)
+  DEFINE_ONE_ELIF(20)
+  DEFINE_ONE_ELIF(21)
+  DEFINE_ONE_ELIF(22)
+  DEFINE_ONE_ELIF(23)
+  DEFINE_ONE_ELIF(24)
+  DEFINE_ONE_ELIF(25)
+  DEFINE_ONE_ELIF(26)
+  DEFINE_ONE_ELIF(27)
+  DEFINE_ONE_ELIF(28)
+  DEFINE_ONE_ELIF(29)
+  DEFINE_ONE_ELIF(30)
+  DEFINE_ONE_ELIF(31)
+  DEFINE_ONE_ELIF(32)
+#undef DEFINE_ONE_ELIF
+  else {
+    return cudaErrorInvalidValue;
+  }
+}
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType,
+         int pack_size>
+typename std::enable_if<pack_size == 2, cudaError_t>::type DispatchLayerNormGradWarpImplCols(
+    cudaStream_t stream, LOAD_X load_x, LOAD_SCALED_DY load_scaled_dy, STORE store,
+    const ComputeType* mean, const ComputeType* inv_variance, const int64_t rows,
+    const int64_t cols) {
+  if (cols <= 0) { return cudaErrorInvalidValue; }
+#define DEFINE_ONE_ELIF(thread_group_width)                                                     \
+  else if (cols <= (thread_group_width)*pack_size) {                                            \
+    if (rows % 2 == 0) {                                                                        \
+      return DispatchLayerNormGradWarpImplPadding<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType,   \
+                                                  pack_size, pack_size, thread_group_width, 2>( \
+          stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);               \
+    } else {                                                                                    \
+      return DispatchLayerNormGradWarpImplPadding<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType,   \
+                                                  pack_size, pack_size, thread_group_width, 1>( \
+          stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);               \
+    }                                                                                           \
+  }
+  DEFINE_ONE_ELIF(1)
+  DEFINE_ONE_ELIF(2)
+  DEFINE_ONE_ELIF(4)
+  DEFINE_ONE_ELIF(8)
+  DEFINE_ONE_ELIF(16)
+  DEFINE_ONE_ELIF(32)
+#undef DEFINE_ONE_ELIF
+#define DEFINE_ONE_ELIF(col)                                                                \
+  else if (cols <= (col)*kWarpSize) {                                                       \
+    return DispatchLayerNormGradWarpImplPadding<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, \
+                                                pack_size, col, kWarpSize, 1>(              \
+        stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);             \
+  }
+  DEFINE_ONE_ELIF(4)
+  DEFINE_ONE_ELIF(6)
+  DEFINE_ONE_ELIF(8)
+  DEFINE_ONE_ELIF(10)
+  DEFINE_ONE_ELIF(12)
+  DEFINE_ONE_ELIF(14)
+  DEFINE_ONE_ELIF(16)
+  DEFINE_ONE_ELIF(18)
+  DEFINE_ONE_ELIF(20)
+  DEFINE_ONE_ELIF(22)
+  DEFINE_ONE_ELIF(24)
+  DEFINE_ONE_ELIF(26)
+  DEFINE_ONE_ELIF(28)
+  DEFINE_ONE_ELIF(30)
+  DEFINE_ONE_ELIF(32)
+#undef DEFINE_ONE_ELIF
+  else {
+    return cudaErrorInvalidValue;
+  }
+}
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType>
+struct DispatchLayerNormGradWarpImplPackSize {
+  cudaError_t operator()(cudaStream_t stream, LOAD_X load_x, LOAD_SCALED_DY load_scaled_dy,
+                         STORE store, const ComputeType* mean, const ComputeType* inv_variance,
+                         const int64_t rows, const int64_t cols) {
+    if (cols % 2 == 0) {
+      return DispatchLayerNormGradWarpImplCols<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, 2>(
+          stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);
+    } else {
+      return DispatchLayerNormGradWarpImplCols<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, 1>(
+          stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);
+    }
+  }
+};
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType>
+inline cudaError_t DispatchLayerNormGradWarpImpl(cudaStream_t stream, LOAD_X load_x,
+                                                 LOAD_SCALED_DY load_scaled_dy, STORE store,
+                                                 const ComputeType* mean,
+                                                 const ComputeType* inv_variance,
+                                                 const int64_t rows, const int64_t cols) {
+  return DispatchLayerNormGradWarpImplPackSize<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType>()(
+      stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);
+}
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType,
+         int pack_size, int block_size>
+__global__ void LayerNormGradBlockSMemImpl(LOAD_X load_x, LOAD_SCALED_DY load_scaled_dy,
+                                           STORE store, const ComputeType* mean,
+                                           const ComputeType* inv_variance, const int64_t rows,
+                                           const int64_t cols) {
+  extern __shared__ __align__(sizeof(double)) unsigned char grad_shared_buf[];
+  auto* normalized_buf = reinterpret_cast<ComputeType*>(grad_shared_buf);
+  auto* dy_buf = normalized_buf + cols;
+  const int tid = threadIdx.x;
+  assert(cols % pack_size == 0);
+  const int num_packs = static_cast<int>(cols) / pack_size;
+  const ComputeType one_over_cols = static_cast<ComputeType>(1.0) / static_cast<ComputeType>(cols);
+  for (int64_t row = blockIdx.x; row < rows; row += gridDim.x) {
+    ComputeType sum_stats1 = 0;
+    ComputeType sum_stats2 = 0;
+    const ComputeType mean_val = mean[row];
+    const ComputeType inv_variance_val = inv_variance[row];
+    const ComputeType inv_variance_over_cols = inv_variance_val * one_over_cols;
+    for (int pack_id = tid; pack_id < num_packs; pack_id += block_size) {
+      ComputeType x_pack[pack_size];
+      ComputeType dy_pack[pack_size];
+      load_x.template load<pack_size>(x_pack, row, pack_id * pack_size);
+      load_scaled_dy.template load<pack_size>(dy_pack, row, pack_id * pack_size);
+#pragma unroll
+      for (int i = 0; i < pack_size; ++i) {
+        const int buf_offset = i * num_packs + pack_id;
+        ComputeType normalized = (x_pack[i] - mean_val) * inv_variance_val;
+        normalized_buf[buf_offset] = normalized;
+        dy_buf[buf_offset] = dy_pack[i];
+        sum_stats1 += dy_pack[i];
+        sum_stats2 += dy_pack[i] * normalized;
+      }
+    }
+    const ComputeType row_sum_stats1 = BlockAllReduce<SumOp, ComputeType, block_size>(sum_stats1);
+    const ComputeType row_sum_stats2 = BlockAllReduce<SumOp, ComputeType, block_size>(sum_stats2);
+    for (int pack_id = tid; pack_id < num_packs; pack_id += block_size) {
+      ComputeType pack[pack_size];
+#pragma unroll
+      for (int i = 0; i < pack_size; ++i) {
+        const int buf_offset = i * num_packs + pack_id;
+        pack[i] = (cols * dy_buf[buf_offset] - row_sum_stats1
+                   - normalized_buf[buf_offset] * row_sum_stats2)
+                  * inv_variance_over_cols;
+      }
+      store.template store<pack_size>(pack, row, pack_id * pack_size);
+    }
+  }
+}
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType,
+         int pack_size, int block_size>
+inline cudaError_t LaunchLayerNormGradBlockSMemImpl(cudaStream_t stream, LOAD_X load_x,
+                                                    LOAD_SCALED_DY load_scaled_dy, STORE store,
+                                                    const ComputeType* mean,
+                                                    const ComputeType* inv_variance, int smem,
+                                                    const int64_t rows, const int64_t cols) {
+  constexpr int waves = 32;
+  int grid_dim_x;
+  {
+    cudaError_t err = GetNumBlocks(LayerNormGradBlockSMemImpl<LOAD_X, LOAD_SCALED_DY, STORE,
+                                                              ComputeType, pack_size, block_size>,
+                                   block_size, smem, rows, waves, &grid_dim_x);
+    if (err != cudaSuccess) { return err; }
+  }
+  LayerNormGradBlockSMemImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, pack_size, block_size>
+      <<<grid_dim_x, block_size, smem, stream>>>(load_x, load_scaled_dy, store, mean, inv_variance,
+                                                 rows, cols);
+  return cudaPeekAtLastError();
+}
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType,
+         int pack_size>
+inline cudaError_t TryDispatchLayerNormGradBlockSMemImplBlockSize(
+    cudaStream_t stream, LOAD_X load_x, LOAD_SCALED_DY load_scaled_dy, STORE store,
+    const ComputeType* mean, const ComputeType* inv_variance, const int64_t rows,
+    const int64_t cols, bool* success) {
+  constexpr int block_size_conf_1 = 128;
+  constexpr int block_size_conf_2 = 256;
+  constexpr int block_size_conf_3 = 512;
+  constexpr int block_size_conf_4 = 1024;
+  const size_t smem = cols * sizeof(ComputeType) * 2;
+  int max_active_blocks_conf_1;
+  {
+    cudaError_t err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+        &max_active_blocks_conf_1,
+        LayerNormGradBlockSMemImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, pack_size,
+                                   block_size_conf_1>,
+        block_size_conf_1, smem);
+    if (err != cudaSuccess) { return err; }
+  }
+  if (max_active_blocks_conf_1 <= 0) {
+    *success = false;
+    return cudaSuccess;
+  }
+  int max_active_blocks_conf_4;
+  {
+    cudaError_t err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+        &max_active_blocks_conf_4,
+        LayerNormGradBlockSMemImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, pack_size,
+                                   block_size_conf_4>,
+        block_size_conf_4, smem);
+    if (err != cudaSuccess) { return err; }
+  }
+  if (max_active_blocks_conf_4 == max_active_blocks_conf_1) {
+    *success = true;
+    return LaunchLayerNormGradBlockSMemImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, pack_size,
+                                            block_size_conf_4>(
+        stream, load_x, load_scaled_dy, store, mean, inv_variance, smem, rows, cols);
+  }
+  int max_active_blocks_conf_3;
+  {
+    cudaError_t err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+        &max_active_blocks_conf_3,
+        LayerNormGradBlockSMemImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, pack_size,
+                                   block_size_conf_3>,
+        block_size_conf_3, smem);
+    if (err != cudaSuccess) { return err; }
+  }
+  if (max_active_blocks_conf_3 == max_active_blocks_conf_1) {
+    *success = true;
+    return LaunchLayerNormGradBlockSMemImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, pack_size,
+                                            block_size_conf_3>(
+        stream, load_x, load_scaled_dy, store, mean, inv_variance, smem, rows, cols);
+  }
+  int max_active_blocks_conf_2;
+  {
+    cudaError_t err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+        &max_active_blocks_conf_2,
+        LayerNormGradBlockSMemImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, pack_size,
+                                   block_size_conf_2>,
+        block_size_conf_2, smem);
+    if (err != cudaSuccess) { return err; }
+  }
+  if (max_active_blocks_conf_2 == max_active_blocks_conf_1) {
+    *success = true;
+    return LaunchLayerNormGradBlockSMemImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, pack_size,
+                                            block_size_conf_2>(
+        stream, load_x, load_scaled_dy, store, mean, inv_variance, smem, rows, cols);
+  }
+  *success = true;
+  return LaunchLayerNormGradBlockSMemImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, pack_size,
+                                          block_size_conf_1>(stream, load_x, load_scaled_dy, store,
+                                                             mean, inv_variance, smem, rows, cols);
+}
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType>
+struct TryDispatchLayerNormGradBlockSMemImplPackSize {
+  cudaError_t operator()(cudaStream_t stream, LOAD_X load_x, LOAD_SCALED_DY load_scaled_dy,
+                         STORE store, const ComputeType* mean, const ComputeType* inv_variance,
+                         const int64_t rows, const int64_t cols, bool* success) {
+    if (cols % 2 == 0) {
+      return TryDispatchLayerNormGradBlockSMemImplBlockSize<LOAD_X, LOAD_SCALED_DY, STORE,
+                                                            ComputeType, 2>(
+          stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols, success);
+    } else {
+      return TryDispatchLayerNormGradBlockSMemImplBlockSize<LOAD_X, LOAD_SCALED_DY, STORE,
+                                                            ComputeType, 1>(
+          stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols, success);
+    }
+  }
+};
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType>
+inline cudaError_t TryDispatchLayerNormGradBlockSMemImpl(cudaStream_t stream, LOAD_X load_x,
+                                                         LOAD_SCALED_DY load_scaled_dy, STORE store,
+                                                         const ComputeType* mean,
+                                                         const ComputeType* inv_variance,
+                                                         const int64_t rows, const int64_t cols,
+                                                         bool* success) {
+  return TryDispatchLayerNormGradBlockSMemImplPackSize<LOAD_X, LOAD_SCALED_DY, STORE,
+                                                       ComputeType>()(
+      stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols, success);
+}
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType,
+         int pack_size, int block_size>
+__global__ void LayerNormGradBlockUncachedImpl(LOAD_X load_x, LOAD_SCALED_DY load_scaled_dy,
+                                               STORE store, const ComputeType* mean,
+                                               const ComputeType* inv_variance, const int64_t rows,
+                                               const int64_t cols) {
+  const int tid = threadIdx.x;
+  assert(cols % pack_size == 0);
+  const int num_packs = static_cast<int>(cols) / pack_size;
+  const ComputeType one_over_cols = static_cast<ComputeType>(1.0) / static_cast<ComputeType>(cols);
+  for (int64_t row = blockIdx.x; row < rows; row += gridDim.x) {
+    const ComputeType mean_val = mean[row];
+    const ComputeType inv_variance_val = inv_variance[row];
+    const ComputeType inv_variance_over_cols = inv_variance_val * one_over_cols;
+    ComputeType sum_stats1 = 0;
+    ComputeType sum_stats2 = 0;
+    for (int pack_id = tid; pack_id < num_packs; pack_id += block_size) {
+      ComputeType x_pack[pack_size];
+      ComputeType dy_pack[pack_size];
+      load_x.template load<pack_size>(x_pack, row, pack_id * pack_size);
+      load_scaled_dy.template load<pack_size>(dy_pack, row, pack_id * pack_size);
+
+#pragma unroll
+      for (int i = 0; i < pack_size; ++i) {
+        sum_stats1 += dy_pack[i];
+        sum_stats2 += dy_pack[i] * (x_pack[i] - mean_val) * inv_variance_val;
+      }
+    }
+    const ComputeType row_sum_stats1 = BlockAllReduce<SumOp, ComputeType, block_size>(sum_stats1);
+    const ComputeType row_sum_stats2 = BlockAllReduce<SumOp, ComputeType, block_size>(sum_stats2);
+    for (int pack_id = tid; pack_id < num_packs; pack_id += block_size) {
+      ComputeType x_pack[pack_size];
+      ComputeType dy_pack[pack_size];
+      load_x.template load<pack_size>(x_pack, row, pack_id * pack_size);
+      load_scaled_dy.template load<pack_size>(dy_pack, row, pack_id * pack_size);
+#pragma unroll
+      for (int i = 0; i < pack_size; ++i) {
+        dy_pack[i] = (cols * dy_pack[i] - row_sum_stats1
+                      - (x_pack[i] - mean_val) * inv_variance_val * row_sum_stats2)
+                     * inv_variance_over_cols;
+      }
+      store.template store<pack_size>(dy_pack, row, pack_id * pack_size);
+    }
+  }
+}
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType,
+         int pack_size>
+inline cudaError_t LaunchLayerNormGradBlockUncachedImpl(cudaStream_t stream, LOAD_X load_x,
+                                                        LOAD_SCALED_DY load_scaled_dy, STORE store,
+                                                        const ComputeType* mean,
+                                                        const ComputeType* inv_variance,
+                                                        const int64_t rows, const int64_t cols) {
+  constexpr int block_size = 1024;
+  constexpr int waves = 32;
+  int grid_dim_x;
+  {
+    cudaError_t err =
+        GetNumBlocks(LayerNormGradBlockUncachedImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType,
+                                                    pack_size, block_size>,
+                     block_size, 0, rows, waves, &grid_dim_x);
+    if (err != cudaSuccess) { return err; }
+  }
+  LayerNormGradBlockUncachedImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, pack_size, block_size>
+      <<<grid_dim_x, block_size, 0, stream>>>(load_x, load_scaled_dy, store, mean, inv_variance,
+                                              rows, cols);
+  return cudaPeekAtLastError();
+}
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType>
+struct DispatchLayerNormGradBlockUncachedImplPackSize {
+  cudaError_t operator()(cudaStream_t stream, LOAD_X load_x, LOAD_SCALED_DY load_scaled_dy,
+                         STORE store, const ComputeType* mean, const ComputeType* inv_variance,
+                         const int64_t rows, const int64_t cols) {
+    if (cols % 2 == 0 && cols > kWarpSize) {
+      return LaunchLayerNormGradBlockUncachedImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, 2>(
+          stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);
+    } else {
+      return LaunchLayerNormGradBlockUncachedImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType, 1>(
+          stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);
+    }
+  }
+};
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType>
+inline cudaError_t DispatchLayerNormGradBlockUncachedImpl(cudaStream_t stream, LOAD_X load_x,
+                                                          LOAD_SCALED_DY load_scaled_dy,
+                                                          STORE store, const ComputeType* mean,
+                                                          const ComputeType* inv_variance,
+                                                          const int64_t rows, const int64_t cols) {
+  return DispatchLayerNormGradBlockUncachedImplPackSize<LOAD_X, LOAD_SCALED_DY, STORE,
+                                                        ComputeType>()(
+      stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);
+}
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType>
+inline typename std::enable_if<!std::is_same<ComputeType, double>::value, cudaError_t>::type
+DispatchLayerNormGrad(cudaStream_t stream, LOAD_X load_x, LOAD_SCALED_DY load_scaled_dy,
+                      STORE store, const ComputeType* mean, const ComputeType* inv_variance,
+                      const int64_t rows, const int64_t cols) {
+  if (cols <= 1024) {
+    return DispatchLayerNormGradWarpImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType>(
+        stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);
+  } else {
+    bool dispatch_smem_impl_success;
+    {
+      cudaError_t err =
+          TryDispatchLayerNormGradBlockSMemImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType>(
+              stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols,
+              &dispatch_smem_impl_success);
+      if (err != cudaSuccess) { return err; }
+    }
+    if (!dispatch_smem_impl_success) {
+      return DispatchLayerNormGradBlockUncachedImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType>(
+          stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);
+    }
+    return cudaSuccess;
+  }
+}
+
+template<typename LOAD_X, typename LOAD_SCALED_DY, typename STORE, typename ComputeType>
+inline typename std::enable_if<std::is_same<ComputeType, double>::value, cudaError_t>::type
+DispatchLayerNormGrad(cudaStream_t stream, LOAD_X load_x, LOAD_SCALED_DY load_scaled_dy,
+                      STORE store, const ComputeType* mean, const ComputeType* inv_variance,
+                      const int64_t rows, const int64_t cols) {
+  return DispatchLayerNormGradBlockUncachedImpl<LOAD_X, LOAD_SCALED_DY, STORE, ComputeType>(
+      stream, load_x, load_scaled_dy, store, mean, inv_variance, rows, cols);
+}
+
+template<typename SRC, typename DST, bool do_scale, bool do_center>
+struct AffineStore {
+  AffineStore(DST* y, int64_t row_size, const DST* gamma, const DST* beta)
+      : y(y), row_size(row_size), gamma(gamma), beta(beta) {}
+  template<int N>
+  __device__ void store(const SRC* src, int64_t row, int64_t col) {
+    Pack<DST, N> y_pack;
+    Pack<DST, N> normalized_pack;
+    Pack<DST, N> gamma_pack;
+    Pack<DST, N> beta_pack;
+    const int64_t offset = (row * row_size + col) / N;
+    const int64_t gamma_offset = col / N;
+    if (do_scale) {
+      gamma_pack.storage =
+          *(reinterpret_cast<const PackType<DST, N>*>(gamma) + gamma_offset);
+    } else {
+#pragma unroll
+      for (int i = 0; i < N; ++i) { gamma_pack.elem[i] = 1; }
+    }
+    if (do_center) {
+      beta_pack.storage =
+          *(reinterpret_cast<const PackType<DST, N>*>(beta) + gamma_offset);
+    } else {
+#pragma unroll
+      for (int i = 0; i < N; ++i) { beta_pack.elem[i] = 0; }
+    }
+#pragma unroll
+    for (int i = 0; i < N; ++i) {
+      DST normalized_i = static_cast<DST>(src[i]);
+      if (do_scale) { normalized_pack.elem[i] = normalized_i; }
+      if (do_scale || do_center) {
+        y_pack.elem[i] = normalized_i * gamma_pack.elem[i] + beta_pack.elem[i];
+      } else {
+        y_pack.elem[i] = normalized_i;
+      }
+    }
+    *(reinterpret_cast<PackType<DST, N>*>(y) + offset) = y_pack.storage;
+  }
+  DST* y;
+  int64_t row_size;
+  const DST* gamma;
+  const DST* beta;
+};
+
+template<typename SRC, typename DST, bool do_scale>
+struct ScaleLoad {
+  ScaleLoad(const SRC* src, const SRC* gamma, int64_t row_size)
+      : src(src), gamma(gamma), row_size(row_size) {}
+  template<int N>
+  __device__ void load(DST* dst, int64_t row, int64_t col) const {
+    Pack<SRC, N> src_pack;
+    Pack<SRC, N> gamma_pack;
+    const int64_t offset = (row * row_size + col) / N;
+    const int64_t gamma_offset = col / N;
+    src_pack.storage = *(reinterpret_cast<const PackType<SRC, N>*>(src) + offset);
+    if (do_scale) {
+      gamma_pack.storage =
+          *(reinterpret_cast<const PackType<SRC, N>*>(gamma) + gamma_offset);
+    } else {
+#pragma unroll
+      for (int i = 0; i < N; ++i) { gamma_pack.elem[i] = static_cast<SRC>(1); }
+    }
+#pragma unroll
+    for (int i = 0; i < N; ++i) {
+      dst[i] = static_cast<DST>(src_pack.elem[i] * gamma_pack.elem[i]);
+    }
+  }
+  const SRC* src;
+  const SRC* gamma;
+  int64_t row_size;
+};
+
+template<typename SRC, typename DST, bool do_add>
+struct AddStore {
+  AddStore(const DST* add_to_output, DST* dst, int64_t row_size)
+      : add_to_output(add_to_output), dst(dst), row_size(row_size) {}
+  template<int N>
+  __device__ void store(const SRC* src, int64_t row, int64_t col) {
+    Pack<DST, N> add_to_output_pack;
+    Pack<DST, N> dst_pack;
+    const int64_t offset = (row * row_size + col) / N;
+    if (do_add) {
+      add_to_output_pack.storage =
+          *(reinterpret_cast<const PackType<DST, N>*>(add_to_output) + offset);
+    }
+#pragma unroll
+    for (int i = 0; i < N; ++i) {
+      if (do_add) {
+        dst_pack.elem[i] = static_cast<DST>(src[i]) + add_to_output_pack.elem[i];
+      } else {
+        dst_pack.elem[i] = static_cast<DST>(src[i]);
+      }
+    }
+    *(reinterpret_cast<PackType<DST, N>*>(dst) + offset) = dst_pack.storage;
+  }
+  const DST* add_to_output;
+  DST* dst;
+  int64_t row_size;
+};
+
+constexpr int64_t kLayerNormParamGradGpuBlockSize = 512;
+
+int64_t GetLayerNormParamGradBlockSize() { return kLayerNormParamGradGpuBlockSize; }
+
+int64_t GetLayerNormParamGradNumBlocks(const int64_t elem_cnt) {
+  return std::min(static_cast<int>((elem_cnt + kLayerNormParamGradGpuBlockSize - 1)
+                                   / kLayerNormParamGradGpuBlockSize),
+                  256);
+}
+
+template<typename T>
+int64_t GetParamGradDynamicSharedMemorySize(const int64_t instance_size) {
+  return 2 * instance_size * sizeof(T);
+}
+
+/*
+template<typename T, typename I>
+__global__ void LayerNormParamGradImpl(const I n, const I instance_size, const T* dy,
+                                       const T* normalized, const T* gamma, T* gamma_diff,
+                                       T* beta_diff) {
+  extern __shared__ __align__(sizeof(double)) unsigned char bw_shared_buf[];
+  auto* gamma_diff_sum_buf = reinterpret_cast<T*>(bw_shared_buf);
+  auto* beta_diff_sum_buf = gamma_diff_sum_buf + instance_size;
+  const I tid = threadIdx.x;
+  for (I elem_id = tid; elem_id < instance_size; elem_id += blockDim.x) {
+    gamma_diff_sum_buf[elem_id] = 0;
+    beta_diff_sum_buf[elem_id] = 0;
+  }
+  __syncthreads();
+  CUDA_1D_KERNEL_LOOP_T(I, i, n) {
+    const I elem_id = i % instance_size;
+    T dy_val = dy[i];
+    T normalized_val = normalized[i];
+    atomicAdd(&gamma_diff_sum_buf[elem_id], dy_val * normalized_val);
+    atomicAdd(&beta_diff_sum_buf[elem_id], dy_val);
+  }
+  __syncthreads();
+  for (I elem_id = tid; elem_id < instance_size; elem_id += blockDim.x) {
+    atomicAdd(gamma_diff + elem_id, gamma_diff_sum_buf[elem_id]);
+    atomicAdd(beta_diff + elem_id, beta_diff_sum_buf[elem_id]);
+  }
+}
+*/
+
+
+template<typename T, typename I>
+__global__ void LayerNormParamGradImpl(const I n, const I instance_size, const T* dy,
+                                       const T* x, const T* mean, const T* inv_variance, const T* gamma, T* gamma_diff,
+                                       T* beta_diff) {
+  extern __shared__ __align__(sizeof(double)) unsigned char bw_shared_buf[];
+  auto* gamma_diff_sum_buf = reinterpret_cast<T*>(bw_shared_buf);
+  auto* beta_diff_sum_buf = gamma_diff_sum_buf + instance_size;
+  const I tid = threadIdx.x;
+  for (I elem_id = tid; elem_id < instance_size; elem_id += blockDim.x) {
+    gamma_diff_sum_buf[elem_id] = 0;
+    beta_diff_sum_buf[elem_id] = 0;
+  }
+  __syncthreads();
+  CUDA_1D_KERNEL_LOOP_T(I, i, n) {
+    const I elem_id = i % instance_size;
+    const I id = i / instance_size;
+    T dy_val = dy[i];
+    T normalized_val = (x[i] - mean[id]) * inv_variance[id];
+    atomicAdd(&gamma_diff_sum_buf[elem_id], dy_val * normalized_val);
+    atomicAdd(&beta_diff_sum_buf[elem_id], dy_val);
+  }
+  __syncthreads();
+  for (I elem_id = tid; elem_id < instance_size; elem_id += blockDim.x) {
+    atomicAdd(gamma_diff + elem_id, gamma_diff_sum_buf[elem_id]);
+    atomicAdd(beta_diff + elem_id, beta_diff_sum_buf[elem_id]);
+  }
+}
+
+int DLGpuLayerNormalization(const DLArrayHandle in_arr,const DLArrayHandle ln_scale,
                             const DLArrayHandle ln_bias, DLArrayHandle mean_arr,
                             DLArrayHandle var_arr, DLArrayHandle out_arr,
                             float eps, DLStreamHandle stream_handle) {
-    int dev_id = (in_arr->ctx).device_id;
-    cudaSetDevice(dev_id);
-    cudnn_init(dev_id, stream_handle);
+  int ndim = in_arr->ndim;
+  int rows = 1;
+  int cols = in_arr->shape[ndim-1];
+  for(int i=0; i<ndim-1; i++)
+    rows *= in_arr->shape[i];
+  
+  const float *x_ptr = (const float *)in_arr->data;
+  float *y_ptr = (float *)out_arr->data;
+  float *mean = (float *)mean_arr->data;
+  float *inv_variance = (float *)var_arr->data;
+  float *gamma_ptr  = (float *)ln_scale->data;
+  float *beta_ptr = (float *)ln_bias->data;  
+  const double epsilon = eps;
+  const int64_t num_instances = rows;
+  const int64_t norm_size = cols;
 
-    float one = 1.0f;
-    float zero = 0.0f;
+  cudaStream_t cu_stream = NULL;
+  if(stream_handle)
+    cu_stream = (*(cudaStream_t *)(stream_handle->handle));
+        
+  DirectLoad<float, float> load(x_ptr, norm_size);
+  AffineStore<float, float, true, true> store(y_ptr, norm_size, gamma_ptr, beta_ptr);
+  DispatchLayerNorm<decltype(load), decltype(store), float>(
+      cu_stream, load, store, num_instances, norm_size, epsilon, mean, inv_variance);  
+  return 0;
+};
 
-    cudnnReduceTensorDescriptor_t rtd;
-    CUDNN_CALL(cudnnCreateReduceTensorDescriptor(&rtd));
-    CUDNN_CALL(cudnnSetReduceTensorDescriptor(
-        rtd, CUDNN_REDUCE_TENSOR_AVG, CUDNN_DATA_FLOAT, CUDNN_PROPAGATE_NAN,
-        CUDNN_REDUCE_TENSOR_NO_INDICES, CUDNN_32BIT_INDICES));
-
-    cudnnTensorDescriptor_t adesc;
-    cudnnTensorDescriptor_t cdesc;
-    CUDNN_CALL(cudnnCreateTensorDescriptor(&adesc));
-    CUDNN_CALL(cudnnCreateTensorDescriptor(&cdesc));
-
-    int ndim = in_arr->ndim;
-    int last_dim = in_arr->shape[ndim - 1];
-    if (ndim < 4)
-        ndim = 4;
-    size_t cpu_mem = ndim * sizeof(int);
-    int *dimA = (int *)malloc(cpu_mem);
-    int *strideA = (int *)malloc(cpu_mem);
-    int *dimC = (int *)malloc(cpu_mem);
-    int *strideC = (int *)malloc(cpu_mem);
-
-    int temp_strideA = 1;
-    int temp_strideC = 1;
-
-    for (int i = ndim - 1; i >= 0; --i) {
-        dimA[i] = i < in_arr->ndim ? (int)in_arr->shape[i] : 1;
-        dimC[i] = i < in_arr->ndim - 1 ? (int)in_arr->shape[i] : 1;
-        strideA[i] = temp_strideA;
-        strideC[i] = temp_strideC;
-        temp_strideA *= dimA[i];
-        temp_strideC *= dimC[i];
-    }
-    size_t size = temp_strideA * sizeof(float);
-
-    CUDNN_CALL(cudnnSetTensorNdDescriptor(adesc, CUDNN_DATA_FLOAT, ndim, dimA,
-                                          strideA));
-    CUDNN_CALL(cudnnSetTensorNdDescriptor(cdesc, CUDNN_DATA_FLOAT, ndim, dimC,
-                                          strideC));
-
-    CUDNN_CALL(cudnnReduceTensor(cudnn_map[dev_id], rtd, NULL, 0,
-                                 (void *)out_arr->data, size, &one, adesc,
-                                 (const void *)in_arr->data, &zero, cdesc,
-                                 (void *)mean_arr->data));
-
-    dim3 blocks;
-    dim3 threads;
-    if (temp_strideA <= 1024) {
-        threads.x = temp_strideA;
-        blocks.x = 1;
-    } else {
-        threads.x = 1024;
-        blocks.x = (temp_strideA + 1023) / 1024;
-    }
-
-    if (stream_handle)
-        minus_mean_n_square_kernel<<<blocks, threads, 0,
-                                     *(cudaStream_t *)stream_handle->handle>>>(
-            (const float *)in_arr->data, (const float *)mean_arr->data,
-            (float *)out_arr->data, last_dim, temp_strideA);
-    else
-        minus_mean_n_square_kernel<<<blocks, threads>>>(
-            (const float *)in_arr->data, (const float *)mean_arr->data,
-            (float *)out_arr->data, last_dim, temp_strideA);
-
-    CUDNN_CALL(cudnnReduceTensor(cudnn_map[dev_id], rtd, NULL, 0,
-                                 (void *)out_arr->data, size, &one, adesc,
-                                 (const void *)out_arr->data, &zero, cdesc,
-                                 (void *)var_arr->data));
-
-    if (temp_strideA <= 1024) {
-        threads.x = temp_strideA;
-        blocks.x = 1;
-    } else {
-        threads.x = 1024;
-        blocks.x = (temp_strideA + 1023) / 1024;
-    }
-    if (stream_handle)
-        rescale_kernel<<<blocks, threads, 0,
-                         *(cudaStream_t *)stream_handle->handle>>>(
-            (const float *)in_arr->data, (const float *)mean_arr->data,
-            (const float *)var_arr->data, (const float *)ln_scale->data,
-            (const float *)ln_bias->data, (float *)out_arr->data, last_dim, eps,
-            temp_strideA);
-    else
-        rescale_kernel<<<blocks, threads>>>(
-            (const float *)in_arr->data, (const float *)mean_arr->data,
-            (const float *)var_arr->data, (const float *)ln_scale->data,
-            (const float *)ln_bias->data, (float *)out_arr->data, last_dim, eps,
-            temp_strideA);
-
-    CUDNN_CALL(cudnnDestroyTensorDescriptor(adesc));
-    CUDNN_CALL(cudnnDestroyTensorDescriptor(cdesc));
-    CUDNN_CALL(cudnnDestroyReduceTensorDescriptor(rtd));
-    free(dimA);
-    free(dimC);
-    free(strideA);
-    free(strideC);
-    return 0;
-}
-
-__global__ void process_kernel1(const float *grads, const float *in_arr,
-                                const float *mean_arr, const float *var_arr,
-                                const float *ln_scale, float *ws1, float *ws2,
-                                float *out_arr, float eps, int last_dim,
-                                size_t size) {
-    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= size)
-        return;
-    int mo_ind = ind / last_dim;
-    float std = sqrtf(var_arr[mo_ind] + eps);
-    float x_centered = in_arr[ind] - mean_arr[mo_ind];
-    float x_norm = x_centered / std;
-    float gscale = grads[ind] * x_norm;
-    ws1[ind] = gscale;
-    int ln_ind = ind % last_dim;
-    if (ln_ind == 0) {
-        ws2[mo_ind] = std;
-    }
-    float dx_norm = grads[ind] * ln_scale[ln_ind];
-    float dvar_temp = dx_norm * x_centered;
-    out_arr[ind] = dvar_temp;
-}
-
-__global__ void process_kernel2(const float *grads, const float *in_arr,
-                                const float *mean_arr, const float *var_arr,
-                                const float *ln_scale, float *ws1, float *ws2,
-                                float *ws3, float eps, int last_dim,
-                                size_t size) {
-    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= size)
-        return;
-    int ln_ind = ind % last_dim;
-    float dx_norm = grads[ind] * ln_scale[ln_ind];
-    int mo_ind = ind / last_dim;
-    float dx_mu_1 = dx_norm / ws2[mo_ind];
-    float dvar = ws3[mo_ind] * -0.5 / ws2[mo_ind] / (var_arr[mo_ind] + eps);
-    float x_centered = in_arr[ind] - mean_arr[mo_ind];
-    float dx_mu_2 = dvar * 2 * x_centered / last_dim;
-    float dx1 = dx_mu_1 + dx_mu_2;
-    ws1[ind] = dx1;
-}
-
-__global__ void process_kernel3(const float *ws1, const float *ws3,
-                                float *out_arr, int last_dim, size_t size) {
-    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= size)
-        return;
-    int mo_ind = ind / last_dim;
-    out_arr[ind] = ws1[ind] - ws3[mo_ind] / last_dim;
-}
-
+                  
 int DLGpuLayerNormalizationGradient(
     const DLArrayHandle out_grads, const DLArrayHandle in_arr,
     const DLArrayHandle ln_scale, DLArrayHandle grad_arr,
     DLArrayHandle grad_scale, DLArrayHandle grad_bias,
-    const DLArrayHandle mean_arr, const DLArrayHandle var_arr, float eps,
-    DLStreamHandle stream_handle) {
-    int dev_id = (out_grads->ctx).device_id;
-    cudnn_init(dev_id, stream_handle);
-    float one = 1.0f;
-    float zero = 0.0f;
+    const DLArrayHandle mean_arr, const DLArrayHandle var_arr, 
+    float eps, DLStreamHandle stream_handle = NULL) {
+    
+  int ndim = out_grads->ndim;
+  int size = 1;
+  int cols = out_grads->shape[ndim-1];
+  for(int i=0; i<ndim; i++)
+    size *= out_grads->shape[i];
+  int rows = size/cols;
+  const int64_t num_instances = rows;
+  const int64_t norm_size = cols;     
+  const float *dy_ptr = (const float *)out_grads->data;
+  const float *x_ptr = (const float *)in_arr->data;
+  const float *mean = (const float *)mean_arr->data;
+  const float *inv_variance = (const float *)var_arr->data;  
+  float *beta_diff = (float *)grad_bias->data;
+  float *gamma_diff = (float *)grad_scale->data;
+  float *dx_ptr = (float *)grad_arr->data;
+  float *gamma_ptr = (float *)ln_scale->data;
+  
+  const int64_t elem_cnt = size;
+  const int64_t m = out_grads->shape[ndim-1];
+  int max_active_blocks = 0;
+  
+  cudaStream_t cu_stream = NULL;
+  if(stream_handle)
+    cu_stream = (*(cudaStream_t *)(stream_handle->handle));
+    
+  cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+        &max_active_blocks, LayerNormParamGradImpl<float, int64_t>, GetLayerNormParamGradBlockSize(),
+        GetParamGradDynamicSharedMemorySize<float>(m));
 
-    cudnnReduceTensorDescriptor_t rtd;
-    CUDNN_CALL(cudnnCreateReduceTensorDescriptor(&rtd));
-    CUDNN_CALL(cudnnSetReduceTensorDescriptor(
-        rtd, CUDNN_REDUCE_TENSOR_ADD, CUDNN_DATA_FLOAT, CUDNN_PROPAGATE_NAN,
-        CUDNN_REDUCE_TENSOR_NO_INDICES, CUDNN_32BIT_INDICES));
+  cudaMemsetAsync(gamma_diff, 0, cols * sizeof(float), cu_stream);
+  cudaMemsetAsync(beta_diff, 0, cols * sizeof(float), cu_stream); 
 
-    cudnnTensorDescriptor_t adesc;
-    cudnnTensorDescriptor_t cdesc;
-    CUDNN_CALL(cudnnCreateTensorDescriptor(&adesc));
-    CUDNN_CALL(cudnnCreateTensorDescriptor(&cdesc));
-    int ori_ndim = out_grads->ndim;
-    int last_dim = out_grads->shape[ori_ndim - 1];
-    int ndim = max(ori_ndim, 4);
-    size_t cpu_mem = ndim * sizeof(int);
-    int *dimA = (int *)malloc(cpu_mem);
-    int *strideA = (int *)malloc(cpu_mem);
-    int *dimC = (int *)malloc(cpu_mem);
-    int *strideC = (int *)malloc(cpu_mem);
+  LayerNormParamGradImpl<float, int32_t><<<GetLayerNormParamGradNumBlocks(elem_cnt), GetLayerNormParamGradBlockSize(),
+               GetParamGradDynamicSharedMemorySize<float>(m), cu_stream>>>(
+                static_cast<int32_t>(elem_cnt), static_cast<int32_t>(m), dy_ptr, x_ptr, mean, inv_variance, gamma_ptr, gamma_diff,
+                beta_diff);
+                
+  DirectLoad<float, float> load_x(x_ptr, norm_size);
+  ScaleLoad<float, float, true> load_scaled_dy(dy_ptr, gamma_ptr, norm_size);
+  AddStore<float, float, false> store(nullptr, dx_ptr, norm_size);
+  DispatchLayerNormGrad<decltype(load_x), decltype(load_scaled_dy), decltype(store), float>(
+      cu_stream, load_x, load_scaled_dy, store,
+      mean, inv_variance, num_instances, norm_size);
+      
+  return 0;
+ }
 
-    int temp_strideA = 1;
-    int temp_strideC = 1;
-
-    for (int i = ndim - 1; i >= 0; --i) {
-        dimA[i] = i < ori_ndim ? (int)out_grads->shape[i] : 1;
-        dimC[i] = i == ori_ndim - 1 ? (int)out_grads->shape[i] : 1;
-        strideA[i] = temp_strideA;
-        strideC[i] = temp_strideC;
-        temp_strideA *= dimA[i];
-        temp_strideC *= dimC[i];
-    }
-    size_t size = temp_strideA * sizeof(float);
-
-    CUDNN_CALL(cudnnSetTensorNdDescriptor(adesc, CUDNN_DATA_FLOAT, ndim, dimA,
-                                          strideA));
-    CUDNN_CALL(cudnnSetTensorNdDescriptor(cdesc, CUDNN_DATA_FLOAT, ndim, dimC,
-                                          strideC));
-    CUDNN_CALL(cudnnReduceTensor(cudnn_map[dev_id], rtd, NULL, 0,
-                                 (void *)grad_arr->data, size, &one, adesc,
-                                 (const void *)out_grads->data, &zero, cdesc,
-                                 (void *)grad_bias->data));
-
-    size_t size1 = temp_strideA * sizeof(float);
-    size_t size2 = size1 / last_dim;
-
-    if (is_chunk_init(dev_id) == false) {
-        chunk_init(dev_id);
-    }
-    float *ws1 = (float *)find_chunk(size1, dev_id);
-    float *ws2 = (float *)find_chunk(size2, dev_id);
-    float *ws3 = (float *)find_chunk(size2, dev_id);
-
-    dim3 blocks;
-    dim3 threads;
-    if (temp_strideA <= 1024) {
-        threads.x = temp_strideA;
-        blocks.x = 1;
-    } else {
-        threads.x = 1024;
-        blocks.x = (temp_strideA + 1023) / 1024;
-    }
-
-    if (stream_handle)
-        process_kernel1<<<blocks, threads, 0,
-                          *(cudaStream_t *)stream_handle->handle>>>(
-            (const float *)out_grads->data, (const float *)in_arr->data,
-            (const float *)mean_arr->data, (const float *)var_arr->data,
-            (const float *)ln_scale->data, ws1, ws2, (float *)grad_arr->data,
-            eps, last_dim, temp_strideA);
-    else
-        process_kernel1<<<blocks, threads>>>(
-            (const float *)out_grads->data, (const float *)in_arr->data,
-            (const float *)mean_arr->data, (const float *)var_arr->data,
-            (const float *)ln_scale->data, ws1, ws2, (float *)grad_arr->data,
-            eps, last_dim, temp_strideA);
-
-    CUDNN_CALL(cudnnReduceTensor(cudnn_map[dev_id], rtd, NULL, 0, (void *)ws1,
-                                 size, &one, adesc, (const void *)ws1, &zero,
-                                 cdesc, (void *)grad_scale->data));
-
-    temp_strideC = 1;
-
-    for (int i = ndim - 1; i >= 0; --i) {
-        dimC[i] = i < ori_ndim - 1 ? (int)out_grads->shape[i] : 1;
-        strideC[i] = temp_strideC;
-        temp_strideC *= dimC[i];
-    }
-    CUDNN_CALL(cudnnSetTensorNdDescriptor(cdesc, CUDNN_DATA_FLOAT, ndim, dimC,
-                                          strideC));
-    CUDNN_CALL(cudnnReduceTensor(
-        cudnn_map[dev_id], rtd, NULL, 0, (void *)grad_arr->data, size, &one,
-        adesc, (const void *)grad_arr->data, &zero, cdesc, (void *)ws3));
-
-    if (stream_handle)
-        process_kernel2<<<blocks, threads, 0,
-                          *(cudaStream_t *)stream_handle->handle>>>(
-            (const float *)out_grads->data, (const float *)in_arr->data,
-            (const float *)mean_arr->data, (const float *)var_arr->data,
-            (const float *)ln_scale->data, ws1, ws2, ws3, eps, last_dim,
-            temp_strideA);
-    else
-        process_kernel2<<<blocks, threads>>>(
-            (const float *)out_grads->data, (const float *)in_arr->data,
-            (const float *)mean_arr->data, (const float *)var_arr->data,
-            (const float *)ln_scale->data, ws1, ws2, ws3, eps, last_dim,
-            temp_strideA);
-
-    CUDNN_CALL(cudnnReduceTensor(cudnn_map[dev_id], rtd, NULL, 0,
-                                 (void *)grad_arr->data, size, &one, adesc,
-                                 (const void *)ws1, &zero, cdesc, (void *)ws3));
-
-    if (stream_handle)
-        process_kernel3<<<blocks, threads, 0,
-                          *(cudaStream_t *)stream_handle->handle>>>(
-            ws1, ws3, (float *)grad_arr->data, last_dim, temp_strideA);
-    else
-        process_kernel3<<<blocks, threads>>>(ws1, ws3, (float *)grad_arr->data,
-                                             last_dim, temp_strideA);
-
-    del_chunk(ws1, dev_id);
-    del_chunk(ws2, dev_id);
-    del_chunk(ws3, dev_id);
-
-    CUDNN_CALL(cudnnDestroyTensorDescriptor(adesc));
-    CUDNN_CALL(cudnnDestroyTensorDescriptor(cdesc));
-    CUDNN_CALL(cudnnDestroyReduceTensorDescriptor(rtd));
-    free(dimA);
-    free(dimC);
-    free(strideA);
-    free(strideC);
-    return 0;
-}
+  
+    
