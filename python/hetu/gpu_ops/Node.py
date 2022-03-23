@@ -34,6 +34,8 @@ class Op(object):
         self.desc = self.name + \
             '(' + ', '.join([inp.name for inp in inputs]) + ')'
 
+        self.NoAllReduce = False
+
     def __add__(self, other):
         """Adding two nodes return a new node."""
         from .AddElewise import add_op

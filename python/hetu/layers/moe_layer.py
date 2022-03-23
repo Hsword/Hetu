@@ -63,9 +63,9 @@ class MoELayer(BaseLayer):
             l_aux, indices_s, location_s,gates_s, capacity =self.gate(reshaped_input)
                        
             if self.top==1:
-                dispatch_input =  ht.dispatch_encode_op(reshaped_input, indices_s, location_s, capacity, self.num_local_experts*self.all2all_size)
+                dispatch_input =  ht.layout_transform_op(reshaped_input, indices_s, location_s, capacity, self.num_local_experts*self.all2all_size)
             elif self.top==2:
-                dispatch_input =  ht.dispatch_encode_op(reshaped_input, indices_s, location_s, capacity, self.num_local_experts*self.all2all_size)
+                dispatch_input =  ht.layout_transform_op(reshaped_input, indices_s, location_s, capacity, self.num_local_experts*self.all2all_size)
             else:
                 raise NotImplementedError
         
@@ -82,7 +82,7 @@ class MoELayer(BaseLayer):
             expert_output = ht.concatenate_op(outputs, axis=0)
             expert_output = ht.alltoall_op(expert_output) 
             expert_output = ht.array_reshape_op(expert_output, [-1, self.embed_dim])
-            expert_output = ht.dispatch_decode_op(expert_output, indices_s, location_s, gates_s, capacity, self.num_local_experts * self.all2all_size)   
+            expert_output = ht.reverse_layout_transform_op(expert_output, indices_s, location_s, gates_s, capacity, self.num_local_experts * self.all2all_size)   
             return expert_output, l_aux
 
         elif self.name == 'BalanceAssignmentLayer':

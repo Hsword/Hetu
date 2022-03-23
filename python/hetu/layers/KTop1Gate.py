@@ -12,55 +12,63 @@ def balance_loss(gates, mask, num_experts):
     l_aux = ht.reducesumaxiszero_op(me * ce) * num_experts
     return l_aux
 
-def topkgating(logits, k, capacity_factor: float, num_tokens: int, num_experts: int, embed_dim: int):
-    """Implements Top1Gating on logits."""
+def ktop1gating(logits, k, capacity_factor: float, num_tokens: int, num_experts: int, embed_dim: int):
+    """Implements KTop1Gating on logits."""
     # everything is in fp32 in this function
-    gates = ht.softmax_op(logits)
+    num_experts_per_prototype = num_experts//k
+    gates = []
+    for i in range(k):
+        gates.append(ht.softmax_op(ht.split_op(logits, axes=[1,], indices=[i, ], splits=[k,])))
+    
     # round-up
     capacity = k * math.ceil((num_tokens / num_experts) * capacity_factor)
-    # Create a mask for 1st's expert per token
-    # noisy gating
-    topk_indices = ht.topk_idx_op(gates, topk=k)
     indices_s = []
     for i in range(k):
-        indices_s.append(ht.split_op(topk_indices, axes=[1,], indices=[i,], splits=[k,]))
+        indices_s.append(ht.topk_idx_op(gates[i], topk=1))
 
     mask_topk = []
     for i in range(k):
-        mask_topk.append(ht.array_reshape_op(ht.one_hot_op(indices_s[i], num_classes=num_experts), [-1, num_experts]))
-    
-    l_aux = balance_loss(gates, mask_topk[0], num_experts)
-    
+        mask_topk.append(ht.array_reshape_op(ht.one_hot_op(indices_s[i], num_classes=num_experts_per_prototype), [-1, num_experts_per_prototype]))
+
+    l_aux = balance_loss(gates[0], mask_topk[0], num_experts_per_prototype)
+    for i in range(1, k):
+        l_aux += balance_loss(gates[i], mask_topk[i], num_experts_per_prototype)
+
+
+    tmp = ht.mul_op(gates[0], mask_topk[0])
+    gates_s = [ht.reduce_sum_op(tmp, axes = 1)]
+    for i in range(1, k):
+        tmp = ht.mul_op(gates[i], mask_topk[i])
+        gates_s.append(ht.reduce_sum_op(tmp, axes = 1))
+
+
+
+
     locations1 = ht.cumsum_with_bias_op(mask_topk[0], bias = -1, dim=0)
 
     location_s = [ht.reduce_sum_op(locations1 * mask_topk[0], axes=1)]
 
 
 
-    acc_base = None
+#    acc_base = None
     for i in range(1, k):
-        acc_base = ht.reduce_sum_op(mask_topk[k - 1], axes=0, keepdims=True) if acc_base is None else acc_base + ht.reduce_sum_op(mask_topk[k - 1], axes=0, keepdims=True)
+#       acc_base = ht.reduce_sum_op(mask_topk[k - 1], axes=0, keepdims=True) if acc_base is None else acc_base + ht.reduce_sum_op(mask_topk[k - 1], axes=0, keepdims=True)
         locations2 = ht.cumsum_with_bias_op(mask_topk[i], bias = -1, dim=0)
-        locations2 += acc_base
+#       locations2 += acc_base
         location_s.append(ht.reduce_sum_op(locations2 * mask_topk[i], axes=1))
-        l_aux += balance_loss(gates, mask_topk[i], num_experts)
 
-    tmp = ht.mul_op(gates, mask_topk[0])
-    gates_s = [ht.reduce_sum_op(tmp, axes = 1)]
-    for i in range(1, k):
-        tmp = ht.mul_op(gates, mask_topk[i])
-        gates_s.append(ht.reduce_sum_op(tmp, axes = 1))
-        
+    for i in range(k):
+        indices_s[i]+=i*num_experts_per_prototype
 
     return l_aux, indices_s, location_s, gates_s, capacity
     
-class TopKGate(BaseLayer):
+class KTop1Gate(BaseLayer):
     def __init__(self, embed_dim: int, num_tokens: int, num_experts: int, k: int = 1,\
                        capacity_factor: float = 1.0, eval_capacity_factor: float = 1.0,\
-                       initializer=ht.init.GenXavierUniform(), name="TopK_Gate"):
+                       initializer=ht.init.GenXavierUniform(), name="KTop1_Gate"):
         self.embed_dim = embed_dim
         self.num_experts = num_experts
-        self.top_k = k
+        self.k = k
         self.num_tokens = num_tokens
         self.capacity_factor = capacity_factor
         self.eval_capacity_factor = eval_capacity_factor
@@ -76,4 +84,4 @@ class TopKGate(BaseLayer):
                 shape=(1, self.num_experts), name=self.name+'_linear_bias')
         bias_var = ht.broadcastto_op(bias_var, x)
         x = x + bias_var        
-        return topkgating(x, self.top_k, self.capacity_factor, self.num_tokens, self.num_experts, self.embed_dim)
+        return ktop1gating(x, self.k, self.capacity_factor, self.num_tokens, self.num_experts, self.embed_dim)

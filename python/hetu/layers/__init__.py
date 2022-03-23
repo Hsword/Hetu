@@ -11,3 +11,7 @@ from .sequence import Sequence
 from .TopGate import TopKGate
 from .BalanceGate import BalanceAssignmentGate
 from .moe_layer import Expert, MoELayer
+from .HashGate import HashGate
+from .hash_layer import HashLayer
+from .KTop1Gate import KTop1Gate
+from .ktop1_layer import KTop1Layer

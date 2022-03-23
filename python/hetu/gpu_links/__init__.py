@@ -65,6 +65,9 @@ from .DispatchEncode import *
 from .DispatchDecode import *
 from .IndexingLink import *
 from .Scatter1DLink import *
+from .LogLink import *
+from .NllLossLink import *
+
 
 __all__ = [
     'matrix_elementwise_add_by_const',
@@ -168,16 +171,22 @@ __all__ = [
     'clone',
     'max',
     'cumsum_with_bias',
-    'dispatch_encode_top1',
-    'dispatch_encode_top2',
-    'dispatch_decode_top1',
-    'dispatch_encode_top2',
+    'layout_transform_top1',
+    'layout_transform_top2',
+    'reverse_layout_transform_top1',
+    'reverse_layout_transform_top2',
     'indexing',
     'indexing_grad',
     'scatter1d',
     'scatter1d_grad',
-    'dispatch_encode_top1_gradient',
-    'dispatch_decode_top1_gradient_data',
-    'dispatch_decode_top1_gradient_gate',
-    'dispatch_decode_top2_gradient_data'
+    'reverse_layout_transform_top1_gradient',
+    'reverse_layout_transform_top1_gradient_data',
+    'reverse_layout_transform_top1_gradient_gate',
+    'reverse_layout_transform_top2_gradient_data',
+    'log_link',
+    'log_grad_link',
+    'nll_loss_link',
+    'nll_loss_grad_link',
+    'reverse_layout_transform_no_gate',
+    'reverse_layout_transform_no_gate_gradient'
 ]

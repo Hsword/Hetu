@@ -938,6 +938,7 @@ class SubExecutor(object):
             grouping_nodes.clear()
         for node in self.computing_nodes:
             if self.dynamic_memory:
+
                 # allocate memory for the node when dynamic_memory == True
                 if self.node_ref_cnt[node] is None or need_reallocation:
                     self.node_memory_plan(node)
@@ -967,13 +968,11 @@ class SubExecutor(object):
             else:
                 if len(grouping_nodes) > 0:
                     make_group()
-
                 for n in node.inputs:
                     if n.event:
                         n.event.sync()
                 input_vals = [self.node_to_arr_map[n] for n in node.inputs]
                 node_val = self.node_to_arr_map[node]
-
                 if isinstance(node, (ParameterServerCommunicateOp, ParameterServerSparsePullOp)):
                     # Here we use d2h stream in ps op, since the stream is used for d2h data transfer.
                     # Please take care at this part.
