@@ -67,14 +67,17 @@ from .TopKVal import topk_val_op
 from .Scatter import scatter_op
 from .Cumsum import cumsum_with_bias_op
 from .AllToAll import alltoall_op
-from .Dispatch_Encode import dispatch_encode_op
-from .Dispatch_Encode import dispatch_encode_gradient_op
-from .Dispatch_Decode import dispatch_decode_gradient_data_op
-from .Dispatch_Decode import dispatch_decode_gradient_gate_op
-from .Dispatch_Decode import dispatch_decode_op
+from .Dispatch_Encode import layout_transform_op
+from .Dispatch_Encode import layout_transform_gradient_op
+from .Dispatch_Decode import reverse_layout_transform_gradient_data_op
+from .Dispatch_Decode import reverse_layout_transform_gradient_gate_op
+from .Dispatch_Decode import reverse_layout_transform_op
 from .BalanceAssignment import balance_assignment_op
 from .Indexing import indexing_op
 from .Scatter1D import scatter1d_op, scatter1d_grad_op
+from .LogElewise import log_op, log_grad_op
+from .NllLoss import nll_loss_op, nll_loss_grad_op
+from .Dispatch_Decode_No_Gate import reverse_layout_transform_no_gate_op, reverse_layout_transform_no_gate_gradient_op
 
 __all__ = [
     'Executor',
@@ -189,13 +192,19 @@ __all__ = [
     'scatter_op',
     'cumsum_with_bias_op',
     'alltoall_op',
-    'dispatch_encode_op',
-    'dispatch_decode_op',
-    'dispatch_encode_gradient_op',
-    'dispatch_decode_gradient_data_op',
-    'dispatch_decode_gradient_gate_op',
+    'layout_transform_op',
+    'reverse_layout_transform_op',
+    'layout_transform_gradient_op',
+    'reverse_layout_transform_gradient_data_op',
+    'reverse_layout_transform_gradient_gate_op',
     'balance_assignment_op',
     'indexing_op',
     'scatter1d_op',
-    'scatter1d_grad_op'
+    'scatter1d_grad_op',
+    'log_op',
+    'log_grad_op',
+    'nll_loss_op',
+    'nll_loss_grad_op',
+    'reverse_layout_transform_no_gate_op',
+    'reverse_layout_transform_no_gate_gradient_op'
 ]

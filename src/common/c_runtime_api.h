@@ -911,6 +911,20 @@ HETUSYS_EXTERN_C {
     int DLGpuScatter1D(const DLArrayHandle input, DLArrayHandle index, DLArrayHandle output, DLStreamHandle stream_handle=NULL);
     
     int DLGpuScatter1DGrad(const DLArrayHandle output_grad, DLArrayHandle index, DLArrayHandle input_grad, DLStreamHandle stream_handle=NULL);
+
+    int DLGpuLog(const DLArrayHandle input, DLArrayHandle output, DLStreamHandle stream_handle=NULL);
+    
+    int DLGpuLogGrad(const DLArrayHandle output_grad, DLArrayHandle input, DLArrayHandle input_grad, DLStreamHandle stream_handle=NULL);
+
+    int DLGpuNllLoss(const DLArrayHandle input, DLArrayHandle target, DLArrayHandle output, DLStreamHandle stream_handle=NULL);
+
+    int DLGpuNllLossGrad(const DLArrayHandle output_grad, DLArrayHandle target, DLArrayHandle input, DLStreamHandle stream_handle=NULL);
+
+    int DLGpuDispatchDecodeNoGate(const DLArrayHandle input, DLArrayHandle indices_s, DLArrayHandle location_s, DLArrayHandle output, int capacity, DLStreamHandle stream_handle);
+
+    int DLGpuDispatchDecodeNoGateGradient(const DLArrayHandle input, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle output, int capacity, DLStreamHandle stream_handle);
+
+
 } // HETUSYS_EXTERN_C
 
 #endif // HETUSYS_RUNTIME_C_RUNTIME_API_H_

@@ -3,11 +3,10 @@ import numpy as np
 from torch import embedding
 from .Node import Op
 from .._base import DNNL_LIB
-from ..gpu_links import dispatch_decode_top1, dispatch_decode_top2
-from ..gpu_links import dispatch_decode_top1_gradient_data
-from ..gpu_links import dispatch_decode_top1_gradient_gate
-from ..gpu_links import dispatch_decode_top2_gradient_data
-
+from ..gpu_links import reverse_layout_transform_top1, reverse_layout_transform_top2
+from ..gpu_links import reverse_layout_transform_top1_gradient_data
+from ..gpu_links import reverse_layout_transform_top1_gradient_gate
+from ..gpu_links import reverse_layout_transform_top2_gradient_data
 
 class DispatchDecodeOp(Op):
     def __init__(self, input, indices_s, location_s, gates, capacity, num_experts, ctx=None):
@@ -30,23 +29,22 @@ class DispatchDecodeOp(Op):
             raise NotImplementedError
         else:
             if self.topK == 1:
-                dispatch_decode_top1(input_vals[0], input_vals[1], input_vals[2], input_vals[3],\
+                reverse_layout_transform_top1(input_vals[0], input_vals[1], input_vals[2], input_vals[3],\
                                         output_val, self.capacity, stream_handle)
             elif self.topK == 2:
-                dispatch_decode_top2(input_vals[0], input_vals[1], input_vals[2], input_vals[3],\
+                reverse_layout_transform_top2(input_vals[0], input_vals[1], input_vals[2], input_vals[3],\
                                         input_vals[4], input_vals[5],input_vals[6], output_val, self.capacity, stream_handle)
             else:
                 raise NotImplementedError
 
     def gradient(self, output_grad):
         if self.topK == 1:
-            return [dispatch_decode_gradient_data_op(output_grad, [self.inputs[1]], [self.inputs[2]], [self.inputs[3]], self.capacity, self.num_experts, ctx=self.raw_ctx),]+[None,]*2+[dispatch_decode_gradient_gate_op(output_grad, self.inputs[0], self.inputs[1], self.inputs[2], self.capacity, ctx=self.raw_ctx)]
+            return [reverse_layout_transform_gradient_data_op(output_grad, [self.inputs[1]], [self.inputs[2]], [self.inputs[3]], self.capacity, self.num_experts, ctx=self.raw_ctx),]+[None,]*2+[reverse_layout_transform_gradient_gate_op(output_grad, self.inputs[0], self.inputs[1], self.inputs[2], self.capacity, ctx=self.raw_ctx)]
         elif self.topK == 2:
-            grad_data = dispatch_decode_gradient_data_op(output_grad, [self.inputs[1], self.inputs[2]], [self.inputs[3], self.inputs[4]], [self.inputs[5], self.inputs[6]], self.capacity,self.num_experts, ctx=self.raw_ctx)
-            grad_gate_1 = dispatch_decode_gradient_gate_op(output_grad, self.inputs[0], self.inputs[1], self.inputs[3], self.capacity, ctx=self.raw_ctx) 
-            grad_gate_2 = dispatch_decode_gradient_gate_op(output_grad, self.inputs[0], self.inputs[2], self.inputs[4], self.capacity, ctx=self.raw_ctx)
+            grad_data = reverse_layout_transform_gradient_data_op(output_grad, [self.inputs[1], self.inputs[2]], [self.inputs[3], self.inputs[4]], [self.inputs[5], self.inputs[6]], self.capacity,self.num_experts, ctx=self.raw_ctx)
+            grad_gate_1 = reverse_layout_transform_gradient_gate_op(output_grad, self.inputs[0], self.inputs[1], self.inputs[3], self.capacity, ctx=self.raw_ctx) 
+            grad_gate_2 = reverse_layout_transform_gradient_gate_op(output_grad, self.inputs[0], self.inputs[2], self.inputs[4], self.capacity, ctx=self.raw_ctx)
             return [grad_data,]+[None,]*4+[grad_gate_1, grad_gate_2,]
-            return 
         else:
             assert 1 == -1
 
@@ -84,9 +82,9 @@ class DispatchDecodeGradientDataOp(Op):
             raise NotImplementedError
         else:
             if self.topK == 1:
-                dispatch_decode_top1_gradient_data(input_vals[0], input_vals[1], input_vals[2], input_vals[3], output_val, self.capacity, stream_handle)
+                reverse_layout_transform_top1_gradient_data(input_vals[0], input_vals[1], input_vals[2], input_vals[3], output_val, self.capacity, stream_handle)
             elif self.topK == 2:
-                dispatch_decode_top2_gradient_data(input_vals[0], input_vals[1], input_vals[2], input_vals[3], input_vals[4], input_vals[5], input_vals[6], output_val, self.capacity, stream_handle)
+                reverse_layout_transform_top2_gradient_data(input_vals[0], input_vals[1], input_vals[2], input_vals[3], input_vals[4], input_vals[5], input_vals[6], output_val, self.capacity, stream_handle)
             else:
                 raise NotImplementedError
         
@@ -109,7 +107,7 @@ class DispatchDecodeGradientGateOp(Op):
         if self.on_cpu:
             raise NotImplementedError
         else:
-            dispatch_decode_top1_gradient_gate(input_vals[0], input_vals[1], input_vals[2], input_vals[3], output_val, self.capacity, stream_handle)
+            reverse_layout_transform_top1_gradient_gate(input_vals[0], input_vals[1], input_vals[2], input_vals[3], output_val, self.capacity, stream_handle)
 
 
     def infer_shape(self, input_shapes):
@@ -118,7 +116,7 @@ class DispatchDecodeGradientGateOp(Op):
     def gradient(self, output_grad):
         return NotImplementedError
 
-def dispatch_decode_op(input, indices_s, location_s, gates, capacity, num_experts, ctx=None):
+def reverse_layout_transform_op(input, indices_s, location_s, gates, capacity, num_experts, ctx=None):
     """Calculate the dispatch encode.
 
     Parameters:
@@ -134,8 +132,8 @@ def dispatch_decode_op(input, indices_s, location_s, gates, capacity, num_expert
     """
     return DispatchDecodeOp(input, indices_s, location_s, gates, capacity, num_experts, ctx=ctx)
 
-def dispatch_decode_gradient_data_op(input, indices, locations, gates, capacity, num_experts, ctx=None):
+def reverse_layout_transform_gradient_data_op(input, indices, locations, gates, capacity, num_experts, ctx=None):
     return DispatchDecodeGradientDataOp(input, indices, locations, gates, capacity, num_experts, ctx=None)
 
-def dispatch_decode_gradient_gate_op(combined_output, expert_output, indices, locations, capacity, ctx=None):
+def reverse_layout_transform_gradient_gate_op(combined_output, expert_output, indices, locations, capacity, ctx=None):
     return DispatchDecodeGradientGateOp(combined_output, expert_output, indices, locations, capacity, ctx=ctx)
