@@ -8,7 +8,7 @@ from ..gpu_links import reverse_layout_transform_top1_gradient_data
 from ..gpu_links import reverse_layout_transform_top1_gradient_gate
 from ..gpu_links import reverse_layout_transform_top2_gradient_data
 
-class DispatchDecodeOp(Op):
+class ReverseLayoutTransformOp(Op):
     def __init__(self, input, indices_s, location_s, gates, capacity, num_experts, ctx=None):
         
         input_node_list = [input, ]
@@ -19,7 +19,7 @@ class DispatchDecodeOp(Op):
         for node in gates:
             input_node_list.append(node)
 
-        super().__init__(DispatchDecodeOp, input_node_list, ctx)
+        super().__init__(ReverseLayoutTransformOp, input_node_list, ctx)
         self.capacity = capacity
         self.topK = len(indices_s)
         self.num_experts = num_experts
@@ -62,7 +62,7 @@ class DispatchDecodeOp(Op):
         else:
             status.set_state(None, 1)
 
-class DispatchDecodeGradientDataOp(Op):
+class ReverseLayoutTransformGradientDataOp(Op):
     def __init__(self, input, indices_s, location_s, gates, capacity, num_experts, ctx):
         input_node_list = [input, ]
         for node in indices_s:
@@ -72,7 +72,7 @@ class DispatchDecodeGradientDataOp(Op):
         for node in gates:
             input_node_list.append(node)
         
-        super().__init__(DispatchDecodeGradientDataOp, input_node_list, ctx)
+        super().__init__(ReverseLayoutTransformGradientDataOp, input_node_list, ctx)
         self.capacity = capacity
         self.num_experts = num_experts
         self.topK = len(indices_s)
@@ -97,10 +97,10 @@ class DispatchDecodeGradientDataOp(Op):
     def gradient(self, output_grad):
         return NotImplementedError
 
-class DispatchDecodeGradientGateOp(Op):
+class ReverseLayoutTransformGradientGateOp(Op):
     def __init__(self, combined_output, expert_output, indice, location, capacity, ctx):
         input_node_list = [combined_output, expert_output, indice, location]
-        super().__init__(DispatchDecodeGradientGateOp, input_node_list, ctx)
+        super().__init__(ReverseLayoutTransformGradientGateOp, input_node_list, ctx)
         self.capacity = capacity
 
     def compute(self, input_vals, output_val, stream_handle=None):
@@ -130,10 +130,10 @@ def reverse_layout_transform_op(input, indices_s, location_s, gates, capacity, n
     A new Node instance created by Op.
 
     """
-    return DispatchDecodeOp(input, indices_s, location_s, gates, capacity, num_experts, ctx=ctx)
+    return ReverseLayoutTransformOp(input, indices_s, location_s, gates, capacity, num_experts, ctx=ctx)
 
 def reverse_layout_transform_gradient_data_op(input, indices, locations, gates, capacity, num_experts, ctx=None):
-    return DispatchDecodeGradientDataOp(input, indices, locations, gates, capacity, num_experts, ctx=None)
+    return ReverseLayoutTransformGradientDataOp(input, indices, locations, gates, capacity, num_experts, ctx=None)
 
 def reverse_layout_transform_gradient_gate_op(combined_output, expert_output, indices, locations, capacity, ctx=None):
-    return DispatchDecodeGradientGateOp(combined_output, expert_output, indices, locations, capacity, ctx=ctx)
+    return ReverseLayoutTransformGradientGateOp(combined_output, expert_output, indices, locations, capacity, ctx=ctx)

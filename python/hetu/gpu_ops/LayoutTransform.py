@@ -7,7 +7,7 @@ from ..gpu_links import layout_transform_top1, layout_transform_top2
 from ..gpu_links import layout_transform_top1_gradient
 from .AddElewise import add_op
 
-class DispatchEncodeOp(Op):
+class LayoutTransformOp(Op):
     def __init__(self, input, indices_s, location_s, capacity, total_experts, ctx=None):
         
         input_node_list = [input, ]
@@ -16,7 +16,7 @@ class DispatchEncodeOp(Op):
         for node in location_s:
             input_node_list.append(node)
 
-        super().__init__(DispatchEncodeOp, input_node_list, ctx)
+        super().__init__(LayoutTransformOp, input_node_list, ctx)
         self.capacity = capacity
         self.topK = len(indices_s)
         self.total_experts = total_experts
@@ -59,10 +59,10 @@ class DispatchEncodeOp(Op):
         else:
             status.set_state(None, 1)
 
-class DispatchEncodeGradientOp(Op):
+class LayoutTransformGradientOp(Op):
     def __init__(self, input, indice, location, capacity, ctx=None):
         input_node_list = [input, indice, location]
-        super().__init__(DispatchEncodeGradientOp, input_node_list, ctx)
+        super().__init__(LayoutTransformGradientOp, input_node_list, ctx)
         self.capacity = capacity
 
     def compute(self, input_vals, output_val, stream_handle=None):
@@ -94,7 +94,7 @@ def layout_transform_op(input, indices_s, location_s, capacity, total_experts, c
     A new Node instance created by Op.
 
     """
-    return DispatchEncodeOp(input, indices_s, location_s, capacity, total_experts, ctx=ctx)
+    return LayoutTransformOp(input, indices_s, location_s, capacity, total_experts, ctx=ctx)
 
 def layout_transform_gradient_op(input, indice, location,capacity, ctx=None):
-    return DispatchEncodeGradientOp(input, indice, location, capacity, ctx=ctx)
+    return LayoutTransformGradientOp(input, indice, location, capacity, ctx=ctx)

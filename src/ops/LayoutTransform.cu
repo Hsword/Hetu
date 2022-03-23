@@ -115,7 +115,7 @@ __global__ void backward_gate(const float* dispatched_input_data, float* reshape
     return;
 }
 
-int DLGpuDispatchEncodeTop1(const DLArrayHandle input, DLArrayHandle indices_s, DLArrayHandle location_s,
+int DLGpuLayoutTransformTop1(const DLArrayHandle input, DLArrayHandle indices_s, DLArrayHandle location_s,
     DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
    
 
@@ -154,7 +154,7 @@ int DLGpuDispatchEncodeTop1(const DLArrayHandle input, DLArrayHandle indices_s, 
 }
 
 
-int DLGpuDispatchEncodeTop2(const DLArrayHandle input, DLArrayHandle indices_s1, DLArrayHandle indices_s2, DLArrayHandle location_s1, DLArrayHandle location_s2, DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
+int DLGpuLayoutTransformTop2(const DLArrayHandle input, DLArrayHandle indices_s1, DLArrayHandle indices_s2, DLArrayHandle location_s1, DLArrayHandle location_s2, DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
     
     assert(input->ndim == 2); // (num_sample * model_dim)
     int samples = input->shape[0];
@@ -188,7 +188,7 @@ int DLGpuDispatchEncodeTop2(const DLArrayHandle input, DLArrayHandle indices_s1,
     return 0;
 }
 
-int DLGpuDispatchDecodeTop1(const DLArrayHandle input, DLArrayHandle indices_s, DLArrayHandle location_s, DLArrayHandle gates, \
+int DLGpuReverseLayoutTransformTop1(const DLArrayHandle input, DLArrayHandle indices_s, DLArrayHandle location_s, DLArrayHandle gates, \
             DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
     assert(input->ndim == 2);
     assert(output->ndim == 2);
@@ -216,7 +216,7 @@ int DLGpuDispatchDecodeTop1(const DLArrayHandle input, DLArrayHandle indices_s, 
     return 0;
 }
 
-int DLGpuDispatchDecodeTop2(const DLArrayHandle input, DLArrayHandle indices_s1, DLArrayHandle indices_s2, DLArrayHandle location_s1, \
+int DLGpuReverseLayoutTransformTop2(const DLArrayHandle input, DLArrayHandle indices_s1, DLArrayHandle indices_s2, DLArrayHandle location_s1, \
             DLArrayHandle location_s2, DLArrayHandle gates_1, DLArrayHandle gates_2, DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
     assert(input->ndim == 2);
     assert(output->ndim == 2);
@@ -253,7 +253,7 @@ int DLGpuDispatchDecodeTop2(const DLArrayHandle input, DLArrayHandle indices_s1,
     return 0;
 }
 
-int DLGpuDispatchEncodeTop1Gradient(const DLArrayHandle input, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
+int DLGpuLayoutTransformTop1Gradient(const DLArrayHandle input, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
     assert(input->ndim == 2);
     assert(output->ndim == 2);
     int samples = output->shape[0];
@@ -278,7 +278,7 @@ int DLGpuDispatchEncodeTop1Gradient(const DLArrayHandle input, DLArrayHandle ind
 }
 
 
-int DLGpuDispatchDecodeTop1GradientData(const DLArrayHandle input, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle gate, DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
+int DLGpuReverseLayoutTransformTop1GradientData(const DLArrayHandle input, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle gate, DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
     assert(input->ndim==2);
     assert(output->ndim==2);
     int samples = input->shape[0];
@@ -309,7 +309,7 @@ int DLGpuDispatchDecodeTop1GradientData(const DLArrayHandle input, DLArrayHandle
 }
 
 
-int DLGpuDispatchDecodeTop2GradientData(const DLArrayHandle input, DLArrayHandle indice_1, DLArrayHandle indice_2, DLArrayHandle location_1, DLArrayHandle location_2, DLArrayHandle gate_1, DLArrayHandle gate_2, DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
+int DLGpuReverseLayoutTransformTop2GradientData(const DLArrayHandle input, DLArrayHandle indice_1, DLArrayHandle indice_2, DLArrayHandle location_1, DLArrayHandle location_2, DLArrayHandle gate_1, DLArrayHandle gate_2, DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
     assert(input->ndim==2);
     assert(output->ndim==2);
     int samples = input->shape[0];
@@ -347,7 +347,7 @@ int DLGpuDispatchDecodeTop2GradientData(const DLArrayHandle input, DLArrayHandle
     return 0;
 }
 
-int DLGpuDispatchDecodeTop1GradientGate(const DLArrayHandle combined_output,DLArrayHandle expert_output, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
+int DLGpuReverseLayoutTransformTop1GradientGate(const DLArrayHandle combined_output,DLArrayHandle expert_output, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
     
     assert(combined_output->ndim==2);
     assert(expert_output->ndim==2);
@@ -379,7 +379,7 @@ int DLGpuDispatchDecodeTop1GradientGate(const DLArrayHandle combined_output,DLAr
 }
 
 
-int DLGpuDispatchDecodeNoGate(const DLArrayHandle input, DLArrayHandle indices_s, DLArrayHandle location_s, \
+int DLGpuReverseLayoutTransformNoGate(const DLArrayHandle input, DLArrayHandle indices_s, DLArrayHandle location_s, \
                     DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
     assert(input->ndim == 2);       
     assert(output->ndim == 2);            
@@ -405,7 +405,7 @@ int DLGpuDispatchDecodeNoGate(const DLArrayHandle input, DLArrayHandle indices_s
     return 0;
 }
 
-int DLGpuDispatchDecodeNoGateGradient(const DLArrayHandle input, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
+int DLGpuReverseLayoutTransformNoGateGradient(const DLArrayHandle input, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle output, int capacity, DLStreamHandle stream_handle){
     assert(input->ndim==2);
     assert(output->ndim==2);
     int samples = input->shape[0];
