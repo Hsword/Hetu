@@ -887,22 +887,22 @@ HETUSYS_EXTERN_C {
     int DLGpuTopKVal(const DLArrayHandle input, DLArrayHandle output_idx, DLArrayHandle output_val, int k, 
             DLStreamHandle stream_handle = NULL);
     
-    int DLGpuDispatchEncodeTop1(const DLArrayHandle input, DLArrayHandle indices_s, DLArrayHandle location_s, DLArrayHandle output, int capacity, DLStreamHandle stream_handle = NULL);
+    int DLGpuLayoutTransformTop1(const DLArrayHandle input, DLArrayHandle indices_s, DLArrayHandle location_s, DLArrayHandle output, int capacity, DLStreamHandle stream_handle = NULL);
 
-    int DLGpuDispatchEncodeTop2(const DLArrayHandle input, DLArrayHandle indices_s1, DLArrayHandle indices_s2, DLArrayHandle location_s1, DLArrayHandle location_s2, DLArrayHandle output, int capacity, DLStreamHandle stream_handle=NULL);
+    int DLGpuLayoutTransformTop2(const DLArrayHandle input, DLArrayHandle indices_s1, DLArrayHandle indices_s2, DLArrayHandle location_s1, DLArrayHandle location_s2, DLArrayHandle output, int capacity, DLStreamHandle stream_handle=NULL);
 
-    int DLGpuDispatchDecodeTop1(const DLArrayHandle input, DLArrayHandle indices_s, DLArrayHandle location_s, DLArrayHandle gates, DLArrayHandle output, int capacity, DLStreamHandle stream_handle = NULL);
+    int DLGpuReverseLayoutTransformTop1(const DLArrayHandle input, DLArrayHandle indices_s, DLArrayHandle location_s, DLArrayHandle gates, DLArrayHandle output, int capacity, DLStreamHandle stream_handle = NULL);
 
-    int DLGpuDispatchDecodeTop2(const DLArrayHandle input, DLArrayHandle indices_s1, DLArrayHandle indices_s2, DLArrayHandle location_s1, DLArrayHandle location_s2, DLArrayHandle gates_1, DLArrayHandle gates_2, DLArrayHandle output, int capacity, DLStreamHandle stream_handle=NULL);
+    int DLGpuReverseLayoutTransformTop2(const DLArrayHandle input, DLArrayHandle indices_s1, DLArrayHandle indices_s2, DLArrayHandle location_s1, DLArrayHandle location_s2, DLArrayHandle gates_1, DLArrayHandle gates_2, DLArrayHandle output, int capacity, DLStreamHandle stream_handle=NULL);
 
-    int DLGpuDispatchEncodeTop1Gradient(const DLArrayHandle input, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle output, int capacity, DLStreamHandle stream_handle=NULL);
+    int DLGpuLayoutTransformTop1Gradient(const DLArrayHandle input, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle output, int capacity, DLStreamHandle stream_handle=NULL);
 
-    int DLGpuDispatchDecodeTop1GradientData(const DLArrayHandle input, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle gate, DLArrayHandle output, int capacity, DLStreamHandle stream_handle=NULL);
+    int DLGpuReverseLayoutTransformTop1GradientData(const DLArrayHandle input, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle gate, DLArrayHandle output, int capacity, DLStreamHandle stream_handle=NULL);
     
-    int DLGpuDispatchDecodeTop2GradientData(const DLArrayHandle input, DLArrayHandle indice_1, DLArrayHandle indice_2, DLArrayHandle location_1, DLArrayHandle location_2, DLArrayHandle gate_1, DLArrayHandle gate_2, DLArrayHandle output, int capacity, DLStreamHandle stream_handle=NULL);
+    int DLGpuReverseLayoutTransformTop2GradientData(const DLArrayHandle input, DLArrayHandle indice_1, DLArrayHandle indice_2, DLArrayHandle location_1, DLArrayHandle location_2, DLArrayHandle gate_1, DLArrayHandle gate_2, DLArrayHandle output, int capacity, DLStreamHandle stream_handle=NULL);
 
 
-    int DLGpuDispatchDecodeTop1GradientGate(const DLArrayHandle combined_output, DLArrayHandle expert_output, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle output, int capacity, DLStreamHandle stream_handle=NULL);
+    int DLGpuReverseLayoutTransformTop1GradientGate(const DLArrayHandle combined_output, DLArrayHandle expert_output, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle output, int capacity, DLStreamHandle stream_handle=NULL);
 
     int DLGpuIndexing(const DLArrayHandle input, DLArrayHandle index, DLArrayHandle output, DLStreamHandle stream_handle=NULL);
 
@@ -920,9 +920,9 @@ HETUSYS_EXTERN_C {
 
     int DLGpuNllLossGrad(const DLArrayHandle output_grad, DLArrayHandle target, DLArrayHandle input, DLStreamHandle stream_handle=NULL);
 
-    int DLGpuDispatchDecodeNoGate(const DLArrayHandle input, DLArrayHandle indices_s, DLArrayHandle location_s, DLArrayHandle output, int capacity, DLStreamHandle stream_handle);
+    int DLGpuReverseLayoutTransformNoGate(const DLArrayHandle input, DLArrayHandle indices_s, DLArrayHandle location_s, DLArrayHandle output, int capacity, DLStreamHandle stream_handle);
 
-    int DLGpuDispatchDecodeNoGateGradient(const DLArrayHandle input, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle output, int capacity, DLStreamHandle stream_handle);
+    int DLGpuReverseLayoutTransformNoGateGradient(const DLArrayHandle input, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle output, int capacity, DLStreamHandle stream_handle);
 
 
 } // HETUSYS_EXTERN_C

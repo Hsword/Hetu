@@ -4,7 +4,7 @@ from .Node import Op
 from .._base import DNNL_LIB
 from ..gpu_links import reverse_layout_transform_no_gate, reverse_layout_transform_no_gate_gradient
 
-class DispatchDecodeNoGateOp(Op):
+class ReverseLayoutTransformNoGateOp(Op):
     def __init__(self, input, indices_s, location_s, capacity, num_experts, ctx=None):
         
         input_node_list = [input, ]
@@ -13,7 +13,7 @@ class DispatchDecodeNoGateOp(Op):
         for node in location_s:
             input_node_list.append(node)
 
-        super().__init__(DispatchDecodeNoGateOp, input_node_list, ctx)
+        super().__init__(ReverseLayoutTransformNoGateOp, input_node_list, ctx)
         self.capacity = capacity
         self.num_experts = num_experts
 
@@ -38,7 +38,7 @@ class DispatchDecodeNoGateOp(Op):
         else:
             status.set_state(None, 1)
 
-class DispatchDecodeNoGateGradientOp(Op):
+class ReverseLayoutTransformNoGateGradientOp(Op):
     def __init__(self, input, indices_s, location_s, capacity, num_experts, ctx):
         input_node_list = [input, ]
         for node in indices_s:
@@ -46,7 +46,7 @@ class DispatchDecodeNoGateGradientOp(Op):
         for node in location_s:
             input_node_list.append(node)
         
-        super().__init__(DispatchDecodeNoGateGradientOp, input_node_list, ctx)
+        super().__init__(ReverseLayoutTransformNoGateGradientOp, input_node_list, ctx)
         self.capacity = capacity
         self.num_experts = num_experts
 
@@ -79,8 +79,8 @@ def reverse_layout_transform_no_gate_op(input, indices_s, location_s, capacity, 
     A new Node instance created by Op.
 
     """
-    return DispatchDecodeNoGateOp(input, indices_s, location_s, capacity, num_experts, ctx=ctx)
+    return ReverseLayoutTransformNoGateOp(input, indices_s, location_s, capacity, num_experts, ctx=ctx)
 
 def reverse_layout_transform_no_gate_gradient_op(input, indices, locations, capacity, num_experts, ctx=None):
-    return DispatchDecodeNoGateGradientOp(input, indices, locations, capacity, num_experts, ctx=None)
+    return ReverseLayoutTransformNoGateGradientOp(input, indices, locations, capacity, num_experts, ctx=None)
 

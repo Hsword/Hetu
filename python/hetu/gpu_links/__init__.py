@@ -66,8 +66,8 @@ from .MinusElewiseLink import *
 from .CloneLink import *
 from .MaxLink import *
 from .CumSumLink import *
-from .DispatchEncode import *
-from .DispatchDecode import *
+from .LayoutTransform import *
+from .ReverseLayoutTransform import *
 from .IndexingLink import *
 from .Scatter1DLink import *
 from .LogLink import *
