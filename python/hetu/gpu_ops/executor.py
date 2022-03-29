@@ -37,6 +37,8 @@ import pickle
 
 import hetu as ht
 
+import hetu as ht
+
 def path_to_lib(name):
     curr_path = os.path.dirname(os.path.abspath(os.path.expanduser(__file__)))
     lib_path = os.path.join(curr_path, '../../../build/lib/')

@@ -56,9 +56,12 @@ from .CrossEntropySparseLink import *
 from .OneHotLink import *
 from .InitializersLink import *
 from .DotLink import *
+<<<<<<< HEAD
 from .LinearLink import *
 from .CudnnConv2dAddBiasLink import *
 from .GeluLink import *
+=======
+>>>>>>> 57723902bdb797bdb4d524c0cb3b6140b517b9a3
 from .TopKIdxLink import *
 from .TopKValLink import *
 from .ScatterLink import *
