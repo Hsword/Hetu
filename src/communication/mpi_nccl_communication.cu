@@ -137,6 +137,99 @@ void _ncclAllReduce(const void *sendbuff, void *recvbuff, int size,
                             _get_proper_redop(op), comm, stream));
 }
 
+void _ncclHAllToAll(const void *sendbuff, void *recvbuff, int size, int datatype, ncclComm_t comm, cudaStream_t stream, int num_nodes, int num_local_gpus) {
+    ncclDataType_t type = _get_proper_datatype(datatype);
+    int unit_size = sizeof(type);
+    switch(type){
+        case 0: 
+        case 1:   
+            unit_size = 1;   
+            break;                  
+        case 5:      
+            unit_size = 2;   
+            break;                  
+        case 2:          
+        case 3:       
+        case 7:   
+            unit_size = 4;   
+            break;                  
+        case 4:    
+        case 8:   
+            unit_size = 8;
+            break;                      
+    }
+    int split_size = size / num_nodes;
+    GroupStart();
+    for(int i = 0; i < num_nodes; i++){
+        NCCLCHECK(ncclSend(sendbuff+i*split_size*unit_size, split_size, type, i*num_local_gpus, comm, stream));
+        NCCLCHECK(ncclRecv(recvbuff+i*split_size*unit_size, split_size, type, i*num_local_gpus, comm, stream));
+    }
+    GroupEnd();
+}
+
+void _ncclHA2AGather(const void *send_buff, void *recv_buff, int size, int datatype, int myrank, int num_local_gpus, ncclComm_t comm, cudaStream_t stream){
+    ncclDataType_t type = _get_proper_datatype(datatype);
+    int unit_size = sizeof(type);
+    switch(type){               
+        case 0:         
+        case 1:   
+            unit_size = 1;   
+            break;                  
+        case 5:   
+            unit_size = 2;   
+            break;                  
+        case 2:          
+        case 3:       
+        case 7:   
+            unit_size = 4;   
+            break;                  
+        case 4:          
+        case 8:  
+            unit_size = 8;   
+            break;        
+    } 
+    GroupStart(); 
+    if(myrank%num_local_gpus==0){
+        for(int i=0; i<num_local_gpus; i++){
+            NCCLCHECK(ncclRecv(recv_buff+i*size*unit_size, size, type, i+myrank, comm, stream));
+        }
+    }
+    int target = myrank - myrank%num_local_gpus;
+    NCCLCHECK(ncclSend(send_buff, size, type, target, comm, stream));
+    GroupEnd();
+}
+
+void _ncclHA2AScatter(const void *send_buff, void *recv_buff, int size, int datatype, int myrank, int num_local_gpus, ncclComm_t comm, cudaStream_t stream){
+   ncclDataType_t type = _get_proper_datatype(datatype);
+    int unit_size = sizeof(type);
+    switch(type){               
+        case 0:         
+        case 1:   
+            unit_size = 1;   
+            break;                  
+        case 5:   
+            unit_size = 2;   
+            break;                  
+        case 2:          
+        case 3:       
+        case 7:   
+            unit_size = 4;   
+            break;                  
+        case 4:          
+        case 8:  
+            unit_size = 8;   
+            break;        
+    }   
+    GroupStart(); 
+    if(myrank%num_local_gpus==0){
+        for(int i=0; i<num_local_gpus; i++){
+            NCCLCHECK(ncclSend(send_buff+i*size*unit_size, size, type, i+myrank, comm, stream));
+        }
+    }
+    int src = myrank - myrank%num_local_gpus;
+    NCCLCHECK(ncclRecv(recv_buff, size, type, src, comm, stream));
+    GroupEnd();
+}
 void _ncclAllToAll(const void *sendbuff, void *recvbuff, int size,
 				   int datatype, ncclComm_t comm,
 				   cudaStream_t stream, int num_of_peers) {
@@ -252,6 +345,19 @@ void dlarrayAllToAll(DLArray *sendarray, DLArray *recvarray, int datatype, ncclC
 	_ncclAllToAll(send_data_buffer, recv_data_buffer, size, datatype, comm, stream, num_of_peers);
 }
 
+void dlarrayHAllToAll(DLArray *sendarray, DLArray *recvarray, int datatype, ncclComm_t comm, DLStreamHandle stream_handle, int num_nodes, int num_local_gpus){
+    int size = 1;
+    for(int i = 0; i < sendarray->ndim; i++){         
+        size = size * sendarray->shape[i];                      
+    }            
+    float *send_data_buffer = (float *)(sendarray->data); 
+    float* recv_data_buffer = (float *)(recvarray->data);                    
+    cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
+                        
+    _ncclHAllToAll(send_data_buffer, recv_data_buffer, size, datatype, comm, stream, num_nodes, num_local_gpus);
+}
+
+
 void dlarraySend(DLArray *array, int datatype, int target, ncclComm_t comm,
                  DLStreamHandle stream_handle) {
     int size = 1;
@@ -274,6 +380,29 @@ void dlarrayRecv(DLArray *array, int datatype, int src, ncclComm_t comm,
     cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
 
     _ncclRecv(data_buffer, size, datatype, src, comm, stream);
+}
+
+void dlarrayHA2AGather(DLArray *sendarr, DLArray *recvarr, int datatype, int myrank, int num_local_gpus, ncclComm_t comm, DLStreamHandle stream_handle){
+    int size = 1;
+    for (int i = 0; i < sendarr->ndim; i++){
+        size *= sendarr->shape[i];
+    }
+    float* recv_buff = (float*)(recvarr->data);
+    float* send_buff = (float*)(sendarr->data);
+    cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
+    _ncclHA2AGather(send_buff, recv_buff, size, datatype, myrank, num_local_gpus, comm, stream);
+}
+
+
+void dlarrayHA2AScatter(DLArray *sendarr, DLArray *recvarr, int datatype, int myrank, int num_local_gpus, ncclComm_t comm, DLStreamHandle stream_handle){
+    int size = 1;
+    for (int i = 0; i < recvarr->ndim; i++){
+        size *= recvarr->shape[i];
+    }
+    float* recv_buff = (float*)(recvarr->data);
+    float* send_buff = (float*)(sendarr->data);
+    cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
+    _ncclHA2AScatter(send_buff, recv_buff, size, datatype, myrank, num_local_gpus, comm, stream);
 }
 
 void commDestroyNccl(ncclComm_t *comm) {

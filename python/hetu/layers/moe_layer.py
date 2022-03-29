@@ -71,6 +71,7 @@ class MoELayer(BaseLayer):
         
                 
             dispatch_input = ht.alltoall_op(dispatch_input)
+#            dispatch_input = ht.halltoall_op(dispatch_input, 2, 8)
             dispatch_input = ht.array_reshape_op(dispatch_input, [self.all2all_size, self.num_local_experts, -1, self.embed_dim])
             
             outputs = []
@@ -81,6 +82,7 @@ class MoELayer(BaseLayer):
 
             expert_output = ht.concatenate_op(outputs, axis=0)
             expert_output = ht.alltoall_op(expert_output) 
+#            expert_output = ht.halltoall_op(expert_output, 2, 8)
             expert_output = ht.array_reshape_op(expert_output, [-1, self.embed_dim])
             expert_output = ht.reverse_layout_transform_op(expert_output, indices_s, location_s, gates_s, capacity, self.num_local_experts * self.all2all_size)   
             return expert_output, l_aux

@@ -1,7 +1,6 @@
 import numpy as np
 import hetu as ht
 from hetu import layers as htl
-from tester import HetuTester
 import argparse
 import logging
 logging.basicConfig(level=logging.INFO,

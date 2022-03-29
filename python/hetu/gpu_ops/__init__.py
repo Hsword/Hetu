@@ -73,6 +73,10 @@ from .Scatter1D import scatter1d_op, scatter1d_grad_op
 from .LogElewise import log_op, log_grad_op
 from .NllLoss import nll_loss_op, nll_loss_grad_op
 from .ReverseLayoutTransformNoGate import reverse_layout_transform_no_gate_op, reverse_layout_transform_no_gate_gradient_op
+from .HAllToAll import halltoall_op
+from .SamGroupSum import sam_group_sum_op
+from .GroupTopKIdx import group_topk_idx_op
+from .SamMax import sam_max_op
 
 __all__ = [
     'Executor',
@@ -195,5 +199,9 @@ __all__ = [
     'nll_loss_op',
     'nll_loss_grad_op',
     'reverse_layout_transform_no_gate_op',
-    'reverse_layout_transform_no_gate_gradient_op'
+    'reverse_layout_transform_no_gate_gradient_op',
+    'halltoall_op',
+    'sam_group_sum_op',
+    'group_topk_idx_op',
+    'sam_max_op'
 ]

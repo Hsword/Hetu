@@ -844,7 +844,17 @@ HETUSYS_EXTERN_C {
 
     int DLGpuReverseLayoutTransformNoGateGradient(const DLArrayHandle input, DLArrayHandle indice, DLArrayHandle location, DLArrayHandle output, int capacity, DLStreamHandle stream_handle);
 
+    int DLGpuHA2ALayoutTransform(const DLArrayHandle input, DLArrayHandle output, int num_nodes, int num_local_gpus, DLStreamHandle stream_handle);
 
+    int DLGpuHA2AReverseLayoutTransform(const DLArrayHandle input, DLArrayHandle output, int num_nodes, int num_local_gpus, DLStreamHandle stream_handle);
+    
+    int DLGpuSamGroupSum(const DLArrayHandle gate, DLArrayHandle output, int num_local_gpus, DLStreamHandle stream_handle);
+
+    int DLGpuGroupTopKIdx(const DLArrayHandle input, DLArrayHandle top1_group, DLArrayHandle output_idx, int k, int num_local_gpus, DLStreamHandle stream_handle);
+
+    int DLGpuSamMax(const DLArrayHandle input, DLArrayHandle top1_group, DLArrayHandle topk_indice, DLArrayHandle output, int num_local_gpus, DLStreamHandle stream_handle);
+
+    int DLGpuSamMaxGrad(const DLArrayHandle output_grad, DLArrayHandle input, DLArrayHandle top1_group, DLArrayHandle topk_indice, DLArrayHandle output, int num_local_gpus, DLStreamHandle stream_handle);
 } // HETUSYS_EXTERN_C
 
 #endif // HETUSYS_RUNTIME_C_RUNTIME_API_H_
