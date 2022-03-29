@@ -72,7 +72,10 @@ from .IndexingLink import *
 from .Scatter1DLink import *
 from .LogLink import *
 from .NllLossLink import *
-
+from .HA2ALayoutTransform import *
+from .SamGroupSumLink import *
+from .GroupTopKIdxLink import *
+from .SamMaxLink import *
 
 __all__ = [
     'matrix_elementwise_add_by_const',
@@ -201,5 +204,11 @@ __all__ = [
     'nll_loss_link',
     'nll_loss_grad_link',
     'reverse_layout_transform_no_gate',
-    'reverse_layout_transform_no_gate_gradient'
+    'reverse_layout_transform_no_gate_gradient',
+    'ha2a_layout_transform',
+    'ha2a_reverse_layout_transform',
+    'sam_group_sum_link',
+    'group_topk_idx',
+    'sammax_link',
+    'sammax_grad_link'
 ]

@@ -29,7 +29,6 @@ class AllToAllOp(Op):
 
     def gradient(self, output_grad):
         return [alltoall_op(output_grad, ctx=self.raw_ctx)]
-
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 1
         return input_shapes[0]
@@ -47,7 +46,7 @@ class AllToAllOp(Op):
         self.inputs[0].inplace = False
         self.dtype = ncclDataType_t.ncclFloat32
         self.comm = config.nccl_comm
-
+        self.myrank = self.comm.myRank.value
 
 def alltoall_op(node, ctx=None):
     """AllToAll Unit.

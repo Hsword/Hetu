@@ -213,7 +213,6 @@ class NCCL_Communicator():
             group_rank = -1
             group_size = len(group_list)
             local_rank = -1
-
             rank_list = []
             assert group_size <= global_size, "Error: Too many ranks in the group."
             local_rank_cnt = 0
@@ -309,9 +308,20 @@ class NCCL_Communicator():
         lib_mpi_nccl.dlarrayRecv(arr.handle, c_int(datatype.value), c_int(
             src), self.ncclcomm, executor_stream.handle if executor_stream else self.stream.handle)
 
+    def dlarrayHA2AGather(self, sendarr, recvarr, datatype, myrank, num_local_gpus, executor_stream=None):
+
+        lib_mpi_nccl.dlarrayHA2AGather(sendarr.handle, recvarr.handle, c_int(datatype.value), myrank, num_local_gpus,self.ncclcomm, executor_stream.handle if executor_stream else self.stream.handle)
+
+    def dlarrayHA2AScatter(self, sendarr, recvarr, datatype, myrank, num_local_gpus, executor_stream=None):
+        lib_mpi_nccl.dlarrayHA2AScatter(sendarr.handle, recvarr.handle, c_int(datatype.value), myrank, num_local_gpus, self.ncclcomm, executor_stream.handle if executor_stream else self.stream.handle)
+
     def dlarrayAllToAll(self, sendarr, recvarr, datatype, executor_stream=None):
         lib_mpi_nccl.dlarrayAllToAll(sendarr.handle, recvarr.handle, c_int(datatype.value), \
                                     self.ncclcomm, executor_stream.handle if executor_stream else self.stream.handle, self.nRanks)
+
+    def dlarrayHAllToAll(self, sendarr, recvarr, datatype, num_nodes, num_local_gpus, executor_stream=None):
+        lib_mpi_nccl.dlarrayHAllToAll(sendarr.handle, recvarr.handle, c_int(datatype.value),\
+                                    self.ncclcomm, executor_stream.handle if executor_stream else self.stream.handle, num_nodes, num_local_gpus)
 
     def ncclCommDestroy(self):
         lib_mpi_nccl.commDestroyNccl(ctypes.byref(self.ncclcomm))
@@ -329,8 +339,8 @@ if __name__ == "__main__":
     t = mpi_communicator()
     t = t.ncclInit()
 
-    send_arr = np.ones(32)*t.localRank.value
-    recv_arr = np.ones(32)*t.localRank.value
+    send_arr = np.ones(16)*t.localRank.value
+    recv_arr = np.ones(16)*t.localRank.value
     print("before: send_arr = "+str(send_arr)+" recv_arr = "+str(recv_arr))
     send_arr = ndarray.array(send_arr, ctx=ndarray.gpu(t.device_id.value))
     recv_arr = ndarray.array(recv_arr, ctx=ndarray.gpu(t.device_id.value))
