@@ -190,7 +190,7 @@ class HetuConfig(object):
             AllRedeuce -> MPI AllReduce
             Hybrid     -> Parameter Server for Sparse Parameter and MPI AllReduce for Dense Parameter
         '''
-        assert pipeline in (None, "gpipe", "pipedream", "hetpipe")
+        assert pipeline in ("", "gpipe", "pipedream", "hetpipe")
         self.pipeline = pipeline
         self.use_preduce = use_preduce
 
