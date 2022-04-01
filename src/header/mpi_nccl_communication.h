@@ -68,6 +68,14 @@ void dlarraySend(DLArray *array, int datatype, int target, ncclComm_t comm,
                  DLStreamHandle stream_handle);
 void dlarrayRecv(DLArray *array, int datatype, int src, ncclComm_t comm,
                  DLStreamHandle stream_handle);
+void dlarrayAllToAll(DLArray *sendarray, DLArray *recvarray, int datatype, \
+                     ncclComm_t comm, DLStreamHandle stream_handle, int num_of_peers);
+void dlarrayHAllToAll(DLArray *sendarray, DLArray *recvarray, int datatype, ncclComm_t comm, DLStreamHandle stream_handle, int num_nodes, int num_local_gpus);
+
+void dlarrayHA2AGather(DLArray *sendarr, DLArray *recvarr, int datatype, int myrank, int num_local_gpus, ncclComm_t comm, DLStreamHandle stream_handle);
+
+void dlarrayHA2AScatter(DLArray *sendarr, DLArray *recvarr, int datatype, int myrank, int num_local_gpus, ncclComm_t comm, DLStreamHandle stream_handle);
+
 void commDestroyNccl(ncclComm_t *comm);
 void setDevice(int device_id);
 }

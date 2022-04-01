@@ -44,7 +44,8 @@ if __name__ == "__main__":
     device_id = 0
     print_rank0("Training {} on HETU".format(args.model))
     if args.comm_mode in ('AllReduce', 'Hybrid'):
-        comm, device_id = ht.mpi_nccl_init()
+        comm = ht.wrapped_mpi_nccl_init()
+        device_id = comm.local_rank
         executor_ctx = ht.gpu(device_id % 8) if args.gpu >= 0 else ht.cpu(0)
     else:
         if args.gpu == -1:

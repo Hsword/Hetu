@@ -9,6 +9,7 @@ from ..cpu_links import array_set as cpu_array_set
 from .Variable import PlaceholderOp  # add for optimizer
 from ..dataloader import DataloaderOp, GNNDataLoaderOp
 from .AllReduceCommunicate import AllReduceCommunicateOp
+from .AllToAll import AllToAllOp
 from .ParameterServerCommunicate import ParameterServerCommunicateOp, ParameterServerSparsePullOp, parameterServerSparsePull_op
 from .Sum import sum_op
 from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp
@@ -33,6 +34,10 @@ import os
 from time import time
 import pickle
 
+
+import hetu as ht
+
+import hetu as ht
 
 def path_to_lib(name):
     curr_path = os.path.dirname(os.path.abspath(os.path.expanduser(__file__)))
@@ -172,7 +177,7 @@ class HetuConfig(object):
         enable_lazy=True,
         cache_bound=100,
         log_path=None,
-        pipeline=None,
+        pipeline="",
         dynamic_memory=False,
         dist_strategy=None,
         use_preduce=False,
@@ -185,7 +190,7 @@ class HetuConfig(object):
             AllRedeuce -> MPI AllReduce
             Hybrid     -> Parameter Server for Sparse Parameter and MPI AllReduce for Dense Parameter
         '''
-        assert pipeline in (None, "gpipe", "pipedream", "hetpipe")
+        assert pipeline in ("", "gpipe", "pipedream", "hetpipe")
         self.pipeline = pipeline
         self.use_preduce = use_preduce
 
@@ -1033,13 +1038,13 @@ class SubExecutor(object):
             grouping_nodes.clear()
         for node in self.computing_nodes:
             if self.dynamic_memory:
+
                 # allocate memory for the node when dynamic_memory == True
                 if self.node_ref_cnt[node] is None or need_reallocation:
                     self.node_memory_plan(node)
                 for n in node.inputs:
                     if n not in self.node_to_arr_map:
                         self.node_memory_plan(n)
-
             if node.on_cpu and isinstance(self.node_to_arr_map[node], ndarray.NDArray):
                 if DNNL_LIB['cpu_ArraySet'] and not isinstance(node, DataD2HOp):
                     cpu_array_set(self.node_to_arr_map[node], 0.0)
@@ -1061,19 +1066,17 @@ class SubExecutor(object):
             else:
                 if len(grouping_nodes) > 0:
                     make_group()
-
                 for n in node.inputs:
                     if n.event:
                         n.event.sync()
                 input_vals = [self.node_to_arr_map[n] for n in node.inputs]
                 node_val = self.node_to_arr_map[node]
-
                 if isinstance(node, (ParameterServerCommunicateOp, ParameterServerSparsePullOp)):
                     # Here we use d2h stream in ps op, since the stream is used for d2h data transfer.
                     # Please take care at this part.
                     node.compute(input_vals, node_val, self.d2h_stream)
 
-                elif isinstance(node, AllReduceCommunicateOp):
+                elif isinstance(node, (AllReduceCommunicateOp, AllToAllOp)):
                     node.compute(input_vals, node_val, self.nccl_stream)
 
                 elif isinstance(node, DataH2DOp):

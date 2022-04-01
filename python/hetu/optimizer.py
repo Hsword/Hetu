@@ -99,9 +99,12 @@ class Optimizer(object):
 
 class OptimizerOp(Op):
     def __init__(self, grads, optimizer):
-        super().__init__(OptimizerOp, grads, None)
         self.name = "Optimizer_%s" % (optimizer.name)
         self.optimizer = optimizer
+        for i, param in enumerate(optimizer.params):
+            if "expert" in param.name:
+                grads[i].NoAllReduce=True
+        super().__init__(OptimizerOp, grads, None)
 
     def compute(self, input_vals, output_val, stream_handle=None, new_tensors_map=None):
         assert output_val is None
@@ -146,7 +149,7 @@ class OptimizerOp(Op):
             current_strategy = config.node_strategy.get(
                 self.optimizer.params[i], self.comm_mode)
             cur_node = node
-            if current_strategy == 'AllReduce' or (current_strategy == 'Hybrid' and not isinstance(node, EmbeddingLookUp_Gradient)):
+            if (current_strategy == 'AllReduce' or (current_strategy == 'Hybrid' and not isinstance(node, EmbeddingLookUp_Gradient))) and node.NoAllReduce==False:
                 cur_node = ht.allreduceCommunicate_op(
                     node, config.param_allreduce_group.get(self.optimizer.params[i], config.nccl_comm))
                 if config.layer_indices is not None and node in config.layer_indices:

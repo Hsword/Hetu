@@ -11,7 +11,6 @@ class MatMulOp(Op):
         super().__init__(MatMulOp, [node_A, node_B], ctx)
         self.matmul_attr_trans_A = trans_A
         self.matmul_attr_trans_B = trans_B
-
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
             if DNNL_LIB['DnnlMatrixMultiply']:
