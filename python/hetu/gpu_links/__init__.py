@@ -59,6 +59,23 @@ from .DotLink import *
 from .LinearLink import *
 from .CudnnConv2dAddBiasLink import *
 from .GeluLink import *
+from .TopKIdxLink import *
+from .TopKValLink import *
+from .ScatterLink import *
+from .MinusElewiseLink import *
+from .CloneLink import *
+from .MaxLink import *
+from .CumSumLink import *
+from .LayoutTransform import *
+from .ReverseLayoutTransform import *
+from .IndexingLink import *
+from .Scatter1DLink import *
+from .LogLink import *
+from .NllLossLink import *
+from .HA2ALayoutTransform import *
+from .SamGroupSumLink import *
+from .GroupTopKIdxLink import *
+from .SamMaxLink import *
 
 __all__ = [
     'matrix_elementwise_add_by_const',
@@ -163,4 +180,35 @@ __all__ = [
     'cross_entropy_gradient',
     'cross_entropy_sparse',
     'cross_entropy_sparse_gradient',
+    'topk_idx',
+    'topk_val',
+    'scatter',
+    'matrix_elementwise_minus',
+    'clone',
+    'max',
+    'cumsum_with_bias',
+    'layout_transform_top1',
+    'layout_transform_top2',
+    'reverse_layout_transform_top1',
+    'reverse_layout_transform_top2',
+    'indexing',
+    'indexing_grad',
+    'scatter1d',
+    'scatter1d_grad',
+    'reverse_layout_transform_top1_gradient',
+    'reverse_layout_transform_top1_gradient_data',
+    'reverse_layout_transform_top1_gradient_gate',
+    'reverse_layout_transform_top2_gradient_data',
+    'log_link',
+    'log_grad_link',
+    'nll_loss_link',
+    'nll_loss_grad_link',
+    'reverse_layout_transform_no_gate',
+    'reverse_layout_transform_no_gate_gradient',
+    'ha2a_layout_transform',
+    'ha2a_reverse_layout_transform',
+    'sam_group_sum_link',
+    'group_topk_idx',
+    'sammax_link',
+    'sammax_grad_link'
 ]
