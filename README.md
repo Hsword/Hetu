@@ -117,6 +117,8 @@ The entire codebase is under [license](LICENSE)
   2. Xupeng Miao, Xiaonan Nie, Yingxia Shao, Zhi Yang, Jiawei Jiang, Lingxiao Ma, Bin Cui. [Heterogeneity-Aware Distributed Machine Learning Training via Partial Reduce](https://doi.org/10.1145/3448016.3452773). SIGMOD 2021
   3. Xupeng Miao, Hailin Zhang, Yining Shi, Xiaonan Nie, Zhi Yang, Yangyu Tao, Bin Cui. [HET: Scaling out Huge Embedding Model Training via Cache-enabled Distributed Framework](https://arxiv.org/abs/2112.07221). VLDB 2022, ChinaSys 2021 Winter.
   4. Xupeng Miao, Yining Shi, Hailin Zhang, Xin Zhang, Xiaonan Nie, Zhi Yang, Bin Cui. HET-GMP: a Graph-based System Approach to Scaling Large Embedding Model Training. SIGMOD 2022.
+  5. Xiaonan Nie, Xupeng Miao, Zhi Yang, Bin Cui. TSplit: Fine-grained GPU Memory Management for Efficient DNN Training via Tensor Splitting. ICDE 2022.
+  6. Sicong Dong, Xupeng Miao, Pengkai Liu, Xin Wang, Bin Cui, Jianxin Li. HET-KG: Communication-Efficient Knowledge Graph Embedding Training via Hotness-Aware Cache. ICDE 2022.
   5. Xupeng Miao, Yujie Wang, Jia Shen, Yingxia Shao, Bin Cui. Graph Neural Network Training Acceleration over Multi-GPUs. Journal of Software (Chinese).
   6. Xiaonan Nie, Shijie Cao, Xupeng Miao, Lingxiao Ma, Jilong Xue, Youshan Miao, Zichao Yang, Zhi Yang, Bin Cui. [Dense-to-Sparse Gate for Mixture-of-Experts](https://arxiv.org/abs/2112.14397). arXiv 2021.
   7. Renrui Zhang, Ziyu Guo, Wei Zhang, Kunchang Li, Xupeng Miao, Bin Cui, Yu Qiao, Peng Gao, Hongsheng Li. [PointCLIP: Point Cloud Understanding by CLIP](https://arxiv.org/abs/2112.02413). CVPR 2022.
@@ -126,19 +128,11 @@ The entire codebase is under [license](LICENSE)
 
 If you use Hetu in a scientific publication, we would appreciate citations to the following paper:
 ```
- @inproceedings{vldb/het22,
-   title = {HET: Scaling out Huge Embedding Model Training via Cache-enabled Distributed Framework},
-   author = {Xupeng Miao and
-         Hailin Zhang and
-         Yining Shi and
-             Xiaonan Nie and
-             Zhi Yang and
-             Yangyu Tao and
-             Bin Cui},
-   journal = {Proc. {VLDB} Endow.},
-   year = {2022},
-   url  = {https://doi.org/10.14778/3489496.3489511},
-   doi  = {10.14778/3489496.3489511},
+ @article{miao2021het,
+   title={HET: Scaling out Huge Embedding Model Training via Cache-enabled Distributed Framework},
+   author={Miao, Xupeng and Zhang, Hailin and Shi, Yining and Nie, Xiaonan and Yang, Zhi and Tao, Yangyu and Cui, Bin},
+   journal={arXiv preprint arXiv:2112.07221},
+   year={2021}
  }
 ```
 
