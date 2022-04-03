@@ -9,6 +9,7 @@ from ..cpu_links import array_set as cpu_array_set
 from .Variable import PlaceholderOp  # add for optimizer
 from ..dataloader import DataloaderOp, GNNDataLoaderOp
 from .AllReduceCommunicate import AllReduceCommunicateOp
+from .AllToAll import AllToAllOp
 from .ParameterServerCommunicate import ParameterServerCommunicateOp, ParameterServerSparsePullOp, parameterServerSparsePull_op
 from .Sum import sum_op
 from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp
@@ -1073,7 +1074,7 @@ class SubExecutor(object):
                     # Please take care at this part.
                     node.compute(input_vals, node_val, self.d2h_stream)
 
-                elif isinstance(node, AllReduceCommunicateOp):
+                elif isinstance(node, (AllReduceCommunicateOp, AllToAllOp)):
                     node.compute(input_vals, node_val, self.nccl_stream)
 
                 elif isinstance(node, DataH2DOp):
