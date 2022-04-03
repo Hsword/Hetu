@@ -1,9 +1,7 @@
 import hetu as ht
 import models
-import os
 import numpy as np
 import argparse
-import json
 import logging
 from time import time
 logging.basicConfig(level=logging.INFO,
@@ -40,59 +38,36 @@ if __name__ == "__main__":
     parser.add_argument('--comm-mode', default=None, help='communication mode')
     args = parser.parse_args()
 
-    global device_id
-    device_id = 0
-    print_rank0("Training {} on HETU".format(args.model))
-    if args.comm_mode in ('AllReduce', 'Hybrid'):
-        comm, device_id = ht.mpi_nccl_init()
-        executor_ctx = ht.gpu(device_id % 8) if args.gpu >= 0 else ht.cpu(0)
-    else:
-        if args.gpu == -1:
-            executor_ctx = ht.cpu(0)
-            print_rank0('Use CPU.')
-        else:
-            executor_ctx = ht.gpu(args.gpu)
-            print_rank0('Use GPU %d.' % args.gpu)
-    if args.comm_mode in ('PS', 'Hybrid'):
-        settings_file = open(os.path.join(os.path.abspath(
-            os.path.dirname(__file__)), 'worker_conf%d.json' % args.gpu))
-        settings = json.load(settings_file)
-        for key in settings:
-            if type(settings[key]) == str:
-                os.environ[key] = settings[key]
-            else:
-                os.environ[key] = str(settings[key])  # type is str
+    if args.comm_mode is not None:
+        args.comm_mode = args.comm_mode.lower()
+    assert args.comm_mode in (None, 'allreduce', 'ps', 'hybrid')
 
+    args.model = args.model.lower()
     assert args.model in ['alexnet', 'cnn_3_layers', 'lenet', 'logreg', 'lstm', 'mlp', 'resnet18', 'resnet34', 'rnn', 'vgg16', 'vgg19'], \
         'Model not supported!'
     model = eval('models.' + args.model)
 
-    assert args.dataset in ['MNIST', 'CIFAR10', 'CIFAR100', 'ImageNet']
-    dataset = args.dataset
+    args.dataset = args.dataset.lower()
+    assert args.dataset in ['mnist', 'cifar10', 'cifar100', 'imagenet']
+    args.opt = args.opt.lower()
     assert args.opt in ['sgd', 'momentum', 'nesterov',
                         'adagrad', 'adam'], 'Optimizer not supported!'
 
     if args.opt == 'sgd':
-        print_rank0('Use SGD Optimizer.')
         opt = ht.optim.SGDOptimizer(learning_rate=args.learning_rate)
     elif args.opt == 'momentum':
-        print_rank0('Use Momentum Optimizer.')
         opt = ht.optim.MomentumOptimizer(learning_rate=args.learning_rate)
     elif args.opt == 'nesterov':
-        print_rank0('Use Nesterov Momentum Optimizer.')
         opt = ht.optim.MomentumOptimizer(
             learning_rate=args.learning_rate, nesterov=True)
     elif args.opt == 'adagrad':
-        print_rank0('Use AdaGrad Optimizer.')
         opt = ht.optim.AdaGradOptimizer(
             learning_rate=args.learning_rate, initial_accumulator_value=0.1)
     else:
-        print_rank0('Use Adam Optimizer.')
         opt = ht.optim.AdamOptimizer(learning_rate=args.learning_rate)
 
     # data loading
-    print_rank0('Loading %s data...' % dataset)
-    if dataset == 'MNIST':
+    if args.dataset == 'mnist':
         datasets = ht.data.mnist()
         train_set_x, train_set_y = datasets[0]
         valid_set_x, valid_set_y = datasets[1]
@@ -101,7 +76,7 @@ if __name__ == "__main__":
         # valid_set_x: (10000, 784), valid_set_y: (10000, 10)
         # x_shape = (args.batch_size, 784)
         # y_shape = (args.batch_size, 10)
-    elif dataset == 'CIFAR10':
+    elif args.dataset == 'cifar10':
         train_set_x, train_set_y, valid_set_x, valid_set_y = ht.data.normalize_cifar(
             num_class=10)
         if args.model == "mlp":
@@ -111,7 +86,7 @@ if __name__ == "__main__":
         # valid_set_x: (10000, 3, 32, 32), valid_set_y: (10000, 10)
         # x_shape = (args.batch_size, 3, 32, 32)
         # y_shape = (args.batch_size, 10)
-    elif dataset == 'CIFAR100':
+    elif args.dataset == 'cifar100':
         train_set_x, train_set_y, valid_set_x, valid_set_y = ht.data.normalize_cifar(
             num_class=100)
         # train_set_x: (50000, 3, 32, 32), train_set_y: (50000, 100)
@@ -120,7 +95,6 @@ if __name__ == "__main__":
         raise NotImplementedError
 
     # model definition
-    print_rank0('Building model {}'.format(args.model))
     x = ht.dataloader_op([
         ht.Dataloader(train_set_x, args.batch_size, 'train'),
         ht.Dataloader(valid_set_x, args.batch_size, 'validate'),
@@ -129,7 +103,7 @@ if __name__ == "__main__":
         ht.Dataloader(train_set_y, args.batch_size, 'train'),
         ht.Dataloader(valid_set_y, args.batch_size, 'validate'),
     ])
-    if args.model in ['resnet18', 'resnet34', 'vgg16', 'vgg19'] and args.dataset == 'CIFAR100':
+    if args.model in ['resnet18', 'resnet34', 'vgg16', 'vgg19'] and args.dataset == 'cifar100':
         loss, y = model(x, y_, 100)
     else:
         loss, y = model(x, y_)
@@ -137,10 +111,25 @@ if __name__ == "__main__":
     train_op = opt.minimize(loss)
 
     eval_nodes = {'train': [loss, y, y_, train_op], 'validate': [loss, y, y_]}
-    executor = ht.Executor(eval_nodes, ctx=executor_ctx,
-                           comm_mode=args.comm_mode)
+    if args.comm_mode is None:
+        if args.gpu < 0:
+            ctx = ht.cpu()
+        else:
+            ctx = ht.gpu(args.gpu)
+        executor = ht.Executor(eval_nodes, ctx=ctx)
+    else:
+        strategy = ht.dist.DataParallel(args.comm_mode)
+        executor = ht.Executor(eval_nodes, dist_strategy=strategy)
     n_train_batches = executor.get_batch_num('train')
     n_valid_batches = executor.get_batch_num('validate')
+
+    global device_id
+    device_id = executor.rank
+    if device_id is None:
+        device_id = 0
+    print_rank0("Training {} on HETU".format(args.model))
+    print_rank0('Use {} Optimizer.'.format(args.opt))
+    print_rank0('Use data {}.'.format(args.dataset))
 
     # training
     print_rank0("Start training loop...")
@@ -198,5 +187,3 @@ if __name__ == "__main__":
     print_rank0("*"*50)
     print_rank0("Running time of total %d epoch = %fs" %
                 (args.num_epochs, running_time))
-    if args.comm_mode in ('AllReduce', 'Hybrid'):
-        ht.mpi_nccl_finish(comm)
