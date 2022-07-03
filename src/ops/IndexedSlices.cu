@@ -3,11 +3,13 @@
 __global__ void indexedslices_oneside_add_kernel(const float *values_data,
                                                  const float *indices_data,
                                                  float *output_data,
-                                                 size_t size, size_t length) {
+                                                 size_t size, size_t length, size_t output_row) {
     size_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= size)
         return;
     int id = indices_data[index];
+    if (id < 0 || id >= output_row)
+        return;
     const float *values_ptr = values_data + length * index;
     float *output_ptr = output_data + length * id;
     for (int i = 0; i < length; i++)
@@ -18,6 +20,7 @@ int IndexedSlicesOneSideAdd(const DLArrayHandle indices,
                             const DLArrayHandle values, DLArrayHandle output,
                             DLStreamHandle stream_handle = NULL) {
     size_t size = 1;
+    size_t output_row = output->shape[0];
     size_t length = output->shape[1];
     for (int i = 0; i < indices->ndim; i++) {
         size *= indices->shape[i];
@@ -40,9 +43,9 @@ int IndexedSlicesOneSideAdd(const DLArrayHandle indices,
     if (stream_handle)
         indexedslices_oneside_add_kernel<<<
             blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
-            values_data, indices_data, output_data, size, length);
+            values_data, indices_data, output_data, size, length, output_row);
     else
         indexedslices_oneside_add_kernel<<<blocks, threads>>>(
-            values_data, indices_data, output_data, size, length);
+            values_data, indices_data, output_data, size, length, output_row);
     return 0;
 }

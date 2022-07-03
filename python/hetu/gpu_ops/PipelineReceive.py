@@ -1,56 +1,52 @@
 from __future__ import absolute_import
 from .Node import Op
-from .. import ndarray
-from ..communicator.mpi_nccl_comm import ncclDataType_t, ncclRedOp_t, GroupEnd
-from ..stream import create_event_handle, create_stream_handle
 
 
 class PipelineReceiveOp(Op):
-    def __init__(self, source, comm, stream=None, ctx=None):
-        assert ctx, "PipelineReceiveOp must be initialized with the ctx argument!"
+    def __init__(self, source, comm, use_indexed_slices=False, ctx=None):
+        # infer shape is done by executor
+        from ..communicator.mpi_nccl_comm import ncclDataType_t
         super().__init__(PipelineReceiveOp, [], ctx)
+        if isinstance(source, int):
+            source = (source,)
+        else:
+            source = tuple(source)
         self.const_attr = source
         self.comm = comm
-        self.comm_stream = stream
-        self.desc = self.name + \
-            '(%s receive from %s)' % (str(self.ctx.device_id), str(source))
-        self.shape = None
-        self.shape_is_received = False
+        self.dtype = ncclDataType_t.ncclFloat32
+        self.index = 0
+        self.ntargets = len(source)
+        self.use_indexed_slices = use_indexed_slices
 
-    def compute(self, input_vals, output_val, stream_handle=None, group_call=False):
-        assert not self.on_cpu, "PipelineReceiveOp only support P2P communication between gpus"
-        assert self.comm_stream, "communicate stream should not be None"
-        self.comm.dlarrayRecv(output_val, ncclDataType_t.ncclFloat32, self.const_attr, stream_handle)
+    @property
+    def desc(self):
+        return self.name + \
+            '(%s receive from %s)' % (
+                str(self.ctx.device_id), str(self.const_attr))
 
-        if group_call:
-            GroupEnd()
+    def compute(self, input_vals, output_val, stream_handle=None):
+        if self.use_indexed_slices:
+            self.comm.dlarrayRecv(
+                output_val.indices, self.dtype, self.const_attr[self.index], stream_handle)
+            self.comm.dlarrayRecv(
+                output_val.values, self.dtype, self.const_attr[self.index], stream_handle)
+        else:
+            self.comm.dlarrayRecv(
+                output_val, self.dtype, self.const_attr[self.index], stream_handle)
+        self.step_index()
 
-    def gradient(self, output_grad):
-        return []
-
-    def infer_shape(self, input_shapes):
-        if not self.shape_is_received:
-            # receive
-            shape_arr = ndarray.array([0, 0, 0, 0], self.ctx)
-            self.comm.dlarrayRecv(shape_arr,
-                                  ncclDataType_t.ncclFloat32,
-                                  self.const_attr,
-                                  self.comm_stream)
-
-            # remove padding and save
-            shape_arr = [int(x) for x in list(shape_arr.asnumpy()) if x != 0]
-            self.shape = tuple(shape_arr)
-            self.shape_is_received = True
-
-        return self.shape
+    def step_index(self):
+        self.index = (self.index + 1) % self.ntargets
 
     def forward_hook(self, config):
-        self.on_gpu = ndarray.is_gpu_ctx(self.ctx)
+        from ..ndarray import is_gpu_ctx
+        from ..stream import create_event_handle
+        self.on_gpu = is_gpu_ctx(self.ctx)
         self.on_cpu = not self.on_gpu
         self.event = create_event_handle(self.ctx)
 
 
-def pipeline_receive_op(source, comm, stream=None, ctx=None):
+def pipeline_receive_op(source, comm, use_indexed_slices=False, ctx=None):
     """Make a new instance of PipelineReceiveOp and call the instance.
 
     Parameters:
@@ -63,4 +59,4 @@ def pipeline_receive_op(source, comm, stream=None, ctx=None):
     A new Node instance created by Op.
 
     """
-    return PipelineReceiveOp(source, comm, stream=stream, ctx=ctx)
+    return PipelineReceiveOp(source, comm, use_indexed_slices=use_indexed_slices, ctx=ctx)

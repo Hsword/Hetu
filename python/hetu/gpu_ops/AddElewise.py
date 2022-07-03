@@ -11,8 +11,6 @@ from ..gpu_links import matrix_elementwise_add_by_const,\
     array_set,\
     matrix_elementwise_add_simple,\
     matrix_elementwise_add_lazy
-from .DataTransfer import DataD2HSparseOp
-from .EmbeddingLookUp import EmbeddingLookUp_Gradient
 import numpy as np
 
 
@@ -174,8 +172,9 @@ class AddOp(Op):
 
     def forward_hook(self, config):
         super().forward_hook(config)
-        if isinstance(self.inputs[0], (EmbeddingLookUp_Gradient, DataD2HSparseOp)) or \
-                isinstance(self.inputs[1], (EmbeddingLookUp_Gradient, DataD2HSparseOp)):
+
+        if self.inputs[0].use_indexed_slices or \
+                self.inputs[1].use_indexed_slices:
             self.compute = self._compute_with_index
         elif self.on_cpu:
             self.compute = self._compute_on_cpu_simple

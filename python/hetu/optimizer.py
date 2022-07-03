@@ -6,7 +6,6 @@ from . import ndarray
 from . import gpu_links as gpu_op
 from .lr_scheduler import FixedScheduler
 from .gpu_ops.Node import Op
-from .gpu_ops.EmbeddingLookUp import EmbeddingLookUp_Gradient
 from .gpu_ops.ParameterServerCommunicate import ParameterServerCommunicateOp
 from .gpu_ops.Variable import PlaceholderOp
 
@@ -35,13 +34,14 @@ class Optimizer(object):
 
     @staticmethod
     def get_var_list(loss):
+        # from .layers.base import OpLayer
         def topo_sort_dfs(node, visited, var_list):
             if node in visited:
                 return
             visited.add(node)
-            if isinstance(node, PlaceholderOp) and node.trainable:
+            # if (isinstance(node, PlaceholderOp) and node.trainable) or isinstance(node, OpLayer):
+            if (isinstance(node, PlaceholderOp) and node.trainable):
                 var_list.append(node)
-                return
             for n in node.inputs:
                 topo_sort_dfs(n, visited, var_list)
 
@@ -59,6 +59,11 @@ class Optimizer(object):
         self.tensors = [config.placeholder_to_arr_map[node]
                         for node in self.params]
         self.initiated = True
+
+    def uninitiate_states(self):
+        # for profiler use, delete tensors
+        self.tensors = []
+        self.initiated = False
 
     def update_tensors_version(self, tensor_map):
         self.tensors = [tensor_map[node] for node in self.params]
@@ -101,9 +106,6 @@ class OptimizerOp(Op):
     def __init__(self, grads, optimizer):
         self.name = "Optimizer_%s" % (optimizer.name)
         self.optimizer = optimizer
-        for i, param in enumerate(optimizer.params):
-            if "expert" in param.name:
-                grads[i].NoAllReduce=True
         super().__init__(OptimizerOp, grads, None)
 
     def compute(self, input_vals, output_val, stream_handle=None, new_tensors_map=None):
@@ -146,17 +148,21 @@ class OptimizerOp(Op):
         self.comm_mode = config.comm_mode
         new_inputs = []
         for i, node in enumerate(self.inputs):
+            cur_param = self.optimizer.params[i]
+            if "expert" in cur_param.name:
+                # expert parameter no use allreduce
+                continue
             current_strategy = config.node_strategy.get(
-                self.optimizer.params[i], self.comm_mode)
+                cur_param, self.comm_mode)
             cur_node = node
-            if (current_strategy == 'AllReduce' or (current_strategy == 'Hybrid' and not isinstance(node, EmbeddingLookUp_Gradient))) and node.NoAllReduce==False:
+            if current_strategy == 'AllReduce' or (current_strategy == 'Hybrid' and not node.use_indexed_slices):
                 cur_node = ht.allreduceCommunicate_op(
-                    node, config.param_allreduce_group.get(self.optimizer.params[i], config.nccl_comm))
+                    node, config.param_allreduce_group.get(cur_param, config.nccl_comm))
                 if config.layer_indices is not None and node in config.layer_indices:
                     config.layer_indices[cur_node] = config.layer_indices[node] + 1
-            elif current_strategy == 'PS' or (current_strategy == 'Hybrid' and isinstance(node, EmbeddingLookUp_Gradient)):
+            elif current_strategy == 'PS' or (current_strategy == 'Hybrid' and node.use_indexed_slices):
                 cur_node = ht.parameterServerCommunicate_op(
-                    node, self.optimizer.params[i], self.optimizer.get_config())
+                    node, cur_param, self.optimizer.get_config())
                 if config.layer_indices is not None and node in config.layer_indices:
                     config.layer_indices[cur_node] = config.layer_indices[node] + 1
             new_inputs.append(cur_node)
@@ -178,6 +184,9 @@ class SGDOptimizer(Optimizer):
     def initiate_states(self, config):
         super().initiate_states(config)
 
+    def uninitiate_states(self):
+        super().uninitiate_states()
+
     def update(self, grads, stream_handle=None):
         assert self.initiated is True
         params_size = len(self.params)
@@ -189,11 +198,8 @@ class SGDOptimizer(Optimizer):
                 assert isinstance(self.tensors[i], ndarray.NDArray)
                 assert isinstance(
                     grads[i], (ndarray.NDArray, ndarray.IndexedSlices))
-                if self.l2reg > 0:
-                    gpu_op.add_l2_regularization(
-                        self.tensors[i], grads[i], self.l2reg, stream_handle)
                 gpu_op.sgd_update(
-                    self.tensors[i], grads[i], self.learning_rate, stream_handle)
+                    self.tensors[i], grads[i], self.learning_rate, self.l2reg, stream_handle)
             else:
                 from ._base import DNNL_LIB
                 if isinstance(grads[i], ndarray.IndexedSlices):
@@ -242,6 +248,10 @@ class MomentumOptimizer(Optimizer):
             self.velocity.append(None if t is None else ndarray.array(
                 np.zeros(t.shape, dtype=np.float32), t.ctx))
 
+    def uninitiate_states(self):
+        super().uninitiate_states()
+        self.velocity = []
+
     def update(self, grads, stream_handle=None):
         assert self.initiated is True
         params_size = len(self.params)
@@ -254,11 +264,8 @@ class MomentumOptimizer(Optimizer):
                 assert isinstance(
                     grads[i], (ndarray.NDArray, ndarray.IndexedSlices))
                 assert isinstance(self.velocity[i], ndarray.NDArray)
-                if self.l2reg > 0:
-                    gpu_op.add_l2_regularization(
-                        self.tensors[i], grads[i], self.l2reg, stream_handle)
                 gpu_op.momentum_update(self.tensors[i], grads[i], self.velocity[i], self.learning_rate, self.momentum,
-                                       self.nesterov, stream_handle)
+                                       self.nesterov, self.l2reg, stream_handle)
             else:
                 if isinstance(grads[i], ndarray.IndexedSlices):
                     raise NotImplementedError
@@ -309,6 +316,10 @@ class AdaGradOptimizer(Optimizer):
             self.accumulator_value.append(None if t is None else ndarray.array(
                 np.full(t.shape, self.initial_accumulator_value), t.ctx))
 
+    def uninitiate_states(self):
+        super().uninitiate_states()
+        self.accumulator_value = []
+
     def update(self, grads, stream_handle=None):
         assert self.initiated is True
         params_size = len(self.params)
@@ -320,11 +331,8 @@ class AdaGradOptimizer(Optimizer):
                 assert isinstance(self.tensors[i], ndarray.NDArray)
                 assert isinstance(
                     grads[i], (ndarray.NDArray, ndarray.IndexedSlices))
-                if self.l2reg > 0:
-                    gpu_op.add_l2_regularization(
-                        self.tensors[i], grads[i], self.l2reg, stream_handle)
-                gpu_op.adagrad_update(self.tensors[i], grads[i], self.accumulator_value[i], self.learning_rate, self.eps,
-                                      stream_handle)
+                gpu_op.adagrad_update(self.tensors[i], grads[i], self.accumulator_value[i],
+                                      self.learning_rate, self.eps, self.l2reg, stream_handle)
             else:
                 if isinstance(grads[i], ndarray.IndexedSlices):
                     raise NotImplementedError
@@ -373,6 +381,11 @@ class AdamOptimizer(Optimizer):
             self.v.append(None if t is None else ndarray.array(
                 np.zeros(t.shape), t.ctx))
 
+    def uninitiate_states(self):
+        super().uninitiate_states()
+        self.m = []
+        self.v = []
+
     def update(self, grads, stream_handle=None):
         assert self.initiated is True
         params_size = len(self.tensors)
@@ -388,11 +401,8 @@ class AdamOptimizer(Optimizer):
                     grads[i], (ndarray.NDArray, ndarray.IndexedSlices))
                 assert isinstance(self.m[i], ndarray.NDArray)
                 assert isinstance(self.v[i], ndarray.NDArray)
-                if self.l2reg > 0:
-                    gpu_op.add_l2_regularization(
-                        self.tensors[i], grads[i], self.l2reg, stream_handle)
                 gpu_op.adam_update(self.tensors[i], grads[i], self.m[i], self.v[i], self.learning_rate, self.beta1,
-                                   self.beta2, self.beta1_t, self.beta2_t, self.epsilon, stream_handle)
+                                   self.beta2, self.beta1_t, self.beta2_t, self.epsilon, self.l2reg, stream_handle)
             else:
                 if isinstance(grads[i], ndarray.IndexedSlices):
                     raise NotImplementedError
@@ -445,6 +455,11 @@ class AdamWOptimizer(Optimizer):
             self.v.append(None if t is None else ndarray.array(
                 np.zeros(t.shape), t.ctx))
 
+    def uninitiate_states(self):
+        super().uninitiate_states()
+        self.m = []
+        self.v = []
+
     def update(self, grads, stream_handle=None):
         assert self.initiated is True
         params_size = len(self.tensors)
@@ -461,7 +476,7 @@ class AdamWOptimizer(Optimizer):
                 assert isinstance(self.m[i], ndarray.NDArray)
                 assert isinstance(self.v[i], ndarray.NDArray)
                 gpu_op.adamw_update(self.tensors[i], grads[i], self.m[i], self.v[i], self.learning_rate, self.beta1,
-                                   self.beta2, self.beta1_t, self.beta2_t, self.epsilon, self.weight_decay, stream_handle)
+                                    self.beta2, self.beta1_t, self.beta2_t, self.epsilon, self.weight_decay, stream_handle)
             else:
                 if isinstance(grads[i], ndarray.IndexedSlices):
                     raise NotImplementedError
@@ -476,7 +491,9 @@ class AdamWOptimizer(Optimizer):
                     vc = self.v[i].asnumpy() / (1 - self.beta2_t)
                     update = mc / (np.sqrt(vc) + self.epsilon)
                     self.tensors[i][:] = prev_param - \
-                        self.learning_rate * (update + self.weight_decay * self.tensors[i])
+                        self.learning_rate * \
+                        (update + self.weight_decay * self.tensors[i])
+
 
 class LambOptimizer(Optimizer):
     def __init__(self, learning_rate=0.01, beta1=0.9, beta2=0.999, epsilon=1e-7, weight_decay=0):
@@ -501,6 +518,11 @@ class LambOptimizer(Optimizer):
                 np.zeros(t.shape), t.ctx))
             self.v.append(None if t is None else ndarray.array(
                 np.zeros(t.shape), t.ctx))
+
+    def uninitiate_states(self):
+        super().uninitiate_states()
+        self.m = []
+        self.v = []
 
     def update(self, grads, stream_handle=None):
         assert self.initiated is True
@@ -535,4 +557,5 @@ class LambOptimizer(Optimizer):
                     norm2_param = np.sqrt(np.sum(np.power(self.tensors[i], 2)))
                     norm2_update = np.sqrt(np.sum(np.power(update, 2)))
                     self.tensors[i][:] = prev_param - \
-                        self.learning_rate * norm2_param / norm2_update * (update + self.weight_decay * self.tensors[i])
+                        self.learning_rate * norm2_param / norm2_update * \
+                        (update + self.weight_decay * self.tensors[i])

@@ -2,7 +2,6 @@ from __future__ import absolute_import
 from .Node import Op
 from .. import ndarray
 from .. import stream
-from .EmbeddingLookUp import EmbeddingLookUp_Gradient
 
 
 class DataH2DOp(Op):
@@ -25,7 +24,7 @@ class DataH2DOp(Op):
             input_vals[0].copyto(output_val)
 
     def gradient(self, output_grad):
-        if isinstance(output_grad, EmbeddingLookUp_Gradient):
+        if output_grad.use_indexed_slices:
             return [datad2h_sparse_op(output_grad)]
         else:
             return [datad2h_op(output_grad)]
@@ -43,7 +42,7 @@ class DataH2DOp(Op):
 
 class DataD2HOp(Op):
     def __init__(self, node_A):
-        assert not isinstance(node_A, EmbeddingLookUp_Gradient)
+        assert not node_A.use_indexed_slices
         super().__init__(DataD2HOp, [node_A], ndarray.cpu(0))
         assert ndarray.is_gpu_ctx(node_A.ctx)
         self.event = None
@@ -75,23 +74,19 @@ class DataD2HOp(Op):
 class DataD2HSparseOp(Op):
     # here sparse means indexed slices
     def __init__(self, node_A):
-        assert isinstance(node_A, EmbeddingLookUp_Gradient)
+        assert node_A.use_indexed_slices
         super().__init__(DataD2HSparseOp, [node_A], ndarray.cpu(0))
         assert ndarray.is_gpu_ctx(node_A.ctx)
         self.event = None
         self.on_cpu = True
         self.on_gpu = False
+        self.use_indexed_slices = True
 
     def compute(self, input_vals, output_val, stream_handle=None):
         assert isinstance(input_vals[0], ndarray.IndexedSlices)
         assert isinstance(output_val, ndarray.IndexedSlices)
         # TODO: include all these parts into memory allocation management!!!
         # TODO: also consider how to deduplicate
-        if output_val.indices is None or output_val.indices.shape != input_vals[0].indices.shape:
-            output_val.indices = ndarray.empty(
-                input_vals[0].indices.shape, ctx=ndarray.cpu(0))
-            output_val.values = ndarray.empty(
-                input_vals[0].values.shape, ctx=ndarray.cpu(0))
         if stream_handle:
             if self.event is None:
                 self.event = stream.create_event_handle(self.inputs[0].ctx)

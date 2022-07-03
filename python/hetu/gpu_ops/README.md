@@ -76,6 +76,7 @@ This directory contains executor and operators for computation and communication
 | SumOp | ✔ | ✖ | ✔ | / |
 | ReciprocalSqrtOp | ✔ | ✔ | ✔ | / |
 | TanhOp | ✔ | ✔ | ✔ | / |
+| TanhGradientOp | ✔ | ✖ | ✔ | / |
 | TransposeOp | ✔ | ✔ | ✔ | / |
 | WhereOp | ✔ | ✖ | ✔ | / |
 | ZerosLikeOp | ✔ | ✔ | ✔ | / |

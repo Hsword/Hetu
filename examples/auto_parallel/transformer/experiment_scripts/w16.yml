@@ -1,0 +1,6 @@
+nodes:
+  - host: daim117
+    workers: 8
+    chief: true
+  - host: daim118
+    workers: 8

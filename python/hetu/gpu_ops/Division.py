@@ -2,12 +2,17 @@ from __future__ import absolute_import
 from .Node import Op
 from .._base import DNNL_LIB
 from .Opposite import opposite_op
+from .MultiplyElewise import mul_op
 from ..cpu_links import matrix_elementwise_divide as\
     cpu_matrix_elementwise_divide
 from ..cpu_links import matrix_elementwise_divide_by_const as\
     cpu_matrix_elementwise_divide_by_const
 from ..gpu_links import matrix_elementwise_divide
 from ..gpu_links import matrix_elementwise_divide_const
+
+# TODO: it's better to implement gradient op for DivOp and DivConstOp
+# since this can reduce the memory and the computation time (a little bit)
+# if the gradient ops are added, please also modify the gradients function in executor file.
 
 
 class DivOp(Op):
@@ -30,9 +35,9 @@ class DivOp(Op):
 
     def gradient(self, output_grad):
         dividend_grad = div_const_op(1, self.inputs[1], ctx=self.raw_ctx)
-        divisor_grad = opposite_op(div_op(div_op(
-            self.inputs[0], self.inputs[1], ctx=self.raw_ctx), self.inputs[1], ctx=self.raw_ctx))
-        return [dividend_grad * output_grad, divisor_grad * output_grad]
+        divisor_grad = opposite_op(
+            div_op(self, self.inputs[1], ctx=self.raw_ctx), ctx=self.raw_ctx)
+        return [mul_op(dividend_grad, output_grad, ctx=self.raw_ctx), mul_op(divisor_grad, output_grad, ctx=self.raw_ctx)]
 
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 2
@@ -40,6 +45,20 @@ class DivOp(Op):
             "can't do elementwise division between variables of different sizes."
         output = input_shapes[0]
         return output
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        status.copy_from(input_statuses[0], deduce_order)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        input_statuses[0].copy_from(status, deduce_order)
+        if deduce_order:
+            if status.valid_all():
+                input_statuses[1].set_order(status.combine_order((-2, -1)))
+        else:
+            if status.valid_state():
+                input_statuses[1].set_state(*status.combine_state((-2, -1)))
 
 
 class DivConstOp(Op):
@@ -59,13 +78,25 @@ class DivConstOp(Op):
                 self.const_attr, input_vals[0], output_val, stream_handle)
 
     def gradient(self, output_grad):
-        divisor_grad = div_op(div_const_op(-self.const_attr,
-                                           self.inputs[0], ctx=self.raw_ctx), self.inputs[0], ctx=self.raw_ctx)
-        return [divisor_grad * output_grad]
+        divisor_grad = div_op(opposite_op(
+            self, ctx=self.raw_ctx), self.inputs[0], ctx=self.raw_ctx)
+        return [mul_op(divisor_grad, output_grad, ctx=self.raw_ctx)]
 
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 1
         return input_shapes[0]
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        return
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if deduce_order:
+            if status.valid_all():
+                input_statuses[0].set_order(status.combine_order((-2, -1)))
+        else:
+            if status.valid_state():
+                input_statuses[0].set_state(*status.combine_state((-2, -1)))
 
 
 def div_op(node_A, node_B, ctx=None):

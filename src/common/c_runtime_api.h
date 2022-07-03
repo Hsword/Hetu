@@ -37,6 +37,9 @@ HETUSYS_EXTERN_C {
     int DLEventElapsedTime(DLEventHandle start, DLEventHandle ending,
                            float *duration);
 
+    // gpu chunk
+    void clear_chunk();
+
     // Array related apis for quick proptying
     /*!
      * \brief Allocate a nd-array's memory,
@@ -270,7 +273,7 @@ HETUSYS_EXTERN_C {
         const float alpha, DLArrayHandle output, DLStreamHandle stream_handle);
 
     /*!
-     * \brief Compute softmax on matrix, and store to output.
+     * \brief Compute tanh on matrix, and store to output.
      * \param input The input array.
      * \param output The output value.
      * \return 0 when success, -1 when failure happens
@@ -279,7 +282,17 @@ HETUSYS_EXTERN_C {
                   DLStreamHandle stream_handle);
 
     /*!
-     * \brief Compute Tanh, and store to output.
+     * \brief Compute the gradient of tanh on matrix, and store to output.
+     * \param forward The forward matrix.
+     * \param grad The gradient matrix.
+     * \param output The output value.
+     * \return 0 when success, -1 when failure happens
+     */
+    int DLGpuTanhGradient(const DLArrayHandle forward, const DLArrayHandle grad,
+                          DLArrayHandle output, DLStreamHandle stream_handle);
+
+    /*!
+     * \brief Compute sigmoid, and store to output.
      * \param input The input array.
      * \param output The output array.
      * \return 0 when success, -1 when failure happens
@@ -288,7 +301,7 @@ HETUSYS_EXTERN_C {
                      DLStreamHandle stream_handle);
 
     /*!
-     * \brief Compute Sigmoid, and store to output.
+     * \brief Compute softmax, and store to output.
      * \param input The input array.
      * \param output The output array.
      * \return 0 when success, -1 when failure happens
@@ -305,13 +318,6 @@ HETUSYS_EXTERN_C {
      * \param output The output value.
      * \return 0 when success, -1 when failure happens
      */
-    int DLGpuEmbeddingLookUp(const DLArrayHandle input, const DLArrayHandle ids,
-                             DLArrayHandle output,
-                             DLStreamHandle stream_handle);
-
-    int DLGpuEmbeddingLookUp_Gradient(
-        const DLArrayHandle output_grad, const DLArrayHandle ids,
-        DLArrayHandle input_grad, DLStreamHandle stream_handle);
 
     int DLGpuSoftmaxCrossEntropySparse(
         const DLArrayHandle input_a, const DLArrayHandle input_b,
@@ -329,6 +335,14 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle input_a, const DLArrayHandle input_b,
         const DLArrayHandle input_c, DLArrayHandle output,
         DLStreamHandle stream_handle);
+
+    int DLGpuEmbeddingLookUp(const DLArrayHandle input, const DLArrayHandle ids,
+                             DLArrayHandle output,
+                             DLStreamHandle stream_handle);
+
+    int DLGpuEmbeddingLookUp_Gradient(
+        const DLArrayHandle output_grad, const DLArrayHandle ids,
+        DLArrayHandle input_grad, DLStreamHandle stream_handle);
 
     int DLGpuCrossEntropy(const DLArrayHandle input_y,
                           const DLArrayHandle label, DLArrayHandle output,
@@ -465,22 +479,22 @@ HETUSYS_EXTERN_C {
 
     int CuDNN_DLGpuBatch_Normalization(
         const DLArrayHandle input_X, const DLArrayHandle bn_scale,
-        const DLArrayHandle bn_bias, DLArrayHandle output_Y, float momentum,
-        float eps, DLArrayHandle save_mean_arr, DLArrayHandle save_var_arr,
-        DLArrayHandle running_mean_arr, DLArrayHandle running_var_arr,
+        const DLArrayHandle bn_bias, DLArrayHandle output_Y, double momentum,
+        double eps, DLArrayHandle running_mean, DLArrayHandle running_var,
+        DLArrayHandle save_mean, DLArrayHandle save_var,
         DLStreamHandle stream_handle);
 
     int CuDNN_DLGpuBatch_Normalization_gradient(
         const DLArrayHandle gradient_Y, const DLArrayHandle input_X,
         const DLArrayHandle bn_scale, DLArrayHandle gradient_X,
         DLArrayHandle gradient_bn_scale, DLArrayHandle gradient_bn_bias,
-        float eps, DLArrayHandle running_mean_arr,
-        DLArrayHandle running_var_arr, DLStreamHandle stream_handle);
+        double eps, DLArrayHandle save_mean, DLArrayHandle save_var,
+        DLStreamHandle stream_handle);
 
     int CuDNN_DLGpuBatch_Normalization_inference(
         const DLArrayHandle input_X, const DLArrayHandle bn_scale,
-        const DLArrayHandle bn_bias, DLArrayHandle output_Y, float eps,
-        DLArrayHandle save_mean_arr, DLArrayHandle save_var_arr,
+        const DLArrayHandle bn_bias, DLArrayHandle output_Y, double eps,
+        DLArrayHandle estimated_mean, DLArrayHandle estimated_var,
         DLStreamHandle stream_handle);
 
     int DLGpuPad(const DLArrayHandle input_X, DLArrayHandle output_Y,
@@ -542,6 +556,9 @@ HETUSYS_EXTERN_C {
     int DLGpuWhere(const DLArrayHandle cond, const DLArrayHandle arr1,
                    const DLArrayHandle arr2, DLArrayHandle output,
                    DLStreamHandle stream_handle);
+    int DLGpuWhereConst(const DLArrayHandle cond, const DLArrayHandle arr1,
+                        float const_attr, DLArrayHandle output,
+                        DLStreamHandle stream_handle);
 
     int DLGpuBatchMatrixMultiply(
         const DLArrayHandle matA, bool transposeA, const DLArrayHandle matB,
@@ -593,9 +610,9 @@ HETUSYS_EXTERN_C {
                      DLArrayHandle output, unsigned long long *pseed,
                      DLStreamHandle stream_handle);
 
-    int DLGpuDropoutGradient_recompute(const DLArrayHandle grad, const float dropout,
-                              DLArrayHandle output, unsigned long long seed,
-                              DLStreamHandle stream_handle);
+    int DLGpuDropoutGradient_recompute(
+        const DLArrayHandle grad, const float dropout, DLArrayHandle output,
+        unsigned long long seed, DLStreamHandle stream_handle);
 
     int DLGpuDropoutGradient(const DLArrayHandle grad,
                              const DLArrayHandle fw_output, const float dropout,
@@ -654,11 +671,9 @@ HETUSYS_EXTERN_C {
     // Optimizer Ops
     int AddL2Regularization(const DLArrayHandle param, DLArrayHandle grad,
                             float l2reg, DLStreamHandle stream_handle);
-
     int AddL2RegularizationSparse(
         const DLArrayHandle param, const DLArrayHandle grad_indices,
         DLArrayHandle grad_values, float l2reg, DLStreamHandle stream_handle);
-
     int SGDOptimizerUpdate(DLArrayHandle param, const DLArrayHandle grad,
                            float lr, DLStreamHandle stream_handle);
 
@@ -701,7 +716,6 @@ HETUSYS_EXTERN_C {
                              float lr, float beta1, float beta2, float beta1t,
                              float beta2t, float eps, float weight_decay,
                              DLStreamHandle stream_handle);
-
     int AdamWOptimizerSparseUpdate(
         DLArrayHandle param, const DLArrayHandle grad_indices,
         const DLArrayHandle grad_values, DLArrayHandle expavg,
@@ -714,7 +728,6 @@ HETUSYS_EXTERN_C {
                             float lr, float beta1, float beta2, float beta1t,
                             float beta2t, float eps, float weight_decay,
                             DLStreamHandle stream_handle);
-
     int LambOptimizerSparseUpdate(
         DLArrayHandle param, const DLArrayHandle grad_indices,
         const DLArrayHandle grad_values, DLArrayHandle expavg,
@@ -814,17 +827,18 @@ HETUSYS_EXTERN_C {
 
     int DnnlBatchNorm(const DLArrayHandle input, const DLArrayHandle bn_scale,
                       const DLArrayHandle bn_bias, DLArrayHandle output,
-                      DLArrayHandle mean, DLArrayHandle var, float momentum,
-                      float eps);
+                      DLArrayHandle running_mean, DLArrayHandle running_var,
+                      DLArrayHandle save_mean, DLArrayHandle save_var,
+                      float momentum, float eps);
     int DnnlBatchNorm_Gradient(
         const DLArrayHandle grad_y, const DLArrayHandle input,
-        const DLArrayHandle bn_scale, const DLArrayHandle bn_bias,
-        DLArrayHandle grad_x, DLArrayHandle grad_scale, DLArrayHandle grad_bias,
-        DLArrayHandle mean, DLArrayHandle var, const float eps);
+        const DLArrayHandle bn_scale, DLArrayHandle grad_x,
+        DLArrayHandle grad_scale, DLArrayHandle grad_bias, DLArrayHandle mean,
+        DLArrayHandle var, const float eps);
     int DnnlBatchNorm_Inference(
         const DLArrayHandle input, const DLArrayHandle bn_scale,
         const DLArrayHandle bn_bias, DLArrayHandle output, DLArrayHandle mean,
-        DLArrayHandle var, float momentum, float eps);
+        DLArrayHandle var, float eps);
 
     int DnnlConcat(const DLArrayHandle input_x, const DLArrayHandle input_y,
                    DLArrayHandle output, int axis);

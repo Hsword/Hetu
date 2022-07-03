@@ -13,68 +13,68 @@ import numpy as np
 
 
 class Batch_NormalizationOp(Op):
-    def __init__(self, node_in, bn_scale, bn_bias, momentum=0.99, eps=0.01, ctx=None):
+    def __init__(self, node_in, bn_scale, bn_bias, momentum=0.1, eps=1e-5, ctx=None):
         super().__init__(Batch_NormalizationOp,
                          [node_in, bn_scale, bn_bias], ctx)
         self.momentum = momentum
         self.eps = eps
-        self.save_mean = None
-        self.save_var = None
+        # saved states
+        # !!! running_mean/running_var is the estimated_mean/estimated_var used in inference (necessary!)
+        # !!! save_mean/save_var is the saved forward computation result used in backward (optional!)
         self.running_mean = None
         self.running_var = None
+        self.save_mean = None
+        self.save_var = None
 
     def compute(self, input_vals, output_val, stream_handle=None, inference=False):
         if inference:
             if self.on_cpu:
                 if DNNL_LIB['DnnlBatchNorm_Inference']:
-                    cpu_batch_norm_inference(input_vals[0], input_vals[1], input_vals[2], output_val, self.save_mean,
-                                             self.save_var, self.momentum, self.eps)
+                    cpu_batch_norm_inference(
+                        input_vals[0], input_vals[1], input_vals[2], output_val, self.running_mean, self.running_var, self.eps)
                 else:
                     output_val[:] = batchnorm_inference(input_vals[0].asnumpy(), input_vals[1].asnumpy(),
-                                                        input_vals[2].asnumpy(
-                    ), self.save_mean, self.save_var,
-                        self.eps)
+                                                        input_vals[2].asnumpy(), self.running_mean, self.running_var, self.eps)
             else:
                 CuDNN_Batch_Normalization_inference(
-                    input_vals[0], input_vals[1], input_vals[2], output_val, self.save_mean, self.save_var, self.eps, stream_handle)
+                    input_vals[0], input_vals[1], input_vals[2], output_val, self.running_mean, self.running_var, self.eps, stream_handle)
         else:
             if self.on_cpu:
                 if DNNL_LIB['DnnlBatchNorm']:
-                    if self.save_mean is None:
-                        dev_id = input_vals[0].handle.contents.ctx.device_id
-                        C = input_vals[0].shape[1]
-                        self.save_mean = ndarray.array(
-                            np.zeros([C], dtype=np.float32), ctx=ndarray.cpu(dev_id))
-                        self.save_var = ndarray.array(
-                            np.zeros([C], dtype=np.float32), ctx=ndarray.cpu(dev_id))
+                    if self.running_mean is None:
+                        channel = input_vals[0].shape[1]
+                        self.running_mean = ndarray.array(
+                            np.zeros((channel,), dtype=np.float32), ctx=self.ctx)
+                        self.running_var = ndarray.array(
+                            np.ones((channel,), dtype=np.float32), ctx=self.ctx)
+                        self.save_mean = ndarray.empty(
+                            (channel,), ctx=self.ctx)
+                        self.save_var = ndarray.empty((channel,), ctx=self.ctx)
                     cpu_batch_norm(input_vals[0], input_vals[1], input_vals[2], output_val,
-                                   self.save_mean, self.save_var, self.momentum, self.eps)
+                                   self.running_mean, self.running_var, self.save_mean, self.save_var, self.momentum, self.eps)
                 else:
-                    output_val[:], self.save_mean, self.save_var = batchnorm_forward(input_vals[0].asnumpy(),
-                                                                                     input_vals[1].asnumpy(
-                    ),
-                        input_vals[2].asnumpy(
-                    ),
-                        self.save_mean,
-                        self.save_var, self.momentum,
-                        self.eps)
+                    if self.running_mean is None:
+                        channel = input_vals[0].shape[1]
+                        self.running_mean = np.zeros(
+                            (channel,), dtype=np.float32)
+                        self.running_var = np.ones(
+                            (channel,), dtype=np.float32)
+                        self.save_mean = np.empty((channel,), dtype=np.float32)
+                        self.save_var = np.empty((channel,), dtype=np.float32)
+                    output_val[:], self.running_mean[:], self.running_var[:], self.save_mean[:], self.save_var[:] = batchnorm_forward(
+                        input_vals[0].asnumpy(), input_vals[1].asnumpy(), input_vals[2].asnumpy(), self.running_mean, self.running_var, self.momentum, self.eps)
             else:
-                if self.save_mean == None:
-                    dev_id = input_vals[0].handle.contents.ctx.device_id
-                    C = input_vals[0].shape[1]
-                    self.save_mean = ndarray.array(
-                        np.zeros([1, C, 1, 1]), ctx=ndarray.gpu(dev_id))
-                    self.save_var = ndarray.array(
-                        np.zeros([1, C, 1, 1]), ctx=ndarray.gpu(dev_id))
+                if self.running_mean is None:
+                    channel = input_vals[0].shape[1]
+                    self.save_mean = ndarray.empty((channel,), ctx=self.ctx)
+                    self.save_var = ndarray.empty((channel,), ctx=self.ctx)
                     self.running_mean = ndarray.array(
-                        np.zeros([1, C, 1, 1]), ctx=ndarray.gpu(dev_id))
+                        np.zeros((channel,)), ctx=self.ctx)
                     self.running_var = ndarray.array(
-                        np.zeros([1, C, 1, 1]), ctx=ndarray.gpu(dev_id))
+                        np.ones((channel,)), ctx=self.ctx)
 
-                CuDNN_Batch_Normalization(
-                    input_vals[0], input_vals[1], input_vals[2], output_val, self.save_mean, self.save_var,
-                    self.running_mean, self.running_var, self.momentum,
-                    self.eps, stream_handle)
+                CuDNN_Batch_Normalization(input_vals[0], input_vals[1], input_vals[2], output_val, self.running_mean,
+                                          self.running_var, self.save_mean, self.save_var, self.momentum, self.eps, stream_handle)
 
     def gradient(self, output_grad):
 
@@ -101,14 +101,30 @@ class Batch_NormalizationOp(Op):
         input_statuses[0].copy_from(status, deduce_order)
         if deduce_order:
             if status.valid_all():
-                new_order = deduce_order_to_reduced_tensor(status)
+                status.check_state(2, True)
+                new_order = status.combine_order((0, -1), (1, 0))
                 input_statuses[1].set_order(new_order)
                 input_statuses[2].set_order(new_order)
         else:
             if status.valid_state():
-                new_state, duplicate = deduce_state_to_reduced_tensor(status)
-                input_statuses[1].set_state(new_state, duplicate)
-                input_statuses[2].set_state(new_state, duplicate)
+                status.check_state(2, False)
+                new_state, new_duplicate, new_partial = status.combine_state(
+                    (0, -1), (1, 0))
+                input_statuses[1].set_state(
+                    new_state, new_duplicate, new_partial)
+                input_statuses[2].set_state(
+                    new_state, new_duplicate, new_partial)
+
+    def deduce_generated_backward_nodes_states(self, input_statuses, status, index):
+        if index <= 0:
+            return status
+        else:
+            from ..context import NodeStatus
+            new_status = NodeStatus(
+                dev_num=status.dev_num, partial_or_node=True)
+            new_status.set_state(*status.combine_state((0, -2), (1, 0)))
+            new_status.set_order(status.combine_order((0, -2), (1, 0)))
+            return new_status
 
 
 class Batch_Normalization_GradientOp(Op):
@@ -121,59 +137,37 @@ class Batch_Normalization_GradientOp(Op):
         self.forward_node = forward_node
         self.eps = eps
 
-    def update_mean_and_var(self, saved_mean, saved_var):
-        self.saved_mean = saved_mean
-        self.saved_var = saved_var
+    def check_valid_arrs(self):
+        assert self.tmp_gradient_in_arr is not None
+        assert self.tmp_gradient_bn_bias is not None
+        assert self.tmp_gradient_bn_scale is not None
 
     def compute(self, input_vals, output_val, stream_handle=None):
-
+        self.check_valid_arrs()
         if self.on_cpu:
             if DNNL_LIB['DnnlBatchNorm_Gradient']:
-                if self.tmp_gradient_bn_bias is None:
-                    shapebn = input_vals[2].shape
-                    self.tmp_gradient_bn_bias = np.zeros(
-                        shape=shapebn, dtype=np.float32)
-                    self.tmp_gradient_bn_scale = np.zeros(
-                        shape=shapebn, dtype=np.float32)
-                    self.tmp_gradient_in_arr = np.zeros(
-                        shape=input_vals[1].shape, dtype=np.float32)
-
-                cpu_batch_norm_gradient(input_vals[0], input_vals[1], input_vals[2], bn_bias, self.tmp_gradient_in_arr,
-                                        self.tmp_gradient_bn_scale,
-                                        self.tmp_gradient_bn_bias, self.forward_node.running_mean,
-                                        self.forward_node.running_var, self.eps)
+                cpu_batch_norm_gradient(input_vals[0], input_vals[1], input_vals[2],
+                                        self.tmp_gradient_in_arr, self.tmp_gradient_bn_scale,
+                                        self.tmp_gradient_bn_bias, self.forward_node.save_mean,
+                                        self.forward_node.save_var, self.eps)
             else:
-                if self.tmp_gradient_bn_bias is None:
-                    typebn = input_vals[2].asnumpy().dtype
-                    shapebn = input_vals[2].asnumpy().shape
-                    self.tmp_gradient_bn_bias = np.zeros(
-                        shape=shapebn, dtype=typebn)
-                    self.tmp_gradient_bn_scale = np.zeros(
-                        shape=shapebn, dtype=typebn)
-                self.tmp_gradient_in_arr, self.tmp_gradient_bn_scale, self.tmp_gradient_bn_bias = batchnorm_backward(
-                    input_vals[0].asnumpy(), input_vals[1].asnumpy(
-                    ), input_vals[2].asnumpy(),
-                    self.tmp_gradient_bn_scale, self.tmp_gradient_bn_bias,
-                    self.eps, self.forward_node.save_mean, self.forward_node.save_var)
+                self.tmp_gradient_in_arr[:], self.tmp_gradient_bn_scale[:], self.tmp_gradient_bn_bias[:] = batchnorm_backward(
+                    input_vals[0].asnumpy(),
+                    input_vals[1].asnumpy(),
+                    input_vals[2].asnumpy(),
+                    self.eps, self.forward_node.save_mean, self.forward_node.save_var
+                )
         else:
-            if self.tmp_gradient_bn_bias == None:
-                shapebn = input_vals[2].shape
-                self.tmp_gradient_bn_scale = ndarray.empty(
-                    shape=shapebn, ctx=input_vals[0].ctx)
-                self.tmp_gradient_bn_bias = ndarray.empty(
-                    shape=shapebn, ctx=input_vals[0].ctx)
-                self.tmp_gradient_in_arr = ndarray.empty(
-                    shape=input_vals[1].shape, ctx=input_vals[0].ctx)
             CuDNN_Batch_Normalization_gradient(input_vals[0], input_vals[1], input_vals[2],
                                                self.tmp_gradient_in_arr, self.tmp_gradient_bn_scale,
-                                               self.tmp_gradient_bn_bias, self.forward_node.running_mean,
-                                               self.forward_node.running_var, self.eps, stream_handle)
+                                               self.tmp_gradient_bn_bias, self.forward_node.save_mean,
+                                               self.forward_node.save_var, self.eps, stream_handle)
 
     def gradient(self, output_grad):
         raise NotImplementedError
 
     def infer_shape(self, input_shapes):
-        return (1,)
+        return None
 
     def forward_deduce_states(self, input_statuses, status, deduce_order):
         assert len(input_statuses) == 3
@@ -186,12 +180,14 @@ class Batch_Normalization_GradientOp(Op):
         input_statuses[1].copy_from(status, deduce_order)
         if deduce_order:
             if status.valid_all():
-                new_order = deduce_order_to_reduced_tensor(status)
-                input_statuses[2].set_order(new_order)
+                status.check_state(2, True)
+                input_statuses[2].set_order(
+                    status.combine_order((0, -1), (1, 0)))
         else:
             if status.valid_state():
-                new_state, duplicate = deduce_state_to_reduced_tensor(status)
-                input_statuses[2].set_state(new_state, duplicate)
+                status.check_state(2, False)
+                input_statuses[2].set_state(
+                    *status.combine_state((0, -1), (1, 0)))
 
 
 class Batch_Normalization_Gradient_of_DataOp(Op):
@@ -200,17 +196,16 @@ class Batch_Normalization_Gradient_of_DataOp(Op):
                          [bn_gradient, in_arr], ctx)
 
     def compute(self, input_vals, output_val, stream_handle=None):
-
-        if self.on_cpu:
-            output_val[:] = self.inputs[0].tmp_gradient_in_arr
-        else:
-            self.inputs[0].tmp_gradient_in_arr.inplace_copy(output_val)
+        assert False, 'In memory plan we already set the result array; should not call the compute.'
 
     def gradient(self, output_grad):
         raise NotImplementedError
 
     def infer_shape(self, input_shapes):
         return input_shapes[1]
+
+    def pass_grad_array(self, array):
+        self.inputs[0].tmp_gradient_in_arr = array
 
 
 class Batch_Normalization_Gradient_of_ScaleOp(Op):
@@ -219,11 +214,7 @@ class Batch_Normalization_Gradient_of_ScaleOp(Op):
                          [bn_gradient, in_scale], ctx)
 
     def compute(self, input_vals, output_val, stream_handle=None):
-
-        if self.on_cpu:
-            output_val[:] = self.inputs[0].tmp_gradient_bn_scale
-        else:
-            self.inputs[0].tmp_gradient_bn_scale.inplace_copy(output_val)
+        assert False, 'In memory plan we already set the result array; should not call the compute.'
 
     def gradient(self, output_grad):
         raise NotImplementedError
@@ -232,18 +223,22 @@ class Batch_Normalization_Gradient_of_ScaleOp(Op):
         return input_shapes[1]
 
     def forward_deduce_states(self, input_statuses, status, deduce_order):
+        src_status = input_statuses[0]
         if deduce_order:
-            if input_statuses[0].valid_all():
-                new_order = deduce_order_to_reduced_tensor(input_statuses[0])
+            if src_status.valid_all():
+                src_status.check_state(2, True)
+                new_order = src_status.combine_order((0, -2), (1, 0))
                 status.set_order(new_order)
         else:
-            if input_statuses[0].valid_state():
-                new_state, duplicate = deduce_state_to_reduced_tensor(
-                    input_statuses[0])
-                status.set_state(new_state, duplicate)
+            if src_status.valid_state():
+                src_status.check_state(2, False)
+                status.set_state(*src_status.combine_state((0, -2), (1, 0)))
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
         pass
+
+    def pass_grad_array(self, array):
+        self.inputs[0].tmp_gradient_bn_scale = array
 
 
 class Batch_Normalization_Gradient_of_BiasOp(Op):
@@ -252,11 +247,7 @@ class Batch_Normalization_Gradient_of_BiasOp(Op):
                          [bn_gradient, in_bias], ctx)
 
     def compute(self, input_vals, output_val, stream_handle=None):
-
-        if self.on_cpu:
-            output_val[:] = self.inputs[0].tmp_gradient_bn_bias
-        else:
-            self.inputs[0].tmp_gradient_bn_bias.inplace_copy(output_val)
+        assert False, 'In memory plan we already set the result array; should not call the compute.'
 
     def gradient(self, output_grad):
         raise NotImplementedError
@@ -265,48 +256,24 @@ class Batch_Normalization_Gradient_of_BiasOp(Op):
         return input_shapes[1]
 
     def forward_deduce_states(self, input_statuses, status, deduce_order):
+        src_status = input_statuses[0]
         if deduce_order:
-            if input_statuses[0].valid_all():
-                new_order = deduce_order_to_reduced_tensor(input_statuses[0])
-                status.set_order(new_order)
+            if src_status.valid_all():
+                src_status.check_state(2, True)
+                status.set_order(src_status.combine_order((0, -2), (1, 0)))
         else:
-            if input_statuses[0].valid_state():
-                new_state, duplicate = deduce_state_to_reduced_tensor(
-                    input_statuses[0])
-                status.set_state(new_state, duplicate)
+            if src_status.valid_state():
+                src_status.check_state(2, False)
+                status.set_state(*src_status.combine_state((0, -2), (1, 0)))
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
         pass
 
-
-def deduce_order_to_reduced_tensor(input_status):
-    input_status.check_state(2, True)
-    new_order = list(input_status.order)
-    if 0 in new_order:
-        ind = new_order.index(0)
-        if (ind > 0 and new_order[ind - 1] == -1) or (ind < len(new_order) - 1 and new_order[ind + 1] == -1):
-            new_order.pop(ind)
-        else:
-            new_order[ind] = -1
-        appeared = False
-        for o in new_order:
-            if o == -1:
-                assert not appeared
-                appeared = True
-    new_order = tuple(new_order)
-    return new_order
+    def pass_grad_array(self, array):
+        self.inputs[0].tmp_gradient_bn_bias = array
 
 
-def deduce_state_to_reduced_tensor(input_status):
-    input_status.check_state(2, False)
-    state, duplicate = input_status.get()
-    new_state = state.copy()
-    if 0 in new_state:
-        duplicate *= new_state.pop(0)
-    return new_state, duplicate
-
-
-def batch_normalization_op(node_in, bn_scale, bn_bias, momentum=0.99, eps=0.01, ctx=None):
+def batch_normalization_op(node_in, bn_scale, bn_bias, momentum=0.1, eps=1e-5, ctx=None):
     """Batch normalization layer node.
 
     Parameters:
@@ -404,56 +371,56 @@ def batch_normalization_gradient_of_bias_op(bn_gradient, in_bias, ctx=None):
     return Batch_Normalization_Gradient_of_BiasOp(bn_gradient, in_bias, ctx=ctx)
 
 
-def batchnorm_forward(x, bn_scale, bn_bias, save_mean, save_var, momentum=0.99, eps=0.01):
+def batchnorm_forward(x, bn_scale, bn_bias, running_mean, running_var, momentum=0.1, eps=1e-5):
     D = x.shape[1]
-    if save_mean is None:
-        save_mean = np.zeros(D, dtype=x.dtype)
-    if save_var is None:
-        save_var = np.ones(D, dtype=x.dtype)
-
     sample_mean = x.mean(axis=(0, 2, 3), dtype=x.dtype)
     sample_var = x.var(axis=(0, 2, 3), dtype=x.dtype)
-    save_mean = momentum * sample_mean + (1.0 - momentum) * save_mean
-    save_var = momentum * sample_var + (1.0 - momentum) * save_var
+    running_mean = momentum * sample_mean + (1.0 - momentum) * running_mean
+    running_var = momentum * sample_var + (1.0 - momentum) * running_var
 
     std = np.sqrt(sample_var.reshape(1, D, 1, 1) + eps, dtype=x.dtype)
     x_centered = x - sample_mean.reshape(1, D, 1, 1)
     x_norm = x_centered / std
     out = bn_scale.reshape(1, D, 1, 1) * x_norm + bn_bias.reshape(1, D, 1, 1)
 
-    return out, save_mean, save_mean
+    return out, running_mean, running_var, sample_mean, sample_var
 
 
-def batchnorm_inference(x, bn_scale, bn_bias, save_mean, save_var, eps=0.01):
+def batchnorm_inference(x, bn_scale, bn_bias, estimated_mean, estimated_var, eps):
     D = x.shape[1]
-    std = np.sqrt(save_var.reshape(1, D, 1, 1) + eps, dtype=x.dtype)
-    x_centered = x - save_mean.reshape(1, D, 1, 1)
+    std = np.sqrt(estimated_var.reshape(1, D, 1, 1) + eps, dtype=x.dtype)
+    x_centered = x - estimated_mean.reshape(1, D, 1, 1)
     x_norm = x_centered / std
     out = bn_scale.reshape(1, D, 1, 1) * x_norm + bn_bias.reshape(1, D, 1, 1)
 
     return out
 
 
-def batchnorm_backward(gradient_Y, x, bn_scale, dbn_scale, dbn_bias, eps, save_mean, save_var):
+def batchnorm_backward(gradient_Y, x, bn_scale, eps, save_mean, save_var):
     D = gradient_Y.shape[1]
+    num_accum = gradient_Y.shape[0] * gradient_Y.shape[2] * gradient_Y.shape[3]
 
+    if not isinstance(save_mean, np.ndarray):
+        save_mean = save_mean.asnumpy()
+    if not isinstance(save_var, np.ndarray):
+        save_var = save_var.asnumpy()
     sample_mean = save_mean
     sample_var = save_var
 
-    std = np.sqrt(sample_var.reshape(1, D, 1, 1) + eps)
+    std = np.sqrt(sample_var + eps).reshape(1, D, 1, 1)
     x_centered = x - sample_mean.reshape(1, D, 1, 1)
     x_norm = x_centered / std
 
-    dbn_scale = (gradient_Y * x_norm).sum(axis=(0, 2, 3))
-    dbn_bias = gradient_Y.sum(axis=(0, 2, 3))
+    dbn_scale = (gradient_Y * x_norm).sum(axis=(0, 2, 3), keepdims=True)
+    dbn_bias = gradient_Y.sum(axis=(0, 2, 3), keepdims=True)
 
     dx_norm = gradient_Y * bn_scale.reshape(1, D, 1, 1)
     dx_centered = dx_norm / std
-    dmean = -(dx_centered.sum(axis=(0, 2, 3)) + 2 / D *
+    dmean = -(dx_centered.sum(axis=(0, 2, 3)) + 2 / num_accum *
               x_centered.sum(axis=(0, 2, 3))).reshape(1, D, 1, 1)
     dstd = (dx_norm * x_centered * -std ** (-2)
             ).sum(axis=(0, 2, 3)).reshape(1, D, 1, 1)
     dvar = dstd / 2 / std
-    dx = dx_centered + (dmean + dvar * 2 * x_centered) / D
+    dx = dx_centered + (dmean + dvar * 2 * x_centered) / num_accum
 
     return dx, dbn_scale, dbn_bias

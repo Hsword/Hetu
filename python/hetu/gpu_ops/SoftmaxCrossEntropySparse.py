@@ -1,5 +1,4 @@
 from __future__ import absolute_import
-import numpy as np
 from .Node import Op
 from .._base import DNNL_LIB
 from ..gpu_links import softmax_cross_entropy_sparse
@@ -28,6 +27,15 @@ class SoftmaxCrossEntropySparseOp(Op):
         assert input_shapes[0][:-1] == input_shapes[1]
         return input_shapes[0][:-1]
 
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        status.get_combine_from(input_statuses[0], deduce_order, (1, -2))
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        input_statuses[0].get_combine_from(status, deduce_order, (-2, 1))
+        input_statuses[1].get_combine_from(status, deduce_order, (-2, -1))
+
 
 class SoftmaxCrossEntropySparseGradientOp(Op):
     def __init__(self, node_A, node_B, node_C, ignored_index, ctx=None):
@@ -45,6 +53,15 @@ class SoftmaxCrossEntropySparseGradientOp(Op):
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 3
         return input_shapes[0]
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        status.copy_from(input_statuses[0], deduce_order)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        input_statuses[0].copy_from(status, deduce_order)
+        input_statuses[2].get_combine_from(status, deduce_order, (1, -1))
 
 
 def softmaxcrossentropy_sparse_op(node_A, node_B, ignored_index=-1, ctx=None):

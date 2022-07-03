@@ -28,12 +28,6 @@ class ReluOp(Op):
         assert len(input_shapes) == 1
         return input_shapes[0]
 
-    def get_default_state(self, status, enforce_order):
-        if enforce_order:
-            super().get_default_state(status, enforce_order)
-        else:
-            status.set_state(None, 1)
-
 
 class ReluGradientOp(Op):
     def __init__(self, node_A, node_B, ctx=None):
@@ -57,12 +51,6 @@ class ReluGradientOp(Op):
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 2
         return input_shapes[0]
-
-    def get_default_state(self, status, enforce_order):
-        if enforce_order:
-            super().get_default_state(status, enforce_order)
-        else:
-            status.set_state(None, 1)
 
 
 def relu_op(node, ctx=None):

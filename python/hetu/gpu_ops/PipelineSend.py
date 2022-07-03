@@ -1,50 +1,48 @@
 from __future__ import absolute_import
 from .Node import Op
-from .. import ndarray
-from ..communicator.mpi_nccl_comm import ncclDataType_t, ncclRedOp_t, GroupStart
-from ..stream import create_event_handle, create_stream_handle
 
 
 class PipelineSendOp(Op):
-    def __init__(self, node_A, destination, comm, stream=None, ctx=None):
+    def __init__(self, node_A, destination, comm, ctx=None):
+        # infer shape is done by executor
+        from ..communicator.mpi_nccl_comm import ncclDataType_t
         super().__init__(PipelineSendOp, [node_A], ctx)
+        if isinstance(destination, int):
+            destination = (destination,)
+        else:
+            destination = tuple(destination)
         self.const_attr = destination
         self.comm = comm
-        self.comm_stream = stream
-        self.desc = self.name + \
-            '(send node %s to rank %s)' % (node_A.name, str(destination))
-        self.shape = None
-        self.shape_is_sent = False
+        self.dtype = ncclDataType_t.ncclFloat32
+        self.index = 0
+        self.ntargets = len(destination)
+        self.use_indexed_slices = node_A.use_indexed_slices
 
-    def compute(self, input_vals, output_val, stream_handle=None, group_call=False):
-        assert not self.on_cpu, "PipelineSendOp only support P2P communication between gpus"
-        if group_call:
-            GroupStart()
+    @property
+    def desc(self):
+        return self.name + \
+            '(send node %s to rank %s)' % (
+                self.inputs[0].name, str(self.const_attr))
 
-        self.comm.dlarraySend(input_vals[0], ncclDataType_t.ncclFloat32, self.const_attr, stream_handle)
+    def compute(self, input_vals, output_val, stream_handle=None):
+        if self.use_indexed_slices:
+            self.comm.dlarraySend(
+                input_vals[0].indices, self.dtype, self.const_attr[self.index], stream_handle)
+            self.comm.dlarraySend(
+                input_vals[0].values, self.dtype, self.const_attr[self.index], stream_handle)
+        else:
+            self.comm.dlarraySend(
+                input_vals[0], self.dtype, self.const_attr[self.index], stream_handle)
+        self.step_index()
 
-    def gradient(self, output_grad):
-        return []
-
-    def infer_shape(self, input_shapes):
-        shape = input_shapes[0]
-        self.shape = shape
-        if not self.shape_is_sent:
-            self.shape_is_sent = True
-            # pad shape so that len=4
-            if len(shape) < 4:
-                shape = [0] * (4 - len(shape)) + list(shape)
-            # construct and send
-            payload = ndarray.array(shape, self.ctx)
-            self.comm.dlarraySend(payload,
-                                  ncclDataType_t.ncclFloat32,
-                                  self.const_attr,
-                                  self.comm_stream)
-        return shape
+    def step_index(self):
+        self.index = (self.index + 1) % self.ntargets
 
     def forward_hook(self, config):
+        from ..ndarray import is_gpu_ctx
+        from ..stream import create_event_handle
         self.ctx = self.inputs[0].ctx
-        self.on_gpu = ndarray.is_gpu_ctx(self.ctx)
+        self.on_gpu = is_gpu_ctx(self.ctx)
         self.on_cpu = not self.on_gpu
         # add event to the previous node, ensure that the send is
         # blocked until previous computations are finished
@@ -53,7 +51,7 @@ class PipelineSendOp(Op):
         self.event = create_event_handle(self.ctx)
 
 
-def pipeline_send_op(node, destination, comm, stream=None, ctx=None):
+def pipeline_send_op(node, destination, comm, ctx=None):
     """Make a new instance of PipelineSendOp and call the instance.
 
     Parameters:
@@ -68,4 +66,4 @@ def pipeline_send_op(node, destination, comm, stream=None, ctx=None):
     A new Node instance created by Op.
 
     """
-    return PipelineSendOp(node, destination, comm, stream=stream, ctx=ctx)
+    return PipelineSendOp(node, destination, comm, ctx=ctx)

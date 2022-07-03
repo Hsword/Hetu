@@ -33,13 +33,11 @@ message(STATUS "HETU version: ${HETU_VERSION}")
 # cuda
 if(${HETU_COMPILE_GPU})
     set(CMAKE_CUDA_COMPILER ${CUDAToolkit_ROOT}/bin/nvcc)
-    file(READ ${CUDAToolkit_ROOT}/version.txt RAW_CUDA_VERSION)
-    string(REGEX MATCH "[0-9\.]+" CUDA_VERSION ${RAW_CUDA_VERSION})
-    if(${CUDA_VERSION} VERSION_LESS "10.1")
-        message(FATAL_ERROR "Required CUDA version >= 10.1, while current CUDA version is ${CUDA_VERSION}")
-    endif()
     find_package(CUDAToolkit REQUIRED)
     enable_language(CUDA)
+    if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_LESS "10.1")
+        message(FATAL_ERROR "Required CUDA version >= 10.1, while current CUDA version is ${CMAKE_CUDA_COMPILER_VERSION}")
+    endif()
 endif()
 
 include(FetchContent) # download third_party

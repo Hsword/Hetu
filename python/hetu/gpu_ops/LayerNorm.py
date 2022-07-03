@@ -83,6 +83,38 @@ class Layer_NormalizationOp(Op):
         assert input_shapes[0][-1] == input_shapes[1][0] == input_shapes[2][0]
         return input_shapes[0]
 
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == 3
+        status.copy_from(input_statuses[0], deduce_order)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == 3
+        input_statuses[0].copy_from(status, deduce_order)
+        if deduce_order:
+            if status.valid_all():
+                new_order = status.combine_order((0, -1), (1, 0))
+                input_statuses[1].set_order(new_order)
+                input_statuses[2].set_order(new_order)
+        else:
+            if status.valid_state():
+                new_state, new_duplicate, new_partial = status.combine_state(
+                    (0, -1), (1, 0))
+                input_statuses[1].set_state(
+                    new_state, new_duplicate, new_partial)
+                input_statuses[2].set_state(
+                    new_state, new_duplicate, new_partial)
+
+    def deduce_generated_backward_nodes_states(self, input_statuses, status, index):
+        if index <= 0:
+            return status
+        else:
+            from ..context import NodeStatus
+            new_status = NodeStatus(
+                dev_num=status.dev_num, partial_or_node=True)
+            new_status.set_state(*status.combine_state((0, -2), (1, 0)))
+            new_status.set_order(status.combine_order((0, -2), (1, 0)))
+            return new_status
+
 
 class Layer_Normalization_GradientOp(Op):
     def __init__(self, out_gradient, in_node, ln_scale, forward_node, eps, ctx=None):
@@ -94,6 +126,11 @@ class Layer_Normalization_GradientOp(Op):
         self.data_shape = None
         self.forward_node = forward_node
         self.eps = eps
+
+    def check_valid_arrs(self):
+        assert self.tmp_gradient_in_arr is not None
+        assert self.tmp_gradient_ln_bias is not None
+        assert self.tmp_gradient_ln_scale is not None
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
@@ -132,21 +169,7 @@ class Layer_Normalization_GradientOp(Op):
             dx_2 = -1 * dx_1.sum(axis=-1, keepdims=True) / last_dim  # (N, 1)
             self.tmp_gradient_in_arr[:] = dx_1 + dx_2  # (N, X)
         else:
-            if self.tmp_gradient_ln_bias is None:
-                shapeln = input_vals[2].shape
-                self.data_shape = tuple(input_vals[0].shape)
-                self.tmp_gradient_ln_bias = ndarray.empty(
-                    shape=shapeln, ctx=input_vals[0].ctx)
-                self.tmp_gradient_ln_scale = ndarray.empty(
-                    shape=shapeln, ctx=input_vals[0].ctx)
-                self.tmp_gradient_in_arr = ndarray.empty(
-                    shape=self.data_shape, ctx=input_vals[0].ctx)
-            elif self.data_shape != tuple(input_vals[0].shape):
-                self.data_shape = tuple(input_vals[0].shape)
-                del self.tmp_gradient_in_arr
-                self.tmp_gradient_in_arr = ndarray.empty(
-                    shape=self.data_shape, ctx=input_vals[0].ctx)
-
+            self.check_valid_arrs()
             layer_normalization_gradient(input_vals[0], input_vals[1], input_vals[2],
                                          self.tmp_gradient_in_arr, self.tmp_gradient_ln_scale,
                                          self.tmp_gradient_ln_bias, self.forward_node.save_mean,
@@ -156,7 +179,25 @@ class Layer_Normalization_GradientOp(Op):
         raise NotImplementedError
 
     def infer_shape(self, input_shapes):
-        return (1,)
+        return None
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == 3
+        status.copy_from(input_statuses[0], deduce_order)
+        status.copy_from(input_statuses[1], deduce_order)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == 3
+        input_statuses[0].copy_from(status, deduce_order)
+        input_statuses[1].copy_from(status, deduce_order)
+        if deduce_order:
+            if status.valid_all():
+                input_statuses[2].set_order(
+                    status.combine_order((0, -1), (1, 0)))
+        else:
+            if status.valid_state():
+                input_statuses[2].set_state(
+                    *status.combine_state((0, -1), (1, 0)))
 
 
 class Layer_Normalization_Gradient_of_DataOp(Op):
@@ -165,16 +206,16 @@ class Layer_Normalization_Gradient_of_DataOp(Op):
                          [ln_gradient, in_arr], ctx)
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        if self.on_cpu:
-            output_val[:] = self.inputs[0].tmp_gradient_in_arr
-        else:
-            self.inputs[0].tmp_gradient_in_arr.inplace_copy(output_val)
+        assert False, 'In memory plan we already set the result array; should not call the compute.'
 
     def gradient(self, output_grad):
         raise NotImplementedError
 
     def infer_shape(self, input_shapes):
         return input_shapes[1]
+
+    def pass_grad_array(self, array):
+        self.inputs[0].tmp_gradient_in_arr = array
 
 
 class Layer_Normalization_Gradient_of_ScaleOp(Op):
@@ -183,16 +224,29 @@ class Layer_Normalization_Gradient_of_ScaleOp(Op):
                          [ln_gradient, in_scale], ctx)
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        if self.on_cpu:
-            output_val[:] = self.inputs[0].tmp_gradient_ln_scale
-        else:
-            self.inputs[0].tmp_gradient_ln_scale.inplace_copy(output_val)
+        assert False, 'In memory plan we already set the result array; should not call the compute.'
 
     def gradient(self, output_grad):
         raise NotImplementedError
 
     def infer_shape(self, input_shapes):
         return input_shapes[1]
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        if deduce_order:
+            if input_statuses[0].valid_all():
+                status.set_order(
+                    input_statuses[0].combine_order((0, -2), (1, 0)))
+        else:
+            if input_statuses[0].valid_state():
+                status.set_state(
+                    *input_statuses[0].combine_state((0, -2), (1, 0)))
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        pass
+
+    def pass_grad_array(self, array):
+        self.inputs[0].tmp_gradient_ln_scale = array
 
 
 class Layer_Normalization_Gradient_of_BiasOp(Op):
@@ -201,16 +255,29 @@ class Layer_Normalization_Gradient_of_BiasOp(Op):
                          [ln_gradient, in_bias], ctx)
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        if self.on_cpu:
-            output_val[:] = self.inputs[0].tmp_gradient_ln_bias
-        else:
-            self.inputs[0].tmp_gradient_ln_bias.inplace_copy(output_val)
+        assert False, 'In memory plan we already set the result array; should not call the compute.'
 
     def gradient(self, output_grad):
         raise NotImplementedError
 
     def infer_shape(self, input_shapes):
         return input_shapes[1]
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        if deduce_order:
+            if input_statuses[0].valid_all():
+                status.set_order(
+                    input_statuses[0].combine_order((0, -2), (1, 0)))
+        else:
+            if input_statuses[0].valid_state():
+                status.set_state(
+                    *input_statuses[0].combine_state((0, -2), (1, 0)))
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        pass
+
+    def pass_grad_array(self, array):
+        self.inputs[0].tmp_gradient_ln_bias = array
 
 
 def layer_normalization_op(node_in, ln_scale, ln_bias, eps=0.01, ctx=None):

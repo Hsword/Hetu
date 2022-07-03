@@ -12,6 +12,7 @@ class SplitOp(Op):
         self.axes = axes
         self.indices = indices
         self.splits = splits
+        self.grad_node = None
         assert len(self.axes) == len(self.splits)
         assert all([x >= 0 for x in axes])
         assert all([x >= 1 for x in splits])
@@ -43,7 +44,7 @@ class SplitOp(Op):
             self.output_shape[axe] = part_size if ind != spl - \
                 1 else ori_shape[axe] - self.begin_pos[axe]
 
-        if hasattr(self, 'grad_node'):
+        if self.grad_node is not None:
             self.grad_node.begin_pos = self.begin_pos
             self.grad_node.output_shape = ori_shape
 
@@ -70,7 +71,7 @@ class SplitOp(Op):
             self.output_shape[axe] = part_size if ind != spl - \
                 1 else ori_shape[axe] - self.begin_pos[axe]
 
-        if hasattr(self, 'grad_node'):
+        if self.grad_node is not None:
             self.grad_node.begin_pos = self.begin_pos
             self.grad_node.output_shape = ori_shape
         return self.output_shape

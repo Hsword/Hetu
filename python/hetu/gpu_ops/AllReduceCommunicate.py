@@ -1,56 +1,26 @@
 from __future__ import absolute_import
 from .Node import Op
-from .. import ndarray
-from .._base import _LIB, check_call
+from ..ndarray import is_gpu_ctx, NDArray, IndexedSlices, empty
 from ..stream import create_event_handle
 
 
 class AllReduceCommunicateOp(Op):
     def __init__(self, nodeA, comm):
         super().__init__(AllReduceCommunicateOp, [nodeA], nodeA.ctx)
-        self.on_gpu = ndarray.is_gpu_ctx(self.ctx)
+        self.on_gpu = is_gpu_ctx(self.ctx)
         self.on_cpu = not self.on_gpu
         self.comm = comm
+        self.use_indexed_slices = nodeA.use_indexed_slices
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        if self.on_cpu:
-            if isinstance(input_vals[0], ndarray.NDArray):
-                self.comm.dlarrayNcclAllReduce(
-                    input_vals[0], output_val, self.dtype, self.reduce_op)
-            elif isinstance(input_vals[0], ndarray.IndexedSlices):
-                if output_val.indices is None:
-                    ind_shape = list(input_vals[0].indices.shape)
-                    val_shape = list(input_vals[0].values.shape)
-                    ind_shape[0] *= self.comm.nrank
-                    val_shape[0] *= self.comm.nrank
-                    output_val.indices = ndarray.empty(ind_shape, self.ctx)
-                    output_val.values = ndarray.empty(val_shape, self.ctx)
-                self.comm.dlarrayAllGather(
-                    input_vals[0].indices, output_val.indices, self.dtype)
-                self.comm.dlarrayAllGather(
-                    input_vals[0].values, output_val.values, self.dtype)
-            else:
-                assert False
-        else:
-            if self.event==None:
-                self.event = create_event_handle(self.ctx)
-            if isinstance(input_vals[0], ndarray.NDArray):
-                self.comm.dlarrayNcclAllReduce(
-                    input_vals[0], output_val, self.dtype, self.reduce_op, stream_handle)
-                self.event.record(stream_handle)
-            elif isinstance(input_vals[0], ndarray.IndexedSlices):
-                if output_val.indices is None:
-                    ind_shape = list(input_vals[0].indices.shape)
-                    val_shape = list(input_vals[0].values.shape)
-                    ind_shape[0] *= self.comm.nrank
-                    val_shape[0] *= self.comm.nrank
-                    output_val.indices = ndarray.empty(ind_shape, self.ctx)
-                    output_val.values = ndarray.empty(val_shape, self.ctx)
-                self.comm.dlarrayAllGather(
-                    input_vals[0].indices, output_val.indices, self.dtype, stream_handle)
-                self.comm.dlarrayAllGather(
-                    input_vals[0].values, output_val.values, self.dtype, stream_handle)
-                self.event.record(stream_handle)
+        if isinstance(input_vals[0], NDArray):
+            self.comm.dlarrayNcclAllReduce(
+                input_vals[0], output_val, self.dtype, self.reduce_op, stream_handle)
+        elif isinstance(input_vals[0], IndexedSlices):
+            self.comm.dlarrayAllGather(
+                input_vals[0].indices, output_val.indices, self.dtype, stream_handle)
+            self.comm.dlarrayAllGather(
+                input_vals[0].values, output_val.values, self.dtype, stream_handle)
 
     def gradient(self, output_grad):
         raise NotImplementedError
@@ -61,10 +31,11 @@ class AllReduceCommunicateOp(Op):
     def forward_hook(self, config):
         from ..communicator.mpi_nccl_comm import ncclDataType_t, ncclRedOp_t
         self.ctx = self.inputs[0].ctx
-        self.on_gpu = ndarray.is_gpu_ctx(self.ctx)
+        self.on_gpu = is_gpu_ctx(self.ctx)
         self.on_cpu = not self.on_gpu
         if self.on_gpu and self.inputs[0].event is None:
             self.inputs[0].event = create_event_handle(self.ctx)
+        self.event = create_event_handle(self.ctx)
 
         # disable inplace if not lazy execution
         # previously we use array reshape lazy callback to do this, which is deprecated (not efficient)
@@ -87,6 +58,19 @@ def allreduceCommunicate_op(node, comm):
 
     """
     return AllReduceCommunicateOp(node, comm)
+
+
+class AllReduceCommunicateP2POp(AllReduceCommunicateOp):
+    def __init__(self, nodeA, comm):
+        Op.__init__(self, AllReduceCommunicateP2POp, [nodeA], nodeA.ctx)
+        self.on_gpu = is_gpu_ctx(self.ctx)
+        self.on_cpu = not self.on_gpu
+        self.comm = comm
+        self.use_indexed_slices = nodeA.use_indexed_slices
+
+
+def allreduceCommunicatep2p_op(node, comm):
+    return AllReduceCommunicateP2POp(node, comm)
 
 
 class GroupAllReduceCommunicateOp(Op):

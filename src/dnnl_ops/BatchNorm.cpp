@@ -19,8 +19,9 @@ using namespace std;
 
 int DnnlBatchNorm(const DLArrayHandle input, const DLArrayHandle bn_scale,
                   const DLArrayHandle bn_bias, DLArrayHandle output,
-                  DLArrayHandle mean, DLArrayHandle var, float momentum,
-                  float eps) {
+                  DLArrayHandle running_mean, DLArrayHandle running_var,
+                  DLArrayHandle save_mean, DLArrayHandle save_var,
+                  float momentum, float eps) {
     dnnl_stream_init();
 
     assert(input->ndim == 4);
@@ -36,6 +37,10 @@ int DnnlBatchNorm(const DLArrayHandle input, const DLArrayHandle bn_scale,
 
     float *scale = (float *)(bn_scale->data);
     float *bias = (float *)(bn_bias->data);
+    float *running_mean_data = (float *)(running_mean->data);
+    float *running_var_data = (float *)(running_var->data);
+    float *save_mean_data = (float *)(save_mean->data);
+    float *save_var_data = (float *)(save_var->data);
     float *ptr = new float[2 * C];
     for (int i = 0; i < C; i++)
         ptr[i] = scale[i];
@@ -52,8 +57,8 @@ int DnnlBatchNorm(const DLArrayHandle input, const DLArrayHandle bn_scale,
     auto input_mem = memory(data_md, eng, input->data);
     auto output_mem = memory(data_md, eng, output->data);
     auto ptr_mem = memory(ptr_md, eng, ptr);
-    auto mean_mem = memory(mean_var_md, eng, mean->data);
-    auto var_mem = memory(mean_var_md, eng, var->data);
+    auto mean_mem = memory(mean_var_md, eng, save_mean_data);
+    auto var_mem = memory(mean_var_md, eng, save_var_data);
 
     auto bn_d = batch_normalization_forward::desc(
         prop_kind::forward_training, data_md, eps,
@@ -67,14 +72,19 @@ int DnnlBatchNorm(const DLArrayHandle input, const DLArrayHandle bn_scale,
                                {DNNL_ARG_VARIANCE, var_mem},
                                {DNNL_ARG_DST, output_mem}});
     engine_stream.wait();
+    for (int i = 0; i < C; ++i) {
+        running_mean_data[i] = running_mean_data[i] * (1 - momentum)
+                               + save_mean_data[i] * momentum;
+        running_var_data[i] =
+            running_var_data[i] * (1 - momentum) + save_var_data[i] * momentum;
+    }
 
     return 0;
 }
 
 int DnnlBatchNorm_Gradient(const DLArrayHandle grad_y,
                            const DLArrayHandle input,
-                           const DLArrayHandle bn_scale,
-                           const DLArrayHandle bn_bias, DLArrayHandle grad_x,
+                           const DLArrayHandle bn_scale, DLArrayHandle grad_x,
                            DLArrayHandle grad_scale, DLArrayHandle grad_bias,
                            DLArrayHandle mean, DLArrayHandle var,
                            const float eps) {
@@ -92,13 +102,14 @@ int DnnlBatchNorm_Gradient(const DLArrayHandle grad_y,
     int out_W = grad_y->shape[3];
 
     float *scale = (float *)(bn_scale->data);
-    float *bias = (float *)(bn_bias->data);
     float *ptr = new float[2 * C];
     float *grad_ptr = new float[2 * out_C];
     for (int i = 0; i < C; i++)
         ptr[i] = scale[i];
+    // bn_bias is not used in gradient
+    // tests show it's ok to set here 0
     for (int i = 0; i < C; i++)
-        ptr[i + C] = bias[i];
+        ptr[i + C] = 0;
 
     auto data_md = memory::desc({N, C, H, W}, memory::data_type::f32,
                                 memory::format_tag::nchw);
@@ -141,7 +152,7 @@ int DnnlBatchNorm_Gradient(const DLArrayHandle grad_y,
     engine_stream.wait();
 
     scale = (float *)(grad_scale->data);
-    bias = (float *)(grad_bias->data);
+    float *bias = (float *)(grad_bias->data);
     for (int i = 0; i < out_C; i++)
         scale[i] = grad_ptr[i];
     for (int i = 0; i < out_C; i++)
@@ -152,8 +163,7 @@ int DnnlBatchNorm_Gradient(const DLArrayHandle grad_y,
 int DnnlBatchNorm_Inference(const DLArrayHandle input,
                             const DLArrayHandle bn_scale,
                             const DLArrayHandle bn_bias, DLArrayHandle output,
-                            DLArrayHandle mean, DLArrayHandle var,
-                            float momentum, float eps) {
+                            DLArrayHandle mean, DLArrayHandle var, float eps) {
     dnnl_stream_init();
 
     assert(input->ndim == 4);
@@ -176,10 +186,6 @@ int DnnlBatchNorm_Inference(const DLArrayHandle input,
         ptr[i] = scale[i];
     for (int i = 0; i < C; i++)
         ptr[i + C] = bias[i];
-    for (int i = 0; i < C; i++)
-        running_mean[i] = running_mean[i] * momentum;
-    for (int i = 0; i < C; i++)
-        running_var[i] = running_var[i] * momentum;
 
     auto data_md = memory::desc({N, C, H, W}, memory::data_type::f32,
                                 memory::format_tag::nchw);

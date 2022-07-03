@@ -92,6 +92,7 @@ if __name__ == "__main__":
             activation = ht.dispatch(activation, (1, 4))
             weight = ht.dispatch(weight, (4, 1))
         activation = ht.matmul_op(activation, weight)
+        activation = ht.relu_op(activation)
 
     if args.split2:
         context2 = tuple((ht.gpu(4), ht.gpu(5), ht.gpu(6), ht.gpu(
@@ -128,10 +129,11 @@ if __name__ == "__main__":
                 activation = ht.dispatch(activation, (1, 4))
                 weight = ht.dispatch(weight, (4, 1))
             activation = ht.matmul_op(activation, weight)
+            activation = ht.relu_op(activation)
 
     with ht.context(ht.gpu(3)):
         activation = ht.dispatch(activation, (1, 1))
-        activation = ht.relu_op(activation)
+        # activation = ht.relu_op(activation)
         y_pred = fc(activation, (2048, 10), 'mlp_fc2', with_relu=False)
         y_ = ht.Variable(name="dataloader_y", trainable=False)
         loss = ht.softmaxcrossentropy_op(y_pred, y_)

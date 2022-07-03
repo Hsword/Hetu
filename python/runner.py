@@ -161,7 +161,7 @@ def main():
     parser.add_argument('command', nargs=argparse.REMAINDER,
                         help='Command to be executed.')
     args = parser.parse_args()
-    settings = ht.dist.DistConfig(args.config, args.servers, args.workers)
+    settings = ht.DistConfig(args.config, args.servers, args.workers)
     print(settings)
     if settings.enable_PS:
         ps_config = settings.make_ps_config()

@@ -11,6 +11,7 @@ class MatMulOp(Op):
         super().__init__(MatMulOp, [node_A, node_B], ctx)
         self.matmul_attr_trans_A = trans_A
         self.matmul_attr_trans_B = trans_B
+
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
             if DNNL_LIB['DnnlMatrixMultiply']:
@@ -81,71 +82,135 @@ class MatMulOp(Op):
 
     def forward_deduce_states(self, input_statuses, status, deduce_order):
         assert len(input_statuses) == 2
-        l2res_map = [
-            {-1: 1, 0: 0, 1: -1},  # no trans
-            {-1: 1, 1: 0, 0: -1},  # trans A
-        ][self.matmul_attr_trans_A]
-        r2res_map = [
-            {-1: 0, 0: -1, 1: 1},  # no trans
-            {-1: 0, 0: 1, 1: -1},  # trans B
-        ][self.matmul_attr_trans_B]
-        if deduce_order:
-            if input_statuses[0].valid_all():
-                order = input_statuses[0].order
-                status.set_order(tuple(l2res_map[x] for x in order))
-            elif input_statuses[1].valid_all():
-                order = input_statuses[1].order
-                status.set_order(tuple(r2res_map[x] for x in order))
-        else:
-            if input_statuses[0].valid_state():
-                state, duplicate = input_statuses[0].get()
-                res_state = (
-                    state.get(int(self.matmul_attr_trans_A), 1), duplicate)
-                res_duplicate = state.get(1-self.matmul_attr_trans_A, 1)
-                status.set_state(res_state, res_duplicate)
-            elif input_statuses[1].valid_state():
-                state, duplicate = input_statuses[1].get()
-                res_state = (duplicate, state.get(
-                    1-self.matmul_attr_trans_B, 1))
-                res_duplicate = state.get(int(self.matmul_attr_trans_B), 1)
-                status.set_state(res_state, res_duplicate)
+        matmul_forward_deduce(input_statuses, status, deduce_order,
+                              self.matmul_attr_trans_A, self.matmul_attr_trans_B)
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
-        def revert(x, whether=True):
-            return (x[1], x[0]) if whether else x
         assert len(input_statuses) == 2
-        res2l_map = [
-            {-1: 1, 0: 0, 1: -1},  # no trans
-            {-1: 0, 0: 1, 1: -1},  # trans A
-        ][self.matmul_attr_trans_A]
-        res2r_map = [
-            {-1: 0, 0: -1, 1: 1},  # no trans
-            {-1: 1, 0: -1, 1: 0},  # trans B
-        ][self.matmul_attr_trans_B]
-        if deduce_order:
-            if status.valid_all():
-                res_order = tuple(res2l_map[x] for x in status.order)
-                input_statuses[0].set_order(res_order)
-                res_order = tuple(res2r_map[x] for x in status.order)
-                input_statuses[1].set_order(res_order)
+        matmul_backward_deduce(status, input_statuses, deduce_order,
+                               self.matmul_attr_trans_A, self.matmul_attr_trans_B)
+
+    def deduce_generated_backward_nodes_states(self, input_statuses, status, index):
+        assert index is not None
+        if index == -1:
+            return status.remove_partial()
         else:
-            if status.valid_state():
-                state, duplicate = status.get()
-                res_state = revert(
-                    (state.get(0, 1), duplicate), self.matmul_attr_trans_A)
-                res_duplicate = state.get(1, 1)
-                input_statuses[0].set_state(res_state, res_duplicate)
-                res_state = revert(
-                    (duplicate, state.get(1, 1)), self.matmul_attr_trans_B)
-                res_duplicate = state.get(0, 1)
-                input_statuses[1].set_state(res_state, res_duplicate)
-            else:
-                if input_statuses[0].state is not None:
-                    input_statuses[1].set_state(
-                        None, input_statuses[0].state.get(int(self.matmul_attr_trans_A), 1))
-                if input_statuses[1].state is not None:
-                    input_statuses[0].set_state(
-                        None, input_statuses[1].state.get(1 - self.matmul_attr_trans_B, 1))
+            return matmul_make_backward_status(status, self.matmul_attr_trans_A, self.matmul_attr_trans_B, index)
+
+
+def matmul_forward_deduce(input_statuses, status, deduce_order, transA, transB):
+    l2res_map = [
+        {-1: 1, 0: 0, 1: -2},  # no trans
+        {-1: 1, 1: 0, 0: -2},  # trans A
+    ][transA]
+    r2res_map = [
+        {-1: 0, 0: -2, 1: 1},  # no trans
+        {-1: 0, 0: 1, 1: -2},  # trans B
+    ][transB]
+    lstatus = input_statuses[0]
+    rstatus = input_statuses[1]
+    if deduce_order:
+        if lstatus.valid_all() and rstatus.valid_all():
+            lorder = lstatus.order
+            rorder = rstatus.order
+            new_lorder = list(l2res_map[x] for x in lorder)
+            new_rorder = list(r2res_map[x] for x in rorder)
+            if new_lorder != new_rorder:
+                new_lorder[new_lorder.index(1)] = -1
+                new_rorder[new_rorder.index(0)] = -1
+                assert new_lorder == new_rorder
+            elif 0 in new_lorder and lstatus.duplicate > 1:
+                ind0 = new_lorder.index(0)
+                ind1 = new_lorder.index(1)
+                if ind0 > ind1:
+                    ind0, ind1 = ind1, ind0
+                assert ind0 + 1 == ind1
+                new_lorder.insert(ind1, -1)
+            status.set_order(tuple(new_lorder))
+    else:
+        if lstatus.valid_state() and rstatus.valid_state():
+            lstate = lstatus.state
+            rstate = rstatus.state
+            lrow = lstate.get(int(transA), 1)
+            lcol = lstate.get(1-transA, 1)
+            rrow = rstate.get(int(transB), 1)
+            rcol = rstate.get(1-transB, 1)
+            assert lcol == rrow
+            res_state = (lrow, rcol)
+            res_partial = lcol
+            status.set_state(res_state, partial=res_partial)
+
+
+def matmul_backward_deduce(status, input_statuses, deduce_order, transA, transB):
+    res2l_map = [
+        {-2: 1, 0: 0, 1: -1, -1: -1},  # no trans
+        {-2: 0, 0: 1, 1: -1, -1: -1},  # trans A
+    ][transA]
+    res2r_map = [
+        {-2: 0, 0: -1, 1: 1, -1: -1},  # no trans
+        {-2: 1, 0: -1, 1: 0, -1: -1},  # trans B
+    ][transB]
+    if deduce_order:
+        if status.valid_all():
+            res_order = tuple(res2l_map[x] for x in status.order)
+            input_statuses[0].set_order(res_order)
+            res_order = tuple(res2r_map[x] for x in status.order)
+            input_statuses[1].set_order(res_order)
+    else:
+        if status.valid_state():
+            state, duplicate = status.get()
+            partial = status.partial
+            state = dict(state)
+            state[-1] = duplicate
+            state[-2] = partial if status.enable_partial else 1
+            lstate, lduplicate = {}, 1
+            rstate, rduplicate = {}, 1
+            for key, value in state.items():
+                lkey = res2l_map[key]
+                if lkey == -1:
+                    lduplicate *= value
+                else:
+                    lstate[lkey] = value
+                rkey = res2r_map[key]
+                if rkey == -1:
+                    rduplicate *= value
+                else:
+                    rstate[rkey] = value
+            input_statuses[0].set_state(lstate, lduplicate)
+            input_statuses[1].set_state(rstate, rduplicate)
+
+
+def matmul_make_backward_status(status, transA, transB, index):
+    from ..context import NodeStatus
+    new_status = NodeStatus(dev_num=status.dev_num, partial_or_node=True)
+    if index < 2:
+        res2genl_map = [
+            {-2: 1, 0: 0, 1: -2, -1: -1},  # no trans
+            {-2: 0, 0: 1, 1: -2, -1: -1},  # trans A
+        ][transA]
+        res2genr_map = [
+            {-2: 0, 0: -2, 1: 1, -1: -1},  # no trans
+            {-2: 1, 0: -2, 1: 0, -1: -1},  # trans B
+        ][transB]
+        res_map = res2genl_map if index == 0 else res2genr_map
+        all_state = dict(status.state)
+        all_state[-2] = 1 if status.partial is None else status.partial
+        all_state[-1] = status.duplicate
+        res_state = {}
+        for key in [-2, -1, 0, 1]:
+            value = all_state.get(key, 1)
+            res_state[res_map[key]] = value
+        partial = res_state.pop(-2)
+        duplicate = res_state.pop(-1)
+        new_status.set_state(res_state, duplicate, partial)
+        order = tuple(res_map[x] for x in status.order)
+        new_status.set_order(order)
+    else:
+        # for bias in linearop
+        assert index == 2
+        new_status.set_state(*status.combine_state((-2, -1), (0, -2), (1, 0)))
+        new_status.set_order(status.combine_order((-2, -1), (0, -2), (1, 0)))
+    return new_status
 
 
 def matmul_op(node_A, node_B, trans_A=False, trans_B=False, ctx=None):

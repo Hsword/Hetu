@@ -62,6 +62,24 @@ class MulOp(Op):
                 assert False, "can't do elementwise multiply between variables of different sizes."
         return output
 
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        flag = False
+        for nst in input_statuses:
+            if nst.enable_partial:
+                flag = True
+                status.copy_from(nst, deduce_order)
+        if not flag:
+            super().forward_deduce_states(input_statuses, status, deduce_order)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        flag = False
+        for nst in input_statuses:
+            if nst.enable_partial:
+                flag = True
+                nst.copy_from(status, deduce_order)
+        if not flag:
+            super().backward_deduce_states(status, input_statuses, deduce_order)
+
 
 def mul_op(node_A, node_B, ctx=None):
     """Make a new instance of matrixs elementwise multiplication and call the instance.

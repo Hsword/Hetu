@@ -11,6 +11,7 @@ class EmbeddingLookUp(Op):
     def __init__(self, embedding, index, ctx=None):
         super().__init__(EmbeddingLookUp, [embedding, index], ctx)
         embedding.is_embed = True
+        self.grad_node = None
 
     def _compute_cpu_dnnl(self, input_vals, output_val, stream_handle=None):
         cpu_embedding_lookup(input_vals[0], input_vals[1], output_val)
@@ -46,7 +47,7 @@ class EmbeddingLookUp(Op):
 
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 2
-        if hasattr(self, 'grad_node'):
+        if self.grad_node is not None:
             self.grad_node.embed_shape = input_shapes[0]
         output_shape = list(input_shapes[1])
         output_shape.append(input_shapes[0][1])
@@ -76,7 +77,9 @@ class EmbeddingLookUp(Op):
     def backward_hook(self, config):
         # insert data transfer op if needed
         local_comm_mode = config.node_strategy.get(self, config.comm_mode)
-        assert local_comm_mode == config.node_strategy.get(self.inputs[0], config.comm_mode), \
+        embedding_comm_mode = config.node_strategy.get(
+            self.inputs[0], config.comm_mode)
+        assert local_comm_mode in (embedding_comm_mode, None), \
             'Embedding lookup communication mode invalid. Should conform with embedding parameter.'
         if local_comm_mode in ('PS', 'Hybrid'):
             cpu_ctx = ndarray.cpu(0)
@@ -84,11 +87,69 @@ class EmbeddingLookUp(Op):
             for n in self.inputs:
                 n.ctx = cpu_ctx
 
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        tb_st, id_st = input_statuses
+        if tb_st.valid(deduce_order) and id_st.valid(deduce_order):
+            if deduce_order:
+                lorder = tb_st.order
+                rorder = id_st.order
+                partial_index = lorder.index(0) if 0 in lorder else None
+                split_index = rorder.index(0) if 0 in rorder else None
+                if partial_index == 0:
+                    new_order = [-2]
+                elif split_index == 0:
+                    new_order = [0]
+                else:
+                    new_order = []
+                if status.duplicate > 1:
+                    new_order.append(-1)
+                if partial_index == 1:
+                    new_order.append(-2)
+                elif split_index == 1:
+                    new_order.append(0)
+                status.set_order(tuple(new_order))
+            else:
+                partial = tb_st.state.get(0, 1)
+                new_state = {0: id_st.state.get(0, 1)}
+                status.set_state(new_state, None, partial)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        # now we only support split batch dimension
+        # TODO: enable dynamic dimension to express the last dimension in state/order
+        assert len(input_statuses) == len(self.inputs)
+        if status.valid(deduce_order):
+            status.check_state(1, deduce_order)
+        if deduce_order:
+            if status.valid_all():
+                input_statuses[0].set_order(
+                    status.combine_order((0, -1), (-2, 0)))
+                input_statuses[1].set_order(status.combine_order((-2, -1)))
+        else:
+            if status.valid_state():
+                input_statuses[0].set_state(
+                    *status.combine_state((0, -1), (-2, 0)))
+                input_statuses[1].set_state(*status.combine_state((-2, -1)))
+
+    def deduce_generated_backward_nodes_states(self, input_statuses, status, index):
+        assert index <= 0
+        if index == -1:
+            return status.remove_partial()
+        else:
+            from ..context import NodeStatus
+            new_status = NodeStatus(
+                dev_num=status.dev_num, partial_or_node=True)
+            new_status.set_state(*status.exchange_state(-2, 0))
+            new_status.set_order(status.exchange_order(-2, 0))
+            return new_status
+
 
 class EmbeddingLookUp_Gradient(Op):
     def __init__(self, vectors, index, embed_shape, ctx=None):
-        super().__init__(EmbeddingLookUp_Gradient, [vectors, index], ctx)
+        super().__init__(EmbeddingLookUp_Gradient,
+                         [vectors, index], ctx)
         self.embed_shape = embed_shape
+        self.use_indexed_slices = True
 
     def compute(self, input_vals, output_val, stream_handle=None):
         assert self.embed_shape
@@ -106,6 +167,21 @@ class EmbeddingLookUp_Gradient(Op):
         # insert data transfer op if needed
         if config.comm_mode == 'PS' or config.comm_mode == "Hybrid":
             self.ctx = ndarray.cpu(0)
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if status.valid(deduce_order):
+            input_statuses[0].set_from_combine(
+                status, deduce_order, (0, -1), (-2, 0))
+            input_statuses[1].set_from_combine(
+                status, deduce_order, (0, -1), (-2, 0))
+        elif input_statuses[0].valid(deduce_order):
+            input_statuses[1].copy_from(input_statuses[0], deduce_order)
+        elif input_statuses[1].valid(deduce_order):
+            input_statuses[0].copy_from(input_statuses[1], deduce_order)
 
 
 def embedding_lookup_op(embedding, index, ctx=None):

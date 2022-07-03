@@ -39,12 +39,12 @@ from .CrossEntropySparse import crossentropy_sparse_op
 from .Split import split_op, split_gradient_op
 from .Sqrt import sqrt_op, rsqrt_op
 from .Sum import sum_op
-from .Tanh import tanh_op
+from .Tanh import tanh_op, tanh_gradient_op
 from .Transpose import transpose_op
 from .Variable import Variable, placeholder_op
 from .ZerosLike import zeroslike_op
 from .EmbeddingLookUp import embedding_lookup_op, embedding_lookup_gradient_op
-from .Where import where_op
+from .Where import where_op, where_const_op
 from .BatchMatrixMult import batch_matmul_op
 from .LayerNorm import layer_normalization_op
 from .InstanceNorm2d import instance_normalization2d_op
@@ -54,7 +54,11 @@ from .ReduceMean import reduce_mean_op
 from .OneHot import one_hot_op
 from .Linear import linear_op
 from .Conv2dAddBias import conv2d_add_bias_op
-from .AllReduceCommunicate import allreduceCommunicate_op, groupallreduceCommunicate_op
+from .AllReduceCommunicate import allreduceCommunicate_op, groupallreduceCommunicate_op, allreduceCommunicatep2p_op
+from .AllGatherCommunicate import allgatherCommunicate_op
+from .ReduceScatterCommunicate import reducescatterCommunicate_op
+from .BroadcastCommunicate import broadcastCommunicate_op
+from .ReduceCommunicate import reduceCommunicate_op
 from .ParameterServerCommunicate import parameterServerCommunicate_op, parameterServerSparsePull_op
 from .DataTransfer import datah2d_op, datad2h_op
 from .MatrixDot import matrix_dot_op
@@ -161,6 +165,7 @@ __all__ = [
     'server_finish',
     'rsqrt_op',
     'tanh_op',
+    'tanh_gradient_op',
     'transpose_op',
     'Variable',
     'worker_init',
@@ -170,6 +175,7 @@ __all__ = [
     "embedding_lookup_op",
     "embedding_lookup_gradient_op",
     'where_op',
+    'where_const_op',
     'batch_matmul_op',
     'layer_normalization_op',
     'instance_normalization2d_op',
@@ -180,6 +186,11 @@ __all__ = [
     'linear_op',
     'conv2d_add_bias_op',
     'allreduceCommunicate_op',
+    'allreduceCommunicatep2p_op',
+    'allgatherCommunicate_op',
+    'reducescatterCommunicate_op',
+    'broadcastCommunicate_op',
+    'reduceCommunicate_op',
     'parameterServerCommunicate_op',
     'datah2d_op',
     'datad2h_op',

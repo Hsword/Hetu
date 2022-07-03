@@ -1,0 +1,9 @@
+alexnet/
+resnet101/
+wresnet101/
+inceptionv3/
+prev/
+
+run*.py
+
+*.png

@@ -41,8 +41,8 @@ for i in range(10):
     torch_result.append(result.detach().numpy())
 
 def batch_norm(x, hidden):
-    scale = init.ones(shape=(1, hidden, 1, 1), name='scale')
-    bias = init.zeros(shape=(1, hidden, 1, 1), name='bias')
+    scale = init.ones(shape=(hidden,), name='scale')
+    bias = init.zeros(shape=(hidden,), name='bias')
     x = ht.batch_normalization_op(x, scale, bias, momentum=0.5, eps=1e-5)
     return x
 

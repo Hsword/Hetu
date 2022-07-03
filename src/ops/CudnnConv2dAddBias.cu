@@ -65,11 +65,15 @@ int Cudnn_Conv2dAddBias(const DLArrayHandle input_x, const DLArrayHandle input_f
     float *output_data = (float *)output->data;
     // algorithm
     cudnnConvolutionFwdAlgo_t algo;
-    // algo = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM;
+#ifdef CUDNN8
+    // TODO: using cudnnFindConvolutionForwardAlgorithm in CuDNN 8 instead
+    algo = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM;
     // algo = CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD_NONFUSED;
+#else
     CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm(
         cudnn_map[dev_id], input_desc, filter_desc, conv_desc, out_desc,
         CUDNN_CONVOLUTION_FWD_PREFER_FASTEST, 0, &algo));
+#endif
     size_t workspace_size;
     CUDNN_CALL(cudnnGetConvolutionForwardWorkspaceSize(
         cudnn_map[dev_id], input_desc, filter_desc, conv_desc, out_desc, algo,
