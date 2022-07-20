@@ -1102,7 +1102,7 @@ HETUSYS_EXTERN_C {
     int DLGpuLearnHash(const DLArrayHandle input, const DLArrayHandle slope,
                        const DLArrayHandle bias, const DLArrayHandle prime,
                        DLArrayHandle output, int nbucket, bool normal,
-                       DLStreamHandle stream_handle);
+                       float eps, DLStreamHandle stream_handle);
 
 } // HETUSYS_EXTERN_C
 

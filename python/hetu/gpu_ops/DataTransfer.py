@@ -14,6 +14,7 @@ class DataH2DOp(Op):
         self.event = None
         self.on_cpu = False
         self.on_gpu = True
+        self.dtype = node_A.dtype
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if stream_handle:
@@ -48,6 +49,7 @@ class DataD2HOp(Op):
         self.event = None
         self.on_cpu = True
         self.on_gpu = False
+        self.dtype = node_A.dtype
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if stream_handle:

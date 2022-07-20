@@ -50,13 +50,14 @@ class HetuMemoryPool(object):
                 for n in node.inputs:
                     release_node(n)
             else:
-                memory_pool[(node_to_shape[node], node.ctx)].append(node)
+                memory_pool[(node_to_shape[node], node.ctx,
+                             node.dtype)].append(node)
 
         for node in computing_nodes:
             if node.inplace or isinstance(node, EmbeddingLookUp_Gradient):
                 continue
             shape = node_to_shape[node]
-            key = (shape, node.ctx)
+            key = (shape, node.ctx, node.dtype)
             if shape is None or node in persistent_nodes or isinstance(node, self.indexed_nodes):
                 pass
             elif len(memory_pool[key]) > 0:
@@ -113,19 +114,16 @@ class HetuMemoryPool(object):
                             node_to_arr_map[node] = ndarray.NDArray(None)
                         elif inference and isinstance(node, DropoutOp):
                             node_to_arr_map[node] = node_to_arr_map[node.inputs[0]]
-                        elif isinstance(node.inputs[0], DataloaderOp) and isinstance(node, DataH2DOp):
-                            node_to_arr_map[node] = ndarray.empty(
-                                shape, ctx=node.ctx, dtype=node.inputs[0].dtype)
                         else:
                             result = reuse_map.get(node, node)
                             if result is node:
                                 node_to_arr_map[node] = ndarray.empty(
-                                    shape, ctx=node.ctx)
+                                    shape, ctx=node.ctx, dtype=node.dtype)
                             else:
                                 node_to_arr_map[node] = node_to_arr_map[result]
                     else:
                         node_to_arr_map[node] = ndarray.empty(
-                            shape, ctx=node.ctx)
+                            shape, ctx=node.ctx, dtype=node.dtype)
                     if isinstance(node, self.ln_bn_grad_nodes):
                         # for batch normailzation, pass array to the real gradient node
                         node.pass_grad_array(node_to_arr_map[node])

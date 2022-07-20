@@ -37,6 +37,7 @@ import ctypes
 import os
 from time import time
 import pickle
+import warnings
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -969,13 +970,19 @@ class SubExecutor(object):
         local_shape = tuple(value.shape)
         local_realloc = local_shape != self.node_to_shape_map.get(
             node, None)
+        value_dtype = ndarray.convert_dtype(value.dtype)
+        if node.dtype != value_dtype:
+            message = 'Node dtype (original {}) will be set by value dtype {}.'.format(
+                node.dtype.__name__.upper(), value_dtype.__name__.upper())
+            warnings.warn(message)
+            node.dtype = value_dtype
         if node.on_cpu:
             assert isinstance(value, (np.ndarray, spmatrix, ndarray.NDArray)), \
                 "feed_dict value type not supported"
             if isinstance(value, np.ndarray):
                 if local_realloc:
                     arr_map[node] = ndarray.empty(
-                        local_shape, ctx=node.ctx, dtype=value.dtype)
+                        local_shape, ctx=node.ctx, dtype=node.dtype)
                 arr_map[node][:] = value
             else:
                 arr_map[node] = value
@@ -983,7 +990,7 @@ class SubExecutor(object):
             if isinstance(value, np.ndarray):
                 if local_realloc:
                     arr_map[node] = ndarray.array(
-                        value, ctx=node.ctx, dtype=value.dtype)
+                        value, ctx=node.ctx, dtype=node.dtype)
                 else:
                     arr_map[node][:] = value
             elif isinstance(value, spmatrix):

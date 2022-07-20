@@ -212,16 +212,16 @@ def test_reduce_min():
 def test_power():
     tester = HetuTester(ht.power_op, 1, p=2)
     tester.test([(1, 2, 3)], atol=1e-7)
-    tester.test([(14, 6)], atol=1e-7)
+    tester.test([(14, 6)], atol=1e-6)
     tester = HetuTester(ht.power_op, 1, p=0)
     tester.test([(1, 2, 3)], atol=1e-7)
     tester.test([(14, 6)], atol=1e-7)
     tester = HetuTester(ht.power_op, 1, p=1)
     tester.test([(1, 2, 3)], atol=1e-7)
     tester.test([(14, 6)], atol=1e-7)
-    tester = HetuTester(ht.power_op, 1, p=4.5)
-    tester.test([(1, 2, 3)], atol=1e-7)
-    tester.test([(14, 6)], atol=1e-7)
+    tester = HetuTester(ht.power_op, 1, in_dtype='uf', p=4.5)
+    tester.test([(1, 2, 3)], rtol=1e-6)
+    tester.test([(14, 6)], rtol=1e-6)
 
 
 def test_tile():
@@ -233,14 +233,14 @@ def test_tile():
 
 
 def test_hash():
-    tester = HetuTester(ht.mod_hash_op, 1, 97)
-    tester.test([(2, 3, 4)], dtype=int)
-    tester = HetuTester(ht.compo_hash_op, 1, 3, 97)
-    tester.test([(2, 3, 4)], dtype=int)
-    tester = HetuTester(ht.learn_hash_op, 4, 1000, 'uniform')
-    tester.test([(2, 3, 4), (128,), (128,), (128,)], dtype=int, atol=1e-6)
-    tester = HetuTester(ht.learn_hash_op, 4, 1000, 'normal')
-    tester.test([(2, 3, 4), (128,), (128,), (128,)], dtype=int, atol=1e-6)
+    tester = HetuTester(ht.mod_hash_op, 1, 97, in_dtype='ui')
+    tester.test([(2, 3, 4)])
+    tester = HetuTester(ht.compo_hash_op, 1, 3, 97, in_dtype='ui')
+    tester.test([(2, 3, 4)])
+    tester = HetuTester(ht.learn_hash_op, 4, 1000, 'uniform', in_dtype='ui')
+    tester.test([(2, 3, 4), (128,), (128,), (128,)], atol=1e-6)
+    tester = HetuTester(ht.learn_hash_op, 4, 1000, 'normal', in_dtype='ui')
+    tester.test([(2, 3, 4), (128,), (128,), (128,)], atol=1e-6)
 
 
 def test_tril_lookup():
@@ -345,7 +345,7 @@ def test_optimizers():
         'sgd': True,
         'momentum': False,
         'nesterov': False,
-        'adagrad': False,
+        'adagrad': True,
         'adam': False,
         'amsgrad': False,
     }

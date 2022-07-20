@@ -3,6 +3,7 @@ from .. import ndarray
 from .. import stream
 from ..context import get_current_context, DeviceGroup
 from copy import copy, deepcopy
+import numpy as np
 from typing import TYPE_CHECKING
 G_NODE_ID = 0
 
@@ -30,7 +31,7 @@ class Op(object):
         ) if ctx is None else DeviceGroup(ctx)
         self.ctx: Union[None, DLContext, DeviceGroup] = ctx
         self.const_attr: Optional[int] = None
-        self.dtype: Optional[Type] = None
+        self.dtype: Optional[Type] = np.float32
         self.inplace: bool = False
         self.lazy_execution: bool = False
         self.event: Union[None, Event, PSEvent] = None

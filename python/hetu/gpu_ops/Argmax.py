@@ -8,6 +8,7 @@ class ArgmaxOp(Op):
     def __init__(self, node_A, dim, ctx=None):
         super().__init__(ArgmaxOp, [node_A], ctx)
         self.dim = dim
+        self.dtype = np.int32
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:

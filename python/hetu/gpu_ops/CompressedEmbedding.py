@@ -9,11 +9,12 @@ class ModHashOp(Op):
     def __init__(self, node, nembed, ctx=None):
         super().__init__(ModHashOp, [node], ctx)
         self.nembed = nembed
+        self.dtype = np.int32
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
             output_val[:] = np.array(
-                input_vals[0].asnumpy(), dtype=int) % self.nembed
+                input_vals[0].asnumpy(), dtype=np.int32) % self.nembed
         else:
             mod_hash(input_vals[0], output_val, self.nembed, stream_handle)
 
@@ -30,10 +31,11 @@ class CompoHashOp(Op):
         super().__init__(CompoHashOp, [node], ctx)
         self.ntable = ntable
         self.nembed = nembed
+        self.dtype = np.int32
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
-            x = np.array(input_vals[0].asnumpy(), dtype=int)
+            x = np.array(input_vals[0].asnumpy(), dtype=np.int32)
             results = []
             for i in range(self.ntable - 1):
                 results.append(x % self.nembed)
@@ -60,12 +62,13 @@ class LearnHashOp(Op):
         super().__init__(LearnHashOp, [node, slope, bias, prime], ctx)
         self.nbucket = nbucket
         self.dist = dist
+        self.eps = 1e-12
 
     def compute(self, input_vals, output_val, stream_handle=None):
         num_hash = input_vals[1].shape[0]
         if self.on_cpu:
             x = np.expand_dims(
-                np.array(input_vals[0].asnumpy(), dtype=int), -1)
+                np.array(input_vals[0].asnumpy(), dtype=np.int32), -1)
             results = (input_vals[1].asnumpy(
             ) * x + input_vals[2].asnumpy()) % input_vals[3].asnumpy() % self.nbucket
             scale_pos = results / (self.nbucket - 1)
@@ -74,7 +77,8 @@ class LearnHashOp(Op):
                 i = 0
                 while i < num_hash:
                     j = i + 1
-                    left_content = np.sqrt(-2 * np.log(scale_pos[..., i]))
+                    left_content = np.sqrt(-2 *
+                                           np.log(np.maximum(scale_pos[..., i], self.eps)))
                     right_content = 2 * np.pi * scale_pos[..., j]
                     scale_both[..., i] = left_content * np.cos(right_content)
                     scale_both[..., j] = left_content * np.sin(right_content)
@@ -82,8 +86,8 @@ class LearnHashOp(Op):
             output_val[:] = scale_both
         else:
             normal = (self.dist == 'normal')
-            learn_hash(input_vals[0], input_vals[1], input_vals[2],
-                       input_vals[3], output_val, self.nbucket, normal, stream_handle)
+            learn_hash(input_vals[0], input_vals[1], input_vals[2], input_vals[3],
+                       output_val, self.nbucket, normal, self.eps, stream_handle)
 
     def gradient(self, output_grad):
         return [None, None, None, None]

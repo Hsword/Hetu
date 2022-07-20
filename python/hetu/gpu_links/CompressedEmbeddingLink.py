@@ -19,11 +19,11 @@ def compo_hash(in_arr, out_arr, ntable, nembed, stream=None):
         ntable), ctypes.c_int(nembed), stream.handle if stream else None)
 
 
-def learn_hash(in_arr, slope, bias, prime, out_arr, nbucket, normal, stream=None):
+def learn_hash(in_arr, slope, bias, prime, out_arr, nbucket, normal, eps, stream=None):
     assert isinstance(in_arr, _nd.NDArray)
     assert isinstance(slope, _nd.NDArray)
     assert isinstance(bias, _nd.NDArray)
     assert isinstance(prime, _nd.NDArray)
     assert isinstance(out_arr, _nd.NDArray)
     _LIB.DLGpuLearnHash(in_arr.handle, slope.handle, bias.handle, prime.handle, out_arr.handle, ctypes.c_int(
-        nbucket), ctypes.c_bool(normal), stream.handle if stream else None)
+        nbucket), ctypes.c_bool(normal), ctypes.c_float(eps), stream.handle if stream else None)

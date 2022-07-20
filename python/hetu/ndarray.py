@@ -137,6 +137,20 @@ def shape_to_stride(shape):
     return tuple(stride)
 
 
+def convert_dtype(dtype):
+    # now only support 4 bytes int and float
+    if isinstance(dtype, np.dtype):
+        dtype = dtype.type
+    if dtype is int or issubclass(dtype, np.signedinteger):
+        dtype = np.int32
+    if dtype is float or issubclass(dtype, np.floating):
+        dtype = np.float32
+    if issubclass(dtype, np.unsignedinteger):
+        dtype = np.uint32
+    assert dtype in (np.int32, np.uint32, np.float32)
+    return dtype
+
+
 class NDArray(object):
     """Lightweight NDArray class of DL runtime.
     Strictly this is only an Array Container(a buffer object)
@@ -153,22 +167,15 @@ class NDArray(object):
         """
         self.handle = handle
         self.no_free = False
-        self.dtype = dtype
-        # now only support 4 bytes int and float
-        if isinstance(self.dtype, np.dtype):
-            self.dtype = self.dtype.type
-        if self.dtype is int or issubclass(self.dtype, np.signedinteger):
-            self.dtype = np.int32
-        if self.dtype is float or issubclass(self.dtype, np.floating):
-            self.dtype = np.float32
-        if issubclass(self.dtype, np.unsignedinteger):
-            self.dtype = np.uint32
-        assert self.dtype in (np.int32, np.uint32, np.float32)
+        self.dtype = convert_dtype(dtype)
 
     def __del__(self):
         if self.no_free:
             return
         check_call(_LIB.DLArrayFree(self.handle))
+
+    def __repr__(self):
+        return 'array{{shape={}, dtype={}, ctx={}}}'.format(self.shape, self.dtype.__name__, self.ctx)
 
     @property
     def shape(self):
