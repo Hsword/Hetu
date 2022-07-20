@@ -8,6 +8,7 @@ from .gpu_ops.EmbeddingLookUp import EmbeddingLookUp
 from .gpu_ops.Dropout import DropoutOp
 from .gpu_ops.PipelineReceive import PipelineReceiveOp
 from .gpu_ops.PipelineSend import PipelineSendOp
+from .gpu_ops.StopGradient import StopGradientOp
 from .dataloader import DataloaderOp, GNNDataLoaderOp
 from .optimizer import OptimizerOp
 from . import ndarray
@@ -23,6 +24,7 @@ class HetuMemoryPool(object):
         self.indexed_nodes = (EmbeddingLookUp_Gradient, DataD2HSparseOp)
         self.ln_bn_grad_nodes = (Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp,
                                  Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp)
+        self.no_compute_nodes = (StopGradientOp, DataloaderOp, GNNDataLoaderOp)
 
     def compute_memory_reuse_plan(self, computing_nodes, node_to_shape, eval_node_list):
         persistent_nodes = self.form_persistent_nodes(
@@ -90,7 +92,7 @@ class HetuMemoryPool(object):
                     node_to_arr_map[node] = placeholder_to_arr_map[node]
                 elif node not in node_to_arr_map:
                     node_to_arr_map[node] = None
-            elif not isinstance(node, (DataloaderOp, GNNDataLoaderOp)):
+            elif not isinstance(node, self.no_compute_nodes):
                 # add for OptimizerOp and ParameterServerOp
                 if shape is None:
                     node_to_arr_map[node] = None
@@ -111,6 +113,9 @@ class HetuMemoryPool(object):
                             node_to_arr_map[node] = ndarray.NDArray(None)
                         elif inference and isinstance(node, DropoutOp):
                             node_to_arr_map[node] = node_to_arr_map[node.inputs[0]]
+                        elif isinstance(node.inputs[0], DataloaderOp) and isinstance(node, DataH2DOp):
+                            node_to_arr_map[node] = ndarray.empty(
+                                shape, ctx=node.ctx, dtype=node.inputs[0].dtype)
                         else:
                             result = reuse_map.get(node, node)
                             if result is node:
@@ -124,6 +129,8 @@ class HetuMemoryPool(object):
                     if isinstance(node, self.ln_bn_grad_nodes):
                         # for batch normailzation, pass array to the real gradient node
                         node.pass_grad_array(node_to_arr_map[node])
+            elif isinstance(node, StopGradientOp):
+                node_to_arr_map[node] = node_to_arr_map[node.inputs[0]]
 
     def start_simulate(self, devices):
         # we simply assume the environment is homogeneous

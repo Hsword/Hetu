@@ -20,10 +20,12 @@ class SigmoidOp(Op):
             sigmoid(input_vals[0], output_val, stream_handle)
 
     def gradient(self, output_grad):
-        # ds=s(1-s)
-        grad_A = sigmoid_op(self.inputs[0], ctx=self.raw_ctx) * \
-            (1 + -1*sigmoid_op(self.inputs[0], ctx=self.raw_ctx))
-        return [grad_A*output_grad]
+        from .MultiplyElewise import mul_op
+        from .AddConst import addbyconst_op
+        from .Opposite import opposite_op
+        grad_A = mul_op(self, addbyconst_op(opposite_op(
+            self, ctx=self.raw_ctx), 1, ctx=self.raw_ctx), ctx=self.raw_ctx)
+        return [mul_op(grad_A, output_grad, ctx=self.raw_ctx)]
 
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 1

@@ -146,15 +146,25 @@ class EmbeddingLookUp(Op):
 
 class EmbeddingLookUp_Gradient(Op):
     def __init__(self, vectors, index, embed_shape, ctx=None):
+        inputs = [vectors]
+        if isinstance(index, Op):
+            inputs.append(index)
+            self.index = None
+        else:
+            self.index = index
         super().__init__(EmbeddingLookUp_Gradient,
-                         [vectors, index], ctx)
+                         inputs, ctx)
         self.embed_shape = embed_shape
         self.use_indexed_slices = True
 
     def compute(self, input_vals, output_val, stream_handle=None):
         assert self.embed_shape
-        output_val.update(
-            values=input_vals[0], indices=input_vals[1], dense_shape=self.embed_shape)
+        if self.index is None:
+            output_val.update(
+                values=input_vals[0], indices=input_vals[1], dense_shape=self.embed_shape)
+        else:
+            output_val.update(
+                values=input_vals[0], indices=self.index, dense_shape=self.embed_shape)
 
     def gradient(self, output_grad):
         raise NotImplementedError

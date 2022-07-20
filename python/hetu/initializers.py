@@ -38,6 +38,20 @@ class BaseInit(object):
                         ctypes.c_int(init_type), ctypes.c_double(arg1), ctypes.c_double(arg2), ctypes.c_ulonglong(seed), opt[0], opt[1], opt[2])
 
 
+class EmptyInit(BaseInit):
+    def __init__(self, shape):
+        super().__init__(shape)
+
+    def init_on_gpu(self, stream):
+        pass
+
+    def init_on_cpu(self, np_rand):
+        pass
+
+    def init_on_ps(self, comm, nid, param_type, seed, opt):
+        raise NotImplementedError
+
+
 class ConstantInit(BaseInit):
     def __init__(self, constant, shape):
         super().__init__(shape)
@@ -210,6 +224,12 @@ class TruncatedNormalInit(BaseInit):
 
 # here we provide easy APIs
 
+def nulls(shape, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'empty_initializer'
+    init = EmptyInit(shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
 
 def zeros(shape, name=None, trainable=True, ctx=None):
     if name is None:
@@ -315,6 +335,10 @@ def _generate(init_func, **init_kargs):
     def _generator_helper(shape, name=None, trainable=True, ctx=None):
         return init_func(shape=shape, name=name, trainable=trainable, ctx=ctx, **init_kargs)
     return _generator_helper
+
+
+def GenEmpty():
+    return _generate(nulls)
 
 
 def GenZeros():

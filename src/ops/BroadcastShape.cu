@@ -121,18 +121,17 @@ int DLGpuBroadcastShapeSimple(const DLArrayHandle in_arr, DLArrayHandle out_arr,
         threads.x = 1024;
         blocks.x = (output_size + 1023) / 1024;
     }
+    size_t ndim = (size_t)in_dims->shape[0];
 
     cudaStream_t cu_stream = static_cast<cudaStream_t>(
         stream_handle ? *(cudaStream_t *)(stream_handle->handle) : NULL);
 
     if (cu_stream != NULL) {
         broadcast_shape_kernel<<<blocks, threads, 0, cu_stream>>>(
-            in_data, out_data, os_data, id_data, (size_t)out_arr->ndim,
-            output_size);
+            in_data, out_data, os_data, id_data, ndim, output_size);
     } else {
-        broadcast_shape_kernel<<<blocks, threads>>>(
-            in_data, out_data, os_data, id_data, (size_t)out_arr->ndim,
-            output_size);
+        broadcast_shape_kernel<<<blocks, threads>>>(in_data, out_data, os_data,
+                                                    id_data, ndim, output_size);
     }
 
     return 0;

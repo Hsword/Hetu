@@ -53,3 +53,7 @@ set(MKL_BUILD $ENV{CONDA_PREFIX})
 # if not found, we'll download and compile it in time
 set(ZMQ_ROOT $ENV{CONDA_PREFIX})
 set(ZMQ_BUILD $ENV{CONDA_PREFIX})
+
+# CUB & THRUST
+set(CUB_ROOT $ENV{CONDA_PREFIX})
+set(THRUST_ROOT $ENV{CONDA_PREFIX})

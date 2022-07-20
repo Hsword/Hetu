@@ -137,13 +137,15 @@ class Batch_Normalization_GradientOp(Op):
         self.forward_node = forward_node
         self.eps = eps
 
-    def check_valid_arrs(self):
+    def check_valid_arrs(self, shape):
         assert self.tmp_gradient_in_arr is not None
-        assert self.tmp_gradient_bn_bias is not None
-        assert self.tmp_gradient_bn_scale is not None
+        if self.tmp_gradient_bn_scale is None:
+            self.tmp_gradient_bn_scale = ndarray.empty(shape, ctx=self.ctx)
+        if self.tmp_gradient_bn_bias is None:
+            self.tmp_gradient_bn_bias = ndarray.empty(shape, ctx=self.ctx)
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        self.check_valid_arrs()
+        self.check_valid_arrs(input_vals[2].shape)
         if self.on_cpu:
             if DNNL_LIB['DnnlBatchNorm_Gradient']:
                 cpu_batch_norm_gradient(input_vals[0], input_vals[1], input_vals[2],

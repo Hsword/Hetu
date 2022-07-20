@@ -55,7 +55,7 @@ class SliceOp(Op):
                 gpu_buf[ndim + i] = ori_shape[i]
                 gpu_buf[2 * ndim + i] = self.output_shape[i]
             self.gpu_buffer = ndarray.array(
-                gpu_buf, self.ctx, data_type=np.uintc)
+                gpu_buf, self.ctx, dtype=np.uintc)
         return tuple(self.output_shape)
 
     def naive_infer_shape(self, input_shapes):
@@ -117,7 +117,7 @@ class SliceGradientOp(Op):
                 gpu_buf[ndim + i] = ori_shape[i]
                 gpu_buf[2 * ndim + i] = self.output_shape[i]
             self.gpu_buffer = ndarray.array(
-                gpu_buf, self.ctx, data_type=np.uintc)
+                gpu_buf, self.ctx, dtype=np.uintc)
         return tuple(self.output_shape)
 
     def naive_infer_shape(self, input_shapes):

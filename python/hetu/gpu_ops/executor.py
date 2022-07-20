@@ -16,6 +16,7 @@ from .BroadcastCommunicate import BroadcastCommunicateOp
 from .AllToAll import AllToAllOp
 from .ParameterServerCommunicate import ParameterServerCommunicateOp, ParameterServerSparsePullOp, parameterServerSparsePull_op
 from .Sum import sum_op
+from .StopGradient import StopGradientOp
 from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp
 from ..communicator.mpi_nccl_comm import ncclDataType_t, GroupStart, GroupEnd
 from .EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient
@@ -452,7 +453,8 @@ class Executor(object):
         # with open('topo{}.txt'.format(self.config.rank), 'w') as fw:
         #     for node in self.topo_order:
         #         if isinstance(node, (PipelineSendOp, PipelineReceiveOp)):
-        #             print(node, node.inputs, node.const_attr, file=fw, flush=True)
+        #             print(node, node.inputs, node.const_attr,
+        #                   file=fw, flush=True)
         #         else:
         #             print(node, node.inputs, file=fw, flush=True)
         self.param_nodes = [node for node in self.topo_order if isinstance(
@@ -542,6 +544,10 @@ class Executor(object):
                     assert pre_shape == cur_shape, 'Shape not conform! Got {} and {} for {}.'.format(
                         pre_shape, cur_shape, node.name)
                     self.config.placeholder_to_arr_map[node][:] = value
+                # else:
+                #     print(list(state_dict.keys()))
+                #     print(node.name)
+                #     assert False
         else:
             assert file_path is not None
             self.ps_comm.BarrierWorker()
@@ -709,6 +715,7 @@ class SubExecutor(object):
 
         ln_bn_grad_nodes = (Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp,
                             Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp)
+        no_compute_nodes = ln_bn_grad_nodes + (StopGradientOp,)
 
         for node in self.topo_order:
             if isinstance(node, (DataloaderOp, GNNDataLoaderOp)):
@@ -718,7 +725,7 @@ class SubExecutor(object):
                     self.need_feed_nodes.append(node)
                 elif node.trainable:
                     self.param_nodes.append(node)
-            elif not ((self.use_sparse_pull or self.cstable_policy) and isinstance(node, EmbeddingLookUp) and self.config.prefetch) and not isinstance(node, ln_bn_grad_nodes):
+            elif not ((self.use_sparse_pull or self.cstable_policy) and isinstance(node, EmbeddingLookUp) and self.config.prefetch) and not isinstance(node, no_compute_nodes):
                 self.computing_nodes.append(node)
         self._batch_num = None
         self.init_need_allocation = (self.need_feed_nodes == []) and (
@@ -914,8 +921,12 @@ class SubExecutor(object):
         cur_ind = -1
         for node in self.topo_order:
             if isinstance(node, EmbeddingLookUp_Gradient):
-                self.indexed_slices_shape[node] = (
-                    self.node_to_shape_map[node.inputs[1]], self.node_to_shape_map[node.inputs[0]])
+                if len(node.inputs) == 2:
+                    self.indexed_slices_shape[node] = (
+                        self.node_to_shape_map[node.inputs[1]], self.node_to_shape_map[node.inputs[0]])
+                else:
+                    self.indexed_slices_shape[node] = (
+                        node.index.shape, self.node_to_shape_map[node.inputs[0]])
             elif isinstance(node, (DataD2HSparseOp, PipelineSendOp)) and node.use_indexed_slices:
                 self.indexed_slices_shape[node] = self.indexed_slices_shape[node.inputs[0]]
             elif isinstance(node, AllReduceCommunicateOp) and node.use_indexed_slices:
@@ -964,7 +975,7 @@ class SubExecutor(object):
             if isinstance(value, np.ndarray):
                 if local_realloc:
                     arr_map[node] = ndarray.empty(
-                        local_shape, ctx=node.ctx)
+                        local_shape, ctx=node.ctx, dtype=value.dtype)
                 arr_map[node][:] = value
             else:
                 arr_map[node] = value
@@ -972,7 +983,7 @@ class SubExecutor(object):
             if isinstance(value, np.ndarray):
                 if local_realloc:
                     arr_map[node] = ndarray.array(
-                        value, ctx=node.ctx)
+                        value, ctx=node.ctx, dtype=value.dtype)
                 else:
                     arr_map[node][:] = value
             elif isinstance(value, spmatrix):
@@ -987,8 +998,7 @@ class SubExecutor(object):
                     if local_realloc:
                         arr_map[node] = ndarray.empty(
                             local_shape, ctx=node.ctx)
-                    else:
-                        arr_map[node][:] = value
+                    arr_map[node][:] = value
             elif isinstance(value, ndarray.ND_Sparse_Array):
                 arr_map[node] = value
             else:
@@ -999,7 +1009,8 @@ class SubExecutor(object):
         self,
         eval_node_list: OP_LIST = [],
         feed_dict: Dict[Op, FEEDINS] = {},
-        convert_to_numpy_ret_vals: bool = False
+        convert_to_numpy_ret_vals: bool = False,
+        dataloader_step=True,
     ) -> List[Union[None, np.ndarray, NDArray]]:
         """
         Parameters
@@ -1036,7 +1047,10 @@ class SubExecutor(object):
             local_realloc = local_shape != self.node_to_shape_map.get(
                 node, None)
             need_reallocation = need_reallocation or local_realloc
-            self.node_to_arr_map[node] = node.get_arr(self.name)
+            if dataloader_step:
+                self.node_to_arr_map[node] = node.get_arr(self.name)
+            else:
+                self.node_to_arr_map[node] = node.get_next_arr(self.name)
             feed_shapes[node] = local_shape
 
         # in pipedream, we should retrieve the latest model parameter.
@@ -1135,6 +1149,12 @@ class SubExecutor(object):
                     # for d2h op / eval nodes / nodes before [allreduce or ps nodes or pipelinesend nodes]
                     # for allreduce op
                     node.event.record(cur_stream)
+                # if cur_stream is not None:
+                #     cur_stream.sync()
+                #     if isinstance(node_val, ndarray.NDArray) and np.any(np.isnan(node_val.asnumpy())):
+                #         print('appear nan!!!', node, node.inputs)
+                #         np.save('problem.npy', input_vals[0].asnumpy())
+                #         exit()
 
         if len(grouping_nodes) > 0:
             make_group()
@@ -1170,6 +1190,7 @@ def gradients(
     from .Division import DivConstOp, DivOp
     from .AddElewise import AddOp
     from .AddConst import AddByConstOp
+    from .MinusElewise import MinusOp
     from .Sum import SumOp
     add_ops = (AddOp, AddByConstOp, SumOp)
     # TODO: add support for Csrmm, MatrixDot, Sigmoid, Sqrt, Where
@@ -1187,7 +1208,7 @@ def gradients(
     forward2backward[None] = insert_grad
     for output, grad in zip(output_node, insert_grad):
         backward2forward[grad] = (output, -1)
-    node_to_output_grads_list = {node: [grad]
+    node_to_output_grads_list = {node: [grad] if grad is not None else []
                                  for node, grad in zip(output_node, insert_grad)}
     node_to_output_grad = {}
     # Traverse forward graph in reverse topological order
@@ -1196,8 +1217,11 @@ def gradients(
         # here the ctx for embedding lookup is a workaround
         # TODO: when implement PS strategy for context semantics, modify here
         if isinstance(node, EmbeddingLookUp):
-            output_grad, is_new = sum_node_list(
-                node_to_output_grads_list[node], node_to_output_grads_list[node][0].raw_ctx)
+            if len(node_to_output_grads_list[node]) == 0:
+                output_grad, is_new = None, False
+            else:
+                output_grad, is_new = sum_node_list(
+                    node_to_output_grads_list[node], node_to_output_grads_list[node][0].raw_ctx)
         else:
             output_grad, is_new = sum_node_list(
                 node_to_output_grads_list[node], node.raw_ctx)
@@ -1215,6 +1239,8 @@ def gradients(
             if isinstance(node, add_ops):
                 # these nodes don't generate new nodes
                 forward2backward[node] = []
+            elif isinstance(node, MinusOp):
+                forward2backward[node] = [input_grads_list[1]]
             else:
                 forward2backward[node] = [
                     n for n in input_grads_list if n is not None]
@@ -1251,10 +1277,11 @@ def gradients(
             if node.inputs[i] not in node_to_output_grads_list:
                 node_to_output_grads_list[node.inputs[i]] = []
             # Calculate partial adjoint for input nodes.
-            node_to_output_grads_list[node.inputs[i]].append(
-                input_grads_list[i])
+            if input_grads_list[i] is not None:
+                node_to_output_grads_list[node.inputs[i]].append(
+                    input_grads_list[i])
             cur_key = input_grads_list[i]
-            if cur_key is not None and not isinstance(node, add_ops):
+            if cur_key is not None and not isinstance(node, add_ops) and not (isinstance(node, (MinusOp)) and i == 0):
                 assert cur_key not in backward2forward
                 backward2forward[cur_key] = (node, i)
 

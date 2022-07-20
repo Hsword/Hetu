@@ -69,6 +69,9 @@ HETUSYS_EXTERN_C {
      */
     int DLArrayCopyFromTo(DLArrayHandle from, DLArrayHandle to,
                           DLStreamHandle stream);
+    int DLArrayCopyFromToOffset(DLArrayHandle from, size_t foffset,
+                                DLArrayHandle to, size_t toffset,
+                                size_t copy_size, DLStreamHandle stream);
 
     /*!
      * \brief Set all array elements to given value.
@@ -344,6 +347,11 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle output_grad, const DLArrayHandle ids,
         DLArrayHandle input_grad, DLStreamHandle stream_handle);
 
+    int DLGpuMinDist(const DLArrayHandle lookup, const DLArrayHandle key,
+                     DLArrayHandle codebook, DLArrayHandle indices,
+                     DLArrayHandle output, bool mode,
+                     DLStreamHandle stream_handle);
+
     int DLGpuCrossEntropy(const DLArrayHandle input_y,
                           const DLArrayHandle label, DLArrayHandle output,
                           DLStreamHandle stream_handle);
@@ -521,11 +529,11 @@ HETUSYS_EXTERN_C {
                                   DLStreamHandle stream_handle);
 
     int DLGpuTranspose(const DLArrayHandle input, DLArrayHandle output,
-		       int *perm, DLStreamHandle stream_handle);
-    
+                       int *perm, DLStreamHandle stream_handle);
+
     int DLGpuTransposeSimple(const DLArrayHandle input, DLArrayHandle output,
-                              const DLArrayHandle gpu_buffer,
-                              DLStreamHandle stream_handle);
+                             const DLArrayHandle gpu_buffer,
+                             DLStreamHandle stream_handle);
 
     int CuSparse_DLGpuCsrmv(
         const DLArrayHandle data_handle, const DLArrayHandle row_handle,
@@ -593,11 +601,33 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle out_strides, const DLArrayHandle in_dims,
         DLStreamHandle stream_handle);
 
+    int DLGpuPower(const DLArrayHandle in_arr, DLArrayHandle out_arr, float p,
+                   DLStreamHandle stream_handle);
+
     int DLGpuReduceSum(const DLArrayHandle in_arr, DLArrayHandle out_arr,
                        int *axes, int num_ax, DLStreamHandle stream_handle);
 
     int DLGpuReduceMean(const DLArrayHandle in_arr, DLArrayHandle out_arr,
                         int *axes, int num_ax, DLStreamHandle stream_handle);
+
+    int DLGpuReduceMin(const DLArrayHandle in_arr, DLArrayHandle out_arr,
+                       int *axes, int num_ax, DLStreamHandle stream_handle);
+
+    int DLGpuReduceMul(const DLArrayHandle in_arr, DLArrayHandle out_arr,
+                       int *axes, int num_ax, DLStreamHandle stream_handle);
+
+    int DLGpuReduceNorm2(const DLArrayHandle in_arr, DLArrayHandle out_arr,
+                         int *axes, int num_ax, DLStreamHandle stream_handle);
+    int DLGpuReduceNorm2Raw(const DLArrayHandle in_arr, DLArrayHandle out_ptr,
+                            int *axes, int num_ax, int offset,
+                            DLStreamHandle stream_handle);
+
+    int DLGpuAdd_(DLArrayHandle arr, const DLArrayHandle adder,
+                  const DLArrayHandle alpha, float cons,
+                  DLStreamHandle stream_handle);
+
+    int DLGpuDivMul(DLArrayHandle arr, const DLArrayHandle alpha, float cons,
+                    DLStreamHandle stream_handle);
 
     int DLGpuArrayLazyCallback(const DLArrayHandle from, DLArrayHandle to,
                                DLStreamHandle stream_handle);
@@ -605,6 +635,14 @@ HETUSYS_EXTERN_C {
     int IndexedSlicesOneSideAdd(
         const DLArrayHandle indices, const DLArrayHandle values,
         DLArrayHandle output, DLStreamHandle stream_handle);
+
+    int DLGpuReduceIndexedSlice(
+        const DLArrayHandle in_indices, const DLArrayHandle in_values,
+        DLArrayHandle out_indices, DLArrayHandle out_values,
+        DLArrayHandle workspace, size_t storage_size, int end_bit,
+        DLStreamHandle stream_handle);
+
+    int DLGpuReduceIndexedSliceGetWorkspaceSize(size_t ind_size, size_t * size);
 
     int DLGpuDropout(const DLArrayHandle input, const float dropout,
                      DLArrayHandle output, unsigned long long *pseed,
@@ -657,6 +695,11 @@ HETUSYS_EXTERN_C {
         const int padding_w, const int stride_h, const int stride_w,
         DLStreamHandle stream_handle);
 
+    int DLGpuTrilLookup(const DLArrayHandle input, DLArrayHandle output,
+                        int offset, DLStreamHandle stream_handle);
+    int DLGpuTrilLookupGradient(const DLArrayHandle input, DLArrayHandle output,
+                                int offset, DLStreamHandle stream_handle);
+
     // Initializers
     int DLGpuNormalInit(DLArrayHandle arr, const float mean, const float stddev,
                         unsigned long long seed, DLStreamHandle stream_handle);
@@ -669,6 +712,8 @@ HETUSYS_EXTERN_C {
                                  DLStreamHandle stream_handle);
 
     // Optimizer Ops
+    int DLGpuSparseSet(DLArrayHandle table, const DLArrayHandle indices,
+                       const DLArrayHandle data, DLStreamHandle stream_handle);
     int AddL2Regularization(const DLArrayHandle param, DLArrayHandle grad,
                             float l2reg, DLStreamHandle stream_handle);
     int AddL2RegularizationSparse(
@@ -700,16 +745,18 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle grad_values, DLArrayHandle acc, float lr, float eps,
         DLStreamHandle stream_handle);
 
-    int AdamOptimizerUpdate(
-        DLArrayHandle param, const DLArrayHandle grad, DLArrayHandle expavg,
-        DLArrayHandle expavgsq, float lr, float beta1, float beta2,
-        float beta1t, float beta2t, float eps, DLStreamHandle stream_handle);
+    int AdamOptimizerUpdate(DLArrayHandle param, const DLArrayHandle grad,
+                            DLArrayHandle expavg, DLArrayHandle expavgsq,
+                            DLArrayHandle maxv, float lr, float beta1,
+                            float beta2, float beta1t, float beta2t, float eps,
+                            DLStreamHandle stream_handle);
 
     int AdamOptimizerSparseUpdate(
         DLArrayHandle param, const DLArrayHandle grad_indices,
         const DLArrayHandle grad_values, DLArrayHandle expavg,
-        DLArrayHandle expavgsq, float lr, float beta1, float beta2,
-        float beta1t, float beta2t, float eps, DLStreamHandle stream_handle);
+        DLArrayHandle expavgsq, DLArrayHandle maxv, float lr, float beta1,
+        float beta2, float beta1t, float beta2t, float eps,
+        DLStreamHandle stream_handle);
 
     int AdamWOptimizerUpdate(DLArrayHandle param, const DLArrayHandle grad,
                              DLArrayHandle expavg, DLArrayHandle expavgsq,
@@ -862,6 +909,9 @@ HETUSYS_EXTERN_C {
     int cpu_EmbeddingLookup(const DLArrayHandle in_mat, const DLArrayHandle ids,
                             DLArrayHandle out_mat);
 
+    int cpu_IndexedSlices2Dense(const DLArrayHandle indices,
+                                const DLArrayHandle values,
+                                DLArrayHandle output);
     int cpu_AddL2Regularization(const DLArrayHandle param,
                                 const DLArrayHandle grad, float l2reg);
     int cpu_SGDOptimizerUpdate(const DLArrayHandle param,
@@ -875,10 +925,23 @@ HETUSYS_EXTERN_C {
     int cpu_AdaGradOptimizerUpdate(DLArrayHandle param,
                                    const DLArrayHandle grad, DLArrayHandle acc,
                                    float learning_rate, float eps);
-    int cpu_AdamOptimizerUpdate(DLArrayHandle param, const DLArrayHandle grad,
-                                DLArrayHandle expavg, DLArrayHandle expavgsq,
-                                float learning_rate, float beta1, float beta2,
-                                float beta1t, float beta2t, float eps);
+    int cpu_AdaGradOptimizerSparseUpdate(
+        DLArrayHandle param, const DLArrayHandle indices,
+        const DLArrayHandle values, DLArrayHandle acc, float learning_rate,
+        float eps);
+    int cpu_AdamOptimizerUpdate(
+        DLArrayHandle param, const DLArrayHandle grad, DLArrayHandle expavg,
+        DLArrayHandle expavgsq, DLArrayHandle maxv, float learning_rate,
+        float beta1, float beta2, float beta1t, float beta2t, float eps);
+    int cpu_AdamOptimizerSparseUpdate(
+        DLArrayHandle param, const DLArrayHandle indices,
+        const DLArrayHandle values, DLArrayHandle expavg,
+        DLArrayHandle expavgsq, DLArrayHandle maxv, float learning_rate,
+        float beta1, float beta2, float beta1t, float beta2t, float eps);
+
+    int cpu_ReduceIndexedSlice(
+        const DLArrayHandle in_indices, const DLArrayHandle in_values,
+        DLArrayHandle out_indices, DLArrayHandle out_values);
 
     int cpu_NormalInit(DLArrayHandle arr, const float mean, const float stddev,
                        unsigned long long seed);
@@ -892,6 +955,15 @@ HETUSYS_EXTERN_C {
                                 DLStreamHandle stream_handle);
 
     int DLGpuBinaryCrossEntropy_Gradient(
+        const DLArrayHandle prediction, const DLArrayHandle label,
+        const DLArrayHandle output_grad, DLArrayHandle output,
+        DLStreamHandle stream_handle);
+
+    int DLGpuBinaryCrossEntropyWithLogits(
+        const DLArrayHandle prediction, const DLArrayHandle label,
+        DLArrayHandle loss, DLStreamHandle stream_handle);
+
+    int DLGpuBinaryCrossEntropyWithLogits_Gradient(
         const DLArrayHandle prediction, const DLArrayHandle label,
         const DLArrayHandle output_grad, DLArrayHandle output,
         DLStreamHandle stream_handle);
@@ -974,11 +1046,11 @@ HETUSYS_EXTERN_C {
                            DLArrayHandle input_grad,
                            DLStreamHandle stream_handle = NULL);
 
-    int DLGpuLog(const DLArrayHandle input, DLArrayHandle output,
+    int DLGpuLog(const DLArrayHandle input, DLArrayHandle output, float eps,
                  DLStreamHandle stream_handle = NULL);
 
     int DLGpuLogGrad(const DLArrayHandle output_grad, DLArrayHandle input,
-                     DLArrayHandle input_grad,
+                     DLArrayHandle input_grad, float eps,
                      DLStreamHandle stream_handle = NULL);
 
     int DLGpuNllLoss(const DLArrayHandle input, DLArrayHandle target,
@@ -1020,6 +1092,18 @@ HETUSYS_EXTERN_C {
                         DLArrayHandle top1_group, DLArrayHandle topk_indice,
                         DLArrayHandle output, int num_local_gpus,
                         DLStreamHandle stream_handle);
+
+    int DLGpuModHash(const DLArrayHandle input, DLArrayHandle output,
+                     int nembed, DLStreamHandle stream_handle);
+
+    int DLGpuCompoHash(const DLArrayHandle input, DLArrayHandle output,
+                       int ntable, int nembed, DLStreamHandle stream_handle);
+
+    int DLGpuLearnHash(const DLArrayHandle input, const DLArrayHandle slope,
+                       const DLArrayHandle bias, const DLArrayHandle prime,
+                       DLArrayHandle output, int nbucket, bool normal,
+                       DLStreamHandle stream_handle);
+
 } // HETUSYS_EXTERN_C
 
 #endif // HETUSYS_RUNTIME_C_RUNTIME_API_H_

@@ -1,46 +1,43 @@
 import os
+import os.path as osp
 import numpy as np
+import pandas as pd
 
+default_data_path = osp.join(
+    osp.split(osp.abspath(__file__))[0], '../datasets')
+default_criteo_path = osp.join(default_data_path, 'criteo')
+default_avazu_path = osp.join(default_data_path, 'avazu')
 
 ###########################################################################
 # criteo
 ###########################################################################
 
+
 def download_criteo(path):
     import tarfile
-    import pandas as pd
     from six.moves import urllib
-    if not os.path.exists(path):
+    if not osp.exists(path):
         os.makedirs(path)
-    assert os.path.isdir(path), 'Please provide a directory path.'
+    assert osp.isdir(path), 'Please provide a directory path.'
     # this source may be invalid, please use other valid sources.
     origin = (
         'https://s3-eu-west-1.amazonaws.com/kaggle-display-advertising-challenge-dataset/dac.tar.gz'
     )
     print('Downloading data from %s' % origin)
-    dataset = os.path.join(path, 'criteo.tar.gz')
+    dataset = osp.join(path, 'criteo.tar.gz')
     urllib.request.urlretrieve(origin, dataset)
     print("Extracting criteo zip...")
     with tarfile.open(dataset) as f:
         f.extractall(path=path)
     print("Create local files...")
 
-    # save csv filed
-    df = pd.read_csv(os.path.join(path, "train.txt"), sep='\t', header=None)
-    df.columns = ['label'] + ["I" +
-                              str(i) for i in range(1, 14)] + ["C"+str(i) for i in range(14, 40)]
-    df.to_csv(os.path.join(path, "train.csv"), index=0)
-    print('Csv file saved.')
+    dense_feats, sparse_feats, labels = read_criteo_from_raw(
+        osp.join(path, 'train.txt'))
 
     # save numpy arrays
-    target_path = [os.path.join(path, filename) for filename in [
+    target_path = [osp.join(path, filename) for filename in [
         'train_dense_feats.npy', 'train_sparse_feats.npy', 'train_labels.npy',
         'test_dense_feats.npy', 'test_sparse_feats.npy', 'test_labels.npy']]
-    dense_feats = [col for col in df.columns if col.startswith('I')]
-    sparse_feats = [col for col in df.columns if col.startswith('C')]
-    labels = df['label']
-    dense_feats = process_dense_feats(df, dense_feats)
-    sparse_feats = process_sparse_feats(df, sparse_feats)
     num_data = dense_feats.shape[0]
     perm = np.random.permutation(num_data)
     # split data in 2 parts
@@ -55,47 +52,77 @@ def download_criteo(path):
     ]
     print('Array shapes:')
     for i in range(len(processed_data)):
-        print(os.path.split(target_path[i])
+        print(osp.split(target_path[i])
               [-1].split('.')[0], processed_data[i].shape)
         np.save(target_path[i], processed_data[i])
     print('Numpy arrays saved.')
 
 
-def process_dense_feats(data, feats):
-    d = data.copy()
+def process_dense_feats(data, feats, inplace=True):
+    if inplace:
+        d = data
+    else:
+        d = data.copy()
     d = d[feats].fillna(0.0)
     for f in feats:
-        d[f] = d[f].apply(lambda x: np.log(x+1) if x > -1 else -1)
+        d[f] = d[f].apply(lambda x: np.log(x+1) if x > 0 else 0)
     return d
 
 
-def process_sparse_feats(data, feats):
+def process_sparse_feats(data, feats, inplace=True, return_counts=False):
     from sklearn.preprocessing import LabelEncoder
     # process to embeddings.
-    d = data.copy()
-    d = d[feats].fillna("-1")
+    if inplace:
+        d = data
+    else:
+        d = data.copy()
+    d = d[feats].fillna("0")
     for f in feats:
         label_encoder = LabelEncoder()
         d[f] = label_encoder.fit_transform(d[f])
     feature_cnt = 0
+    counts = [0]
     for f in feats:
         d[f] += feature_cnt
         feature_cnt += d[f].nunique()
-    return d
+        counts.append(feature_cnt)
+    if return_counts:
+        return d, counts
+    else:
+        return d
 
 
-def process_head_criteo_data(path=os.path.join(os.path.split(os.path.abspath(__file__))[0], '../datasets/criteo'), nrows=20000, return_val=True):
-    import pandas as pd
-    csv_path = os.path.join(path, "train.csv")
-    if not os.path.exists(csv_path):
-        download_criteo(path)
-    df = pd.read_csv(csv_path, nrows=nrows, header=0)
+def read_criteo_from_raw(path=osp.join(default_criteo_path, 'train.txt'), return_counts=False, nrows=-1):
+    den_fea = 13
+    spa_fea = 26
+    if nrows > 0:
+        df = pd.read_csv(path, sep='\t', header=None, nrows=nrows)
+    else:
+        df = pd.read_csv(path, sep='\t', header=None)
+    df.columns = ['label'] + ["I" + str(i) for i in range(1, 1 + den_fea)] + [
+        "C"+str(i) for i in range(1 + den_fea, 1 + den_fea + spa_fea)]
     dense_feats = [col for col in df.columns if col.startswith('I')]
     sparse_feats = [col for col in df.columns if col.startswith('C')]
-    labels = np.array(df['label']).reshape(-1, 1)
-    dense_feats = np.array(process_dense_feats(df, dense_feats))
-    sparse_feats = np.array(process_sparse_feats(
-        df, sparse_feats)).astype(np.int32)
+    labels = df['label']
+    dense = process_dense_feats(df, dense_feats)
+    if return_counts:
+        sparse, counts = process_sparse_feats(
+            df, sparse_feats, return_counts=True)
+        return dense, sparse, labels, counts
+    else:
+        sparse = process_sparse_feats(df, sparse_feats)
+        return dense, sparse, labels
+
+
+def process_head_criteo_data(path=default_criteo_path, nrows=20000, return_val=True):
+    raw_path = osp.join(path, "train.txt")
+    if not osp.exists(raw_path):
+        download_criteo(path)
+    dense_feats, sparse_feats, labels = read_criteo_from_raw(
+        raw_path, nrows=nrows)
+    dense_feats = np.array(dense_feats)
+    sparse_feats = np.array(sparse_feats).astype(np.int32)
+    labels = np.array(labels).reshape(-1, 1)
     if return_val:
         test_num = nrows // 10
         train_dense = dense_feats[:-test_num]
@@ -109,24 +136,152 @@ def process_head_criteo_data(path=os.path.join(os.path.split(os.path.abspath(__f
         return dense_feats, sparse_feats, labels
 
 
-def process_sampled_criteo_data(path=os.path.join(os.path.split(os.path.abspath(__file__))[0], '../datasets/criteo')):
+def process_sampled_criteo_data(path=default_criteo_path):
     # all data should be available! no checking.
-    processed_data = [np.load(os.path.join(path, filename))
+    processed_data = [np.load(osp.join(path, filename))
                       for filename in ['sampled_dense_feats.npy', 'sampled_sparse_feats.npy', 'sampled_labels.npy']]
     return tuple(processed_data)
 
 
-def process_all_criteo_data(path=os.path.join(os.path.split(os.path.abspath(__file__))[0], '../datasets/criteo'), return_val=True):
-    file_paths = [os.path.join(path, filename) for filename in [
+def process_all_criteo_data(path=default_criteo_path, return_val=True, separate_fields=False):
+    file_paths = [osp.join(path, filename) for filename in [
         'train_dense_feats.npy', 'test_dense_feats.npy', 'train_sparse_feats.npy',
         'test_sparse_feats.npy',  'train_labels.npy', 'test_labels.npy']]
-    if not all([os.path.exists(p) for p in file_paths]):
+    if not all([osp.exists(p) for p in file_paths]):
         download_criteo(path)
     files = [np.load(filename) for filename in file_paths]
+    if separate_fields:
+        fields_files = ['train_sparse_feats_fields.npy',
+                        'test_sparse_feats_fields.npy']
+        if not all([osp.exists(osp.join(path, p)) for p in fields_files]):
+            ori_train_sparse = files[2]
+            ori_test_sparse = files[3]
+            ori_sparse = np.concatenate(
+                (ori_train_sparse, ori_test_sparse), axis=0)
+            cur_offset = 0
+            for i in range(26):
+                ori_sparse[:, i] -= cur_offset
+                uni = np.unique(ori_sparse[:, i])
+                cur_num = len(uni)
+                cur_offset += cur_num
+            test_num = ori_sparse.shape[0] // 10
+            new_train_sparse = ori_sparse[:-test_num]
+            new_test_sparse = ori_sparse[-test_num:]
+            new_train_sparse = np.transpose(new_train_sparse, (1, 0))
+            new_test_sparse = np.transpose(new_test_sparse, (1, 0))
+            np.save(osp.join(path, 'train_sparse_feats_fields.npy'),
+                    new_train_sparse)
+            np.save(osp.join(path, 'test_sparse_feats_fields.npy'),
+                    new_test_sparse)
+        else:
+            new_train_sparse = np.load(osp.join(
+                path, 'train_sparse_feats_fields.npy'))
+            new_test_sparse = np.load(osp.join(
+                path, 'test_sparse_feats_fields.npy'))
+        files[2] = new_train_sparse
+        files[3] = new_test_sparse
     if return_val:
         return (files[0], files[1]), (files[2], files[3]), (files[4], files[5])
     else:
         return files[0], files[2], files[4]
+
+
+def get_separate_fields(sparse, path):
+    if osp.exists(path):
+        return np.load(path)
+    else:
+        num_embed_fields = [1460, 583, 10131227, 2202608, 305, 24, 12517, 633, 3, 93145, 5683,
+                            8351593, 3194, 27, 14992, 5461306, 10, 5652, 2173, 4, 7046547, 18, 15, 286181, 105, 142572]
+        accum = 0
+        for i in range(26):
+            sparse[:, i] -= accum
+            accum += num_embed_fields[i]
+        np.save(path, sparse)
+        return sparse
+
+
+def process_all_criteo_data_by_day(path=default_criteo_path, return_val=True, separate_fields=False):
+    days = 7
+    in_path = osp.join(path, 'train.txt')
+    train_path = osp.join(path, 'kaggle_processed_train_hetu.npz')
+    val_path = osp.join(path, 'kaggle_processed_val_hetu.npz')
+    test_path = osp.join(path, 'kaggle_processed_test_hetu.npz')
+
+    data_ready = osp.exists(train_path)
+    if return_val:
+        data_ready = data_ready and osp.exists(test_path)
+
+    if not data_ready:
+        pro_path = osp.join(path, 'kaggle_processed_hetu.npz')
+        pro_data_ready = osp.exists(pro_path)
+
+        if not pro_data_ready:
+            print("Reading raw data={}".format(in_path))
+            dense, sparse, labels, counts = read_criteo_from_raw(
+                in_path, return_counts=True)
+            np.savez_compressed(
+                pro_path,
+                sparse=sparse,
+                dense=dense,
+                label=labels,
+                count=counts,
+            )
+        print("Reading pre-processed data={}".format(pro_path))
+        data = np.load(pro_path)
+        dense, sparse, label, count = data['dense'], data['sparse'], data['label'], data['count']
+        counts = []
+        for i in range(len(count) - 1):
+            counts.append(count[i+1] - count[i])
+        print("Count of each feature: {}".format(counts))
+        num_samples = dense.shape[0]
+        total_per_file = []
+        num_data_per_split, extras = divmod(num_samples, days)
+        total_per_file = [num_data_per_split] * days
+        for j in range(extras):
+            total_per_file[j] += 1
+        offset_per_file = np.array([0] + [x for x in total_per_file])
+        for i in range(days):
+            offset_per_file[i + 1] += offset_per_file[i]
+        print("File offsets: {}".format(offset_per_file))
+
+        # create reordering
+        indices = np.arange(dense.shape[0])
+        indices = np.array_split(indices, offset_per_file[1:-1])
+        train_indices = np.concatenate(indices[:-1])
+        test_indices = indices[-1]
+        test_indices, val_indices = np.array_split(test_indices, 2)
+        # randomize
+        train_indices = np.random.permutation(train_indices)
+        print("Randomized indices across days ...")
+
+        # create training, validation, and test sets
+        for ind, cur_path in zip([train_indices, val_indices, test_indices], [train_path, val_path, test_path]):
+            cur_dense = dense[ind]
+            cur_sparse = sparse[ind]
+            cur_label = label[ind]
+            np.savez_compressed(
+                cur_path,
+                sparse=cur_sparse,
+                dense=cur_dense,
+                label=cur_label,
+                count=counts,
+            )
+
+    train_data = np.load(train_path)
+    train_dense, train_sparse, train_label = train_data[
+        'dense'], train_data['sparse'], train_data['label']
+    if separate_fields:
+        train_sparse = get_separate_fields(
+            train_sparse, osp.join(path, 'train_sep_sparse.npy'))
+    if return_val:
+        test_data = np.load(test_path)
+        test_dense, test_sparse, test_label = test_data['dense'], test_data['sparse'], test_data['label']
+        if separate_fields:
+            test_sparse = get_separate_fields(
+                test_sparse, osp.join(path, 'test_sep_sparse.npy'))
+        return (train_dense, test_dense), (train_sparse, test_sparse), (train_label, test_label)
+    else:
+        return train_dense, train_sparse, train_label
 
 
 ###########################################################################
@@ -134,7 +289,6 @@ def process_all_criteo_data(path=os.path.join(os.path.split(os.path.abspath(__fi
 ###########################################################################
 
 def maybe_download(train_data, test_data):
-    import pandas as pd
     """if adult data "train.csv" and "test.csv" are not in your directory,
     download them.
     """
@@ -144,14 +298,14 @@ def maybe_download(train_data, test_data):
                "capital_gain", "capital_loss", "hours_per_week", "native_country",
                "income_bracket"]
 
-    if not os.path.exists(train_data):
+    if not osp.exists(train_data):
         print("downloading training data...")
         df_train = pd.read_csv("http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data",
                                names=COLUMNS, skipinitialspace=True)
     else:
         df_train = pd.read_csv("train.csv")
 
-    if not os.path.exists(test_data):
+    if not osp.exists(test_data):
         print("downloading testing data...")
         df_test = pd.read_csv("http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.test",
                               names=COLUMNS, skipinitialspace=True, skiprows=1)
@@ -198,7 +352,6 @@ def onehot(x):
 
 
 def wide(df_train, df_test, wide_cols, x_cols, target):
-    import pandas as pd
     print('Processing wide data')
     df_train['IS_TRAIN'] = 1
     df_test['IS_TRAIN'] = 0
@@ -232,7 +385,6 @@ def wide(df_train, df_test, wide_cols, x_cols, target):
 
 
 def load_adult_data(return_val=True):
-    import pandas as pd
     df_train, df_test = maybe_download("train.csv", "test.csv")
 
     df_train['income_label'] = (
@@ -300,11 +452,10 @@ def load_adult_data(return_val=True):
 # avazu
 ###########################################################################
 
-def process_avazu(path=os.path.join(os.path.split(os.path.abspath(__file__))[0], '../datasets/avazu')):
-    import pandas as pd
+def process_avazu(path=default_avazu_path):
     # please download in advance from https://www.kaggle.com/c/avazu-ctr-prediction/data
-    train_file = os.path.join(path, 'train.csv')
-    # test_file = os.path.join(path, 'test.csv') # useless, no labels
+    train_file = osp.join(path, 'train.csv')
+    # test_file = osp.join(path, 'test.csv') # useless, no labels
 
     df_train = pd.read_csv(train_file)
     sparse_feats = process_sparse_feats(df_train, df_train.columns[2:])
@@ -312,9 +463,9 @@ def process_avazu(path=os.path.join(os.path.split(os.path.abspath(__file__))[0],
     # [240, 7, 7, 4737, 7745, 26, 8552, 559, 36, 2686408, 6729486, 8251, 5, 4, 2626, 8, 9, 435, 4, 68, 172, 60]
     # sum: 9449445
 
-    np.save(os.path.join(path, 'sparse.npy'), sparse_feats)
+    np.save(osp.join(path, 'sparse.npy'), sparse_feats)
 
 
 if __name__ == '__main__':
-    download_criteo(os.path.join(os.path.split(
-        os.path.abspath(__file__)), '../datasets/criteo'))
+    download_criteo(osp.join(osp.split(
+        osp.abspath(__file__)), '../datasets/criteo'))

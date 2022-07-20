@@ -7,9 +7,10 @@ class Embedding(BaseLayer):
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.name = name
-        self.ctx = None
+        self.ctx = ctx
         self.embedding_table = initializer(
-            shape=(self.num_embeddings, self.embedding_dim), name=self.name, ctx=self.ctx)
+            shape=(self.num_embeddings, self.embedding_dim), name=self.name, ctx=ctx)
 
     def __call__(self, x):
-        return ht.embedding_lookup_op(self.embedding_table, x, ctx=self.ctx)
+        with ht.context(self.ctx):
+            return ht.embedding_lookup_op(self.embedding_table, x)

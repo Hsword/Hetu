@@ -60,7 +60,7 @@ class TransposeOp(Op):
                 in_stride *= ori_shape[i]
                 out_stride *= res_shape[i]
             self.gpu_buffer = ndarray.array(
-                buffer, self.ctx, data_type=np.uintc)
+                buffer, self.ctx, dtype=np.uintc)
         return tuple(res_shape)
 
     def naive_infer_shape(self, input_shapes):

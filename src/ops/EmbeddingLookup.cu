@@ -1,6 +1,6 @@
 #include "gpu_runtime.h"
 
-__global__ void embedding_lookup_kernel(const float *input, const float *ids,
+__global__ void embedding_lookup_kernel(const float *input, const int *ids,
                                         float *output, size_t size,
                                         size_t length, size_t input_row) {
     size_t index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -39,7 +39,7 @@ int DLGpuEmbeddingLookUp(const DLArrayHandle input, const DLArrayHandle ids,
     dim3 threads;
     float *output_data = (float *)output->data;
     const float *input_data = (const float *)input->data;
-    const float *id_list = (const float *)ids->data;
+    const int *id_list = (const int *)ids->data;
     if (size <= 1024) {
         threads.x = size;
         blocks.x = 1;
@@ -52,8 +52,8 @@ int DLGpuEmbeddingLookUp(const DLArrayHandle input, const DLArrayHandle ids,
                                   *(cudaStream_t *)stream_handle->handle>>>(
             input_data, id_list, output_data, size, length, input_row);
     else
-        embedding_lookup_kernel<<<blocks, threads>>>(input_data, id_list,
-                                                     output_data, size, length, input_row);
+        embedding_lookup_kernel<<<blocks, threads>>>(
+            input_data, id_list, output_data, size, length, input_row);
     return 0;
 }
 
@@ -65,7 +65,7 @@ __global__ void array_set_zero_kernel(float *output, size_t size) {
 }
 
 __global__ void embedding_lookup_gradient_kernel(const float *output_grad_data,
-                                                 const float *ids,
+                                                 const int *ids,
                                                  float *input_grad_data,
                                                  size_t size, size_t length) {
     size_t index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -99,7 +99,7 @@ int DLGpuEmbeddingLookUp_Gradient(const DLArrayHandle output_grad,
     dim3 threads;
     const float *output_grad_data = (const float *)output_grad->data;
     float *input_grad_data = (float *)input_grad->data;
-    const float *id_list = (const float *)ids->data;
+    const int *id_list = (const int *)ids->data;
 
     size_t input_grad_size = 1;
     for (int i = 0; i < input_grad->ndim; i++) {

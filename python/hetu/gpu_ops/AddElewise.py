@@ -123,7 +123,7 @@ class AddOp(Op):
             strides = list(input_val1.stride) + \
                 list(input_val2.stride) + list(output_val.stride)
             self.gpu_buffer = ndarray.array(
-                strides, self.ctx, data_type=np.uintc)
+                strides, self.ctx, dtype=np.uintc)
             self.check_reset = False
 
     def gradient(self, output_grad):
@@ -152,6 +152,9 @@ class AddOp(Op):
                     assert False, "can't add variables of shapes  " + \
                         str(input_shapes[0])+str(input_shapes[1])
             output = long_shapes
+        else:
+            assert False, "Shapes not valid; got {} in {} with inputs {}".format(
+                input_shapes, self, self.inputs)
         if self.compute_to_be_config:
             if has_const:
                 self.compute = self._compute_on_gpu_add_const

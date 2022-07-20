@@ -6,9 +6,12 @@ from ..gpu_links import matrix_elementwise_multiply_by_const
 
 
 class MulByConstOp(Op):
-    def __init__(self, node_A, const_val, ctx=None):
+    def __init__(self, node_A, const_val, const_updater=None, ctx=None):
         super().__init__(MulByConstOp, [node_A], ctx)
         self.const_attr = const_val
+        self.const_updater = const_updater
+        if self.const_updater is not None:
+            self.cnt = 0
 
     @property
     def desc(self):
@@ -25,6 +28,9 @@ class MulByConstOp(Op):
         else:
             matrix_elementwise_multiply_by_const(
                 input_vals[0], self.const_attr, output_val, stream_handle)
+        if self.const_updater is not None:
+            self.cnt += 1
+            self.const_attr = self.const_updater(self.cnt)
 
     def gradient(self, output_grad):
         return [self.const_attr * output_grad]
@@ -34,7 +40,7 @@ class MulByConstOp(Op):
         return input_shapes[0]
 
 
-def mul_byconst_op(node_A, const_val, ctx=None):
+def mul_byconst_op(node_A, const_val, const_updater=None, ctx=None):
     """Make a new instance of MulByConstOp and call the instance.
 
     Parameters:
@@ -49,4 +55,4 @@ def mul_byconst_op(node_A, const_val, ctx=None):
     A new Node instance created by Op.
 
     """
-    return MulByConstOp(node_A, const_val, ctx=ctx)
+    return MulByConstOp(node_A, const_val, const_updater=const_updater, ctx=ctx)

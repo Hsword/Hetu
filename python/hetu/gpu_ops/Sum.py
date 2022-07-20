@@ -68,7 +68,7 @@ class SumOp(Op):
             strides = list(output_val.stride) + \
                 list(input_val.stride) + list(output_val.stride)
             self.gpu_buffers[ind] = ndarray.array(
-                strides, self.ctx, data_type=np.uintc)
+                strides, self.ctx, dtype=np.uintc)
             self.check_reset[ind] = False
 
     def gradient(self, output_grad):

@@ -2,6 +2,7 @@ from __future__ import absolute_import
 import os
 import numpy as np
 import multiprocessing as mp
+from collections import Iterable
 
 from . import ndarray
 from .gpu_ops.Node import Op
@@ -9,12 +10,20 @@ from .gpu_ops.Node import Op
 
 # Multi-Process not useful now, since we don't have memory to CPU bottleneck
 class Dataloader(object):
-    def __init__(self, raw_data, batch_size, name='default', func=None, drop_last=True):
+    def __init__(self, raw_data, batch_size, name='default', func=None, batch_func=None, drop_last=True, dtype=np.float32):
         self.func = func if func else lambda x: x
-        self.raw_data = np.array(self.func(raw_data), np.float32)
+        self.dtype = dtype
+        self.raw_data = np.array(self.func(raw_data), dtype=self.dtype)
         self.batch_size = batch_size
         self.drop_last = drop_last
-        self.name = str(name)
+        if batch_func is None:
+            def batch_func(x): return x
+        self.batch_func = batch_func
+        if isinstance(name, str):
+            self.name = name
+        else:
+            assert isinstance(name, Iterable)
+            self.name = tuple(name)
         self.dp_nrank = None
         self.parts = None
         self.slices = None
@@ -44,7 +53,7 @@ class Dataloader(object):
         for i in range(self.queue_size):
             next_index = self.index + self.batch_size
             self.arrs.append(ndarray.array(
-                self.reshape_tensor(self.raw_data[self.seq[self.index:next_index]]), ctx=ndarray.cpu(0)))
+                self.reshape_tensor(self.raw_data[self.seq[self.index:next_index]]), ctx=ndarray.cpu(0), dtype=self.dtype))
             self.index = next_index
             self.arr_map[i] = i
         self.max_key = self.queue_size - 1
@@ -55,7 +64,7 @@ class Dataloader(object):
             res_num = self.samples_num % self.batch_size
             if res_num > 0:
                 self.arrs.append(ndarray.empty(
-                    tuple([res_num] + list(self.shape[1:])), ctx=ndarray.cpu(0)))
+                    tuple([res_num] + list(self.shape[1:])), ctx=ndarray.cpu(0), dtype=self.dtype))
             self.rest = self.queue_size
 
         self.batch_index = 0
@@ -137,8 +146,8 @@ class Dataloader(object):
 
     def reshape_tensor(self, tensor):
         if self.slices is None:
-            return tensor
-        return tensor[self.slices]
+            return self.batch_func(tensor)
+        return self.batch_func(tensor[self.slices])
 
     def get_cur_shape(self):
         return tuple(self.arrs[self.arr_map[self.batch_index]].shape)
@@ -184,15 +193,20 @@ class GNNDataLoaderOp(Op):
 
 
 class DataloaderOp(Op):
-    def __init__(self, dataloaders):
+    def __init__(self, dataloaders, dtype=np.float32):
         super().__init__(DataloaderOp, [], ndarray.cpu(0))
         self.on_gpu = False
         self.on_cpu = True
-        self.dataloaders = {
-            dl.name: dl for dl in dataloaders
-        }
+        self.dataloaders = {}
+        for dl in dataloaders:
+            if isinstance(dl.name, tuple):
+                self.dataloaders.update({name: dl for name in dl.name})
+            else:
+                self.dataloaders[dl.name] = dl
+            assert dl.dtype == dtype
         self.name = "DataloaderOp%d(%s)" % (
             self.id, '_'.join(self.dataloaders.keys()))
+        self.dtype = dtype
 
     @ property
     def desc(self):
@@ -240,7 +254,7 @@ class DataloaderOp(Op):
             d.init_states()
 
 
-def dataloader_op(dataloaders):
+def dataloader_op(dataloaders, dtype=np.float32):
     '''
     dataloaders: list of dataloaders
     '''
@@ -249,9 +263,9 @@ def dataloader_op(dataloaders):
         if isinstance(dl, Dataloader):
             temp_dataloaders.append(dl)
         elif isinstance(dl, list):
-            temp_dataloaders.append(Dataloader(*dl))
+            temp_dataloaders.append(Dataloader(*dl, dtype=dtype))
         elif isinstance(dl, dict):
-            temp_dataloaders.append(Dataloader(**dl))
+            temp_dataloaders.append(Dataloader(**dl, dtype=dtype))
         else:
             assert False, 'Dataloader parameter invalid.'
-    return DataloaderOp(temp_dataloaders)
+    return DataloaderOp(temp_dataloaders, dtype)

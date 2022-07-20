@@ -1,7 +1,9 @@
 from __future__ import absolute_import
 from .AddConstLink import *
 from .AddElewiseLink import *
+from .Argmax import *
 from .ArraySetLink import *
+from .AutoDimLink import *
 from .AvgPoolLink import *
 from .BroadcastLink import *
 from .BinaryCrossEntropyLink import *
@@ -35,16 +37,21 @@ from .MatrixRsqrtLink import *
 from .MatrixTransLink import *
 from .OppositeLink import *
 from .SigmoidLink import *
+from .SparseSetLink import *
 from .TanhLink import *
 from .SliceLink import *
 from .EmbeddingLookUpLink import *
+from .MinDistLink import *
 from .WhereLink import *
 from .BatchMatrixMultLink import *
 from .LayerNormLink import *
 from .InstanceNorm2dLink import *
 from .BroadcastShapeLink import *
+from .PowerLink import *
 from .ReduceSumLink import *
 from .ReduceMeanLink import *
+from .ReduceMinLink import *
+from .ReduceMulLink import *
 from .OptimizerLink import *
 from .IndexedSliceLink import *
 from .DropoutLink import *
@@ -76,13 +83,21 @@ from .HA2ALayoutTransform import *
 from .SamGroupSumLink import *
 from .GroupTopKIdxLink import *
 from .SamMaxLink import *
+from .CompressedEmbeddingLink import *
+from .TrilLookupLink import *
 
 __all__ = [
     'matrix_elementwise_add_by_const',
     'matrix_elementwise_add',
     'matrix_elementwise_add_simple',
     'matrix_elementwise_add_lazy',
+    'argmax',
     'array_set',
+    'reduce_norm2',
+    'reduce_norm2_raw',
+    'all_fro_norm',
+    'all_add_',
+    'div_n_mul_',
     'average_pooling2d',
     'average_pooling2d_gradient',
     'broadcast_to',
@@ -133,6 +148,7 @@ __all__ = [
     'matrix_transpose',
     'matrix_transpose_simple',
     'sigmoid',
+    'sparse_set',
     'tanh',
     'tanh_gradient',
     'matrix_slice',
@@ -141,6 +157,7 @@ __all__ = [
     'matrix_slice_gradient_simple',
     'embedding_lookup',
     'embedding_lookup_gradient',
+    'minimum_distance_vector',
     'where',
     'where_const',
     'batch_matrix_multiply',
@@ -150,8 +167,11 @@ __all__ = [
     'instance_normalization2d',
     'broadcast_shape',
     'broadcast_shape_simple',
+    'matrix_power',
     'reduce_sum',
     'reduce_mean',
+    'reduce_min',
+    'reduce_mul',
     'dropout',
     'dropout_gradient',
     'dropout2d',
@@ -163,6 +183,8 @@ __all__ = [
     'one_hot',
     'matmul_with_bias',
     'CuDNN_conv2d_with_bias',
+    'tril_lookup',
+    'tril_lookup_gradient',
 
     'normal_init',
     'uniform_init',
@@ -173,8 +195,12 @@ __all__ = [
     'adagrad_update',
     'adam_update',
     'indexedslice_oneside_add',
+    'reduce_indexedslice',
+    'reduce_indexedslice_get_workspace_size',
     'binary_cross_entropy',
+    'binary_cross_entropy_with_logits',
     'binary_cross_entropy_gradient',
+    'binary_cross_entropy_with_logits_gradient',
     'matrix_dot',
     'gelu',
     'gelu_gradient',
@@ -212,5 +238,8 @@ __all__ = [
     'sam_group_sum_link',
     'group_topk_idx',
     'sammax_link',
-    'sammax_grad_link'
+    'sammax_grad_link',
+    'mod_hash',
+    'compo_hash',
+    'learn_hash',
 ]

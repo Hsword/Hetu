@@ -8,6 +8,9 @@ class BaseLayer(object):
     def __call__(self):
         raise NotImplementedError
 
+    def make_dataloader_func(self):
+        raise NotImplementedError
+
 
 class OpLayer(BaseLayer, Op):
     # this class is to simulate an Op in status deduction

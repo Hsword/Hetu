@@ -96,8 +96,8 @@ class BroadcastShapeOp(Op):
                 in_dims = [1 for _ in range(diff)] + input_shape
 
             self.out_strides = ndarray.array(
-                out_strides, self.ctx, data_type=np.int32)
-            self.in_dims = ndarray.array(in_dims, self.ctx, data_type=np.int32)
+                out_strides, self.ctx, dtype=np.int32)
+            self.in_dims = ndarray.array(in_dims, self.ctx, dtype=np.int32)
         return tuple(output_shape)
 
     def naive_infer_shape(self, input_shapes):

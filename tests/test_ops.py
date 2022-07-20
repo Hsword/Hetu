@@ -1,7 +1,6 @@
 import numpy as np
 import hetu as ht
-from hetu import gpu_links as gpu_op
-from tester import HetuTester
+from tester import HetuTester, HetuOptimzierTester
 
 
 def test_add_const():
@@ -180,6 +179,222 @@ def test_batch_norm_train():
     print('Op BatchNormalizeGradientOp pass the test with shapes: {}'.format(input_shapes))
 
 
+def test_reduce_mul():
+    tester = HetuTester(ht.reduce_mul_op, 1, axes=[1], keepdims=True)
+    tester.test([(7, 9)], rtol=1e-6)
+    tester.test([(1, 13, 2, 4)], rtol=1e-6)
+    tester.test([(5, 1)], rtol=1e-6)
+    tester = HetuTester(ht.reduce_mul_op, 1, axes=[0, 2], keepdims=False)
+    tester.test([(7, 9, 3, 4)], rtol=1e-6)
+    tester.test([(1, 13, 2)], rtol=1e-6)
+    tester.test([(2, 2, 2, 2)], rtol=1e-6)
+
+
+def test_minus_elewise():
+    tester = HetuTester(ht.minus_op, 2)
+    tester.test([(2, 3, 4, 5), (2, 3, 4, 5)])
+    tester.test([(3, 4, 1), (3, 4, 1)])
+    tester.test([(2, 3), (2, 3)])
+
+
+def test_reduce_min():
+    tester = HetuTester(ht.reduce_mean_op, 1, axes=[
+                        1, 3], keepdims=[True, False])
+    tester.test([(1, 2, 3, 4, 5)], atol=3e-7)
+    tester.test([(2, 3, 4, 5)], atol=3e-7)
+    tester.test([(1, 2, 3, 4, 5, 6)], atol=3e-7)
+    tester = HetuTester(ht.reduce_mean_op, 1, axes=[2], keepdims=False)
+    tester.test([(1, 2, 3, 4, 5)], atol=3e-7)
+    tester.test([(2, 3, 4, 5)], atol=3e-7)
+    tester.test([(1, 2, 3, 4, 5, 6)], atol=3e-7)
+
+
+def test_power():
+    tester = HetuTester(ht.power_op, 1, p=2)
+    tester.test([(1, 2, 3)], atol=1e-7)
+    tester.test([(14, 6)], atol=1e-7)
+    tester = HetuTester(ht.power_op, 1, p=0)
+    tester.test([(1, 2, 3)], atol=1e-7)
+    tester.test([(14, 6)], atol=1e-7)
+    tester = HetuTester(ht.power_op, 1, p=1)
+    tester.test([(1, 2, 3)], atol=1e-7)
+    tester.test([(14, 6)], atol=1e-7)
+    tester = HetuTester(ht.power_op, 1, p=4.5)
+    tester.test([(1, 2, 3)], atol=1e-7)
+    tester.test([(14, 6)], atol=1e-7)
+
+
+def test_tile():
+    tester = HetuTester(ht.tile_op, 1, (2, 1, 3, 4))
+    tester.test([(2, 3)])
+    tester.test([(1, 2, 3)])
+    tester.test([(2, 3, 2, 3)])
+    tester.test([(2, 3, 2, 3, 4)])
+
+
+def test_hash():
+    tester = HetuTester(ht.mod_hash_op, 1, 97)
+    tester.test([(2, 3, 4)], dtype=int)
+    tester = HetuTester(ht.compo_hash_op, 1, 3, 97)
+    tester.test([(2, 3, 4)], dtype=int)
+    tester = HetuTester(ht.learn_hash_op, 4, 1000, 'uniform')
+    tester.test([(2, 3, 4), (128,), (128,), (128,)], dtype=int, atol=1e-6)
+    tester = HetuTester(ht.learn_hash_op, 4, 1000, 'normal')
+    tester.test([(2, 3, 4), (128,), (128,), (128,)], dtype=int, atol=1e-6)
+
+
+def test_tril_lookup():
+    tester = HetuTester(ht.tril_lookup_op, 1)
+    tester.test([(2, 23, 23)])
+    tester.test([(2, 83, 83)])
+    tester.test([(17, 9, 9)])
+    tester.test([(13, 19, 19)])
+    tester.test([(7, 9, 6, 6)])
+    tester = HetuTester(ht.tril_lookup_op, 1, -1)
+    tester.test([(3, 3)])
+    tester.test([(2, 23, 23)])
+    tester.test([(2, 83, 83)])
+    tester.test([(17, 9, 9)])
+    tester.test([(13, 19, 19)])
+    tester.test([(7, 9, 6, 6)])
+    tester = HetuTester(ht.tril_lookup_op, 1, 1)
+    tester.test([(2, 23, 23)])
+    tester.test([(2, 83, 83)])
+    tester.test([(17, 9, 9)])
+    tester.test([(13, 19, 19)])
+    tester.test([(7, 9, 6, 6)])
+    tester = HetuTester(ht.tril_lookup_op, 1, 3)
+    tester.test([(2, 23, 23)])
+    tester.test([(2, 83, 83)])
+    tester.test([(17, 9, 9)])
+    tester.test([(13, 19, 19)])
+    tester.test([(7, 9, 6, 6)])
+    tester = HetuTester(ht.tril_lookup_op, 1, -2)
+    tester.test([(2, 23, 23)])
+    tester.test([(2, 83, 83)])
+    tester.test([(17, 9, 9)])
+    tester.test([(13, 19, 19)])
+    tester.test([(7, 9, 6, 6)])
+
+
+def test_tril_gradient_lookup():
+    tester = HetuTester(ht.tril_lookup_gradient_op, 1)
+    tester.test([(2, 276)])
+    tester.test([(2, 3486)])
+    tester.test([(17, 45)])
+    tester.test([(13, 190)])
+    tester.test([(7, 9, 21)])
+    tester = HetuTester(ht.tril_lookup_gradient_op, 1, -1)
+    tester.test([(2, 253)])
+    tester.test([(2, 3403)])
+    tester.test([(17, 36)])
+    tester.test([(13, 171)])
+    tester.test([(7, 9, 15)])
+    tester = HetuTester(ht.tril_lookup_gradient_op, 1, 1)
+    tester.test([(2, 298)])
+    tester.test([(2, 3568)])
+    tester.test([(17, 53)])
+    tester.test([(13, 208)])
+    tester.test([(7, 9, 26)])
+    tester = HetuTester(ht.tril_lookup_gradient_op, 1, 3)
+    tester.test([(2, 339)])
+    tester.test([(2, 3729)])
+    tester.test([(17, 66)])
+    tester.test([(13, 241)])
+    tester.test([(7, 9, 33)])
+    tester = HetuTester(ht.tril_lookup_gradient_op, 1, -2)
+    tester.test([(2, 231)])
+    tester.test([(2, 3321)])
+    tester.test([(17, 28)])
+    tester.test([(13, 153)])
+    tester.test([(7, 9, 10)])
+
+
+def test_transpose():
+    tester = HetuTester(ht.transpose_op, 1, (1, 0))
+    tester.test([(3, 7)])
+    tester.test([(89, 93)])
+    tester = HetuTester(ht.transpose_op, 1, (2, 0, 3, 1))
+    tester.test([(3, 7, 11, 13)])
+    tester.test([(89, 93, 2, 3)])
+    tester = HetuTester(ht.transpose_op, 1, (0, 2, 1))
+    tester.test([(89, 93, 7)])
+    tester.test([(1, 2, 3)])
+
+
+def test_argmax():
+    tester = HetuTester(ht.argmax_op, 1, 1)
+    tester.test([(3, 4)])
+    tester.test([(89, 93, 71)])
+    tester = HetuTester(ht.argmax_op, 1, 0)
+    tester.test([(3, 4, 5)])
+    tester.test([(89, 93, 71, 13)])
+    tester = HetuTester(ht.argmax_op, 1, 3)
+    tester.test([(3, 4, 5, 5, 6)])
+    tester.test([(89, 93, 71, 13, 1, 2)])
+
+
+def test_optimizers():
+    test_shapes = [
+        (1000, 8),
+        (2, 3, 4),
+        (4, 5, 6),
+        (87, 91, 73),
+    ]
+    tests = {
+        'sgd': True,
+        'momentum': False,
+        'nesterov': False,
+        'adagrad': False,
+        'adam': False,
+        'amsgrad': False,
+    }
+
+    # np.random.seed(123)
+    if tests['sgd']:
+        tester = HetuOptimzierTester(
+            ht.optim.SGDOptimizer(100), test_shapes)
+        tester.test(rtol=1e-6, atol=1e-6)
+        tester = HetuOptimzierTester(
+            ht.optim.SGDOptimizer(100, 0.3), test_shapes)
+        tester.test(iters=3, rtol=1e-3, atol=1e-3)
+    if tests['momentum']:
+        tester = HetuOptimzierTester(
+            ht.optim.MomentumOptimizer(100), test_shapes)
+        tester.test(rtol=1e-6, atol=1e-6)
+        tester = HetuOptimzierTester(
+            ht.optim.MomentumOptimizer(100, l2reg=0.3), test_shapes)
+        tester.test(rtol=1e-4, atol=1e-4)
+    if tests['nesterov']:
+        tester = HetuOptimzierTester(
+            ht.optim.MomentumOptimizer(100, nesterov=True), test_shapes)
+        tester.test(rtol=1e-6, atol=1e-6)
+        tester = HetuOptimzierTester(
+            ht.optim.MomentumOptimizer(100, nesterov=True, l2reg=0.3), test_shapes)
+        tester.test(rtol=1e-4, atol=1e-4)
+    if tests['adagrad']:
+        tester = HetuOptimzierTester(
+            ht.optim.AdaGradOptimizer(100), test_shapes)
+        tester.test(atol=1e-7)
+        tester = HetuOptimzierTester(
+            ht.optim.AdaGradOptimizer(100, l2reg=0.001), test_shapes)
+        tester.test(rtol=1e-5, atol=2e-5)
+    if tests['adam']:
+        tester = HetuOptimzierTester(
+            ht.optim.AdamOptimizer(100), test_shapes)
+        tester.test(atol=1e-6, rtol=1e-6)
+        tester = HetuOptimzierTester(
+            ht.optim.AdamOptimizer(100, l2reg=0.3), test_shapes)
+        tester.test(rtol=1e-4, atol=2e-5)
+    if tests['amsgrad']:
+        tester = HetuOptimzierTester(
+            ht.optim.AdamOptimizer(100, amsgrad=True), test_shapes)
+        tester.test(atol=1e-6, rtol=1e-6)
+        tester = HetuOptimzierTester(
+            ht.optim.AdamOptimizer(100, l2reg=0.3, amsgrad=True), test_shapes)
+        tester.test(rtol=1e-3, atol=2e-5)
+
+
 test_add_const()
 test_add_elewise()
 test_broadcast_to()
@@ -192,3 +407,14 @@ test_conv2d_add_bias()
 test_tanh_gradient()
 test_batch_norm_inference()
 test_batch_norm_train()
+test_reduce_mul()
+test_minus_elewise()
+test_reduce_min()
+test_power()
+test_tile()
+test_hash()
+test_tril_lookup()
+test_tril_gradient_lookup()
+test_transpose()
+test_argmax()
+test_optimizers()

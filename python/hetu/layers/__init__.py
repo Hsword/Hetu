@@ -4,6 +4,7 @@ from .concatenate import Concatenate, ConcatenateLayers
 from .conv import Conv2d
 from .dropout import DropOut
 from .embedding import Embedding
+from .compressed_embedding import HashEmbedding, CompositionalEmbedding, LearningEmbedding, DPQEmbedding, AutoDimEmbedding
 from .identity import Identity
 from .linear import Linear
 from .normalization import BatchNorm, LayerNorm
@@ -22,3 +23,4 @@ from .KTop1Gate import KTop1Gate
 from .ktop1_layer import KTop1Layer
 from .sam_layer import SAMLayer
 from .SAMGate import SAMGate
+from .loss import BCEWithLogitsLoss, BCELoss, SoftmaxCrossEntropyLoss
