@@ -165,50 +165,28 @@ def worker(args):
         use_log_alpha = True
         embed_layer = htl.AutoDimEmbedding(
             num_embed, candidates, num_slot, batch_size, initializer=initializer, log_alpha=use_log_alpha, ctx=ectx)
+    elif args.method == 'md':
+        alpha = 0.3
+        round_dim = True
+        embed_layer = htl.MDEmbedding(
+            num_embed_fields, num_dim, alpha, round_dim, initializer=initializer, ctx=ectx)
     else:
         raise NotImplementedError
 
     # define models for criteo
     if args.all:
         from models.load_data import process_all_criteo_data_by_day
-        dense, sparse, labels = process_all_criteo_data_by_day(
-            return_val=args.val)
+        func = process_all_criteo_data_by_day
     elif args.val:
         from models.load_data import process_head_criteo_data
-        dense, sparse, labels = process_head_criteo_data(return_val=True)
+        func = process_head_criteo_data
     else:
         from models.load_data import process_sampled_criteo_data
-        dense, sparse, labels = process_sampled_criteo_data()
-    if isinstance(dense, tuple):
-        if args.method == 'autodim':
-            tr_names = ('train', 'alpha')
-            va_names = ('validate', 'all_no_update')
-        else:
-            tr_names = 'train'
-            va_names = 'validate'
-        dense_input = ht.dataloader_op(
-            [[dense[0], batch_size, tr_names], [dense[1], batch_size, va_names]])
-        sparse_input = ht.dataloader_op([
-            [sparse[0], batch_size, tr_names],
-            [sparse[1], batch_size, va_names],
-        ], dtype=np.int32)
-        labels = (labels[0].reshape((-1, 1)), labels[1].reshape((-1, 1)))
-        y_ = ht.dataloader_op([[labels[0], batch_size, tr_names], [
-                              labels[1], batch_size, va_names]])
-    else:
-        assert args.method != 'autodim', 'Autodim only used when args.val is set to True.'
-        dense_input = ht.dataloader_op(
-            [[dense, batch_size, 'train']])
-        sparse_input = ht.dataloader_op(
-            [[sparse, batch_size, 'train']], dtype=np.int32)
-        labels = labels.reshape((-1, 1))
-        y_ = ht.dataloader_op(
-            [[labels, batch_size, 'train']])
-    print("Data loaded.")
+        func = process_sampled_criteo_data
 
     model = args.model(num_dim, 26, 13)
 
-    embed_input = embed_layer(sparse_input)
+    embed_input, dense_input, y_ = embed_layer.compute_all(func, batch_size, args.val)
     loss, prediction = model(embed_input, dense_input, y_)
     if args.method == 'dpq' and embed_layer.mode == 'vq':
         loss = ht.add_op(loss, embed_layer.reg)
@@ -236,7 +214,7 @@ def worker(args):
             if args.method != 'dpq':
                 eval_nodes['validate'] = [loss, prediction, y_]
             else:
-                val_embed_input = embed_layer.make_inference(sparse_input)
+                val_embed_input = embed_layer.make_inference()
                 val_loss, val_prediction = model(
                     val_embed_input, dense_input, y_)
                 eval_nodes['validate'] = [val_loss, val_prediction, y_]
@@ -274,16 +252,7 @@ def worker(args):
                 if prev_auc is not None and cur_auc <= prev_auc:
                     print("Switch to retrain stage...")
                     check_auc = False
-                    _, new_sparse_data, _ = process_all_criteo_data_by_day(
-                        return_val=True, separate_fields=True)
-                    new_sparse_ops = []
-                    train_sparse, test_sparse = new_sparse_data
-                    for i in range(train_sparse.shape[1]):
-                        new_sparse_ops.append(ht.dataloader_op([
-                            [train_sparse[:, i], batch_size, 'train'],
-                            [test_sparse[:, i], batch_size, 'validate'], ], dtype=np.int32))
-                    embed_input = embed_layer.make_retrain(
-                        new_sparse_ops, num_embed_fields, executor.config.placeholder_to_arr_map, executor.config.comp_stream)
+                    embed_input = embed_layer.make_retrain(process_all_criteo_data_by_day, num_embed_fields, executor.config.placeholder_to_arr_map, executor.config.comp_stream)
                     loss, prediction = model(embed_input, dense_input, y_)
                     opt = ht.optim.AdamOptimizer(learning_rate=learning_rate)
                     train_op = opt.minimize(loss)

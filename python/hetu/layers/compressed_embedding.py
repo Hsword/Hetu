@@ -1,11 +1,11 @@
-from .base import BaseLayer
+from .embedding import Embedding
 import hetu as ht
 import math
 import numpy as np
 import os.path as osp
 
 
-class HashEmbedding(BaseLayer):
+class HashEmbedding(Embedding):
     def __init__(self, num_embeddings, embedding_dim, compress_rate=None, size_limit=None, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         assert compress_rate is None or size_limit is None
         if size_limit is not None:
@@ -29,7 +29,7 @@ class HashEmbedding(BaseLayer):
             return ht.embedding_lookup_op(self.embedding_table, sparse_input)
 
 
-class CompositionalEmbedding(BaseLayer):
+class CompositionalEmbedding(Embedding):
     # compositional embedding
     def __init__(self, num_embeddings, embedding_dim, num_tables, aggregator, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         aggregator = aggregator[:3]
@@ -68,7 +68,7 @@ class CompositionalEmbedding(BaseLayer):
             return ht.transpose_op(sparse_data, [0, 2, 1, 3])
 
 
-class LearningEmbedding(BaseLayer):
+class LearningEmbedding(Embedding):
     # deep learning embedding
     def __init__(self, embedding_dim, num_buckets, num_hash, mlp_dim=1024, dist='uniform', initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         from .linear import Linear
@@ -123,7 +123,7 @@ class LearningEmbedding(BaseLayer):
         return x
 
 
-class DPQEmbedding(BaseLayer):
+class DPQEmbedding(Embedding):
     def __init__(self, num_embeddings, embedding_dim, num_choices, num_parts, num_slot, batch_size, share_weights=False, mode='vq', initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         from ..initializers import nulls
         from .normalization import BatchNorm
@@ -238,7 +238,8 @@ class DPQEmbedding(BaseLayer):
 
             return outputs_final
 
-    def make_inference(self, x):
+    def make_inference(self):
+        x = self.sparse_op
         with ht.context(self.ctx):
             codes = ht.embedding_lookup_op(self.codebooks, x)
             # (bs, slot, npart)
@@ -252,7 +253,7 @@ class DPQEmbedding(BaseLayer):
             return outputs
 
 
-class AutoDimEmbedding(BaseLayer):
+class AutoDimEmbedding(Embedding):
     def __init__(self, num_embeddings, dim_candidates, num_slot, batch_size, log_alpha=False, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         from .normalization import BatchNorm
         self.num_embeddings = num_embeddings
@@ -422,8 +423,10 @@ class AutoDimEmbedding(BaseLayer):
             'train', convert_to_numpy_ret_vals=True)  # train data
         return results
 
-    def make_retrain(self, xs, separate_num_embeds, var2arr, stream):
+    def make_retrain(self, func, separate_num_embeds, var2arr, stream):
         from ..gpu_links import argmax
+        _, xs, _ = super().load_data(func, self.batch_size,
+                                     val=True, sep=True, only_sparse=True)
         for node, value in var2arr.items():
             node.tensor_value = value
         dim_choice = ht.empty((self.num_slot, ), ctx=self.ctx)
@@ -465,3 +468,66 @@ class AutoDimEmbedding(BaseLayer):
             all_lookups.append(lookups)
         all_lookups = ht.concatenate_op(all_lookups, 1)
         return all_lookups
+
+    def load_data(self, func, batch_size, val=True, sep=False):
+        assert val, 'Autodim only used when args.val is set to True.'
+        return super().load_data(func, batch_size, val, sep=sep, tr_name=('train', 'alpha'), va_name=('validate', 'all_no_update'))
+
+
+class MDEmbedding(Embedding):
+    def __init__(self, num_embed_fields, embedding_dim, alpha, round_dim, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+        dims = self.md_solver(num_embed_fields, alpha,
+                              num_dim=embedding_dim, round_dim=round_dim)
+        self.ctx = ctx
+        embeds = []
+        projs = []
+        base_dim = embedding_dim
+        assert base_dim == max(dims)
+        for i, (n, d) in enumerate(zip(num_embed_fields, dims)):
+            embeds.append(initializer(
+                shape=(n, d), name=f'{name}_fields_{i}', ctx=ctx))
+            if dims[i] < base_dim:
+                projs.append(initializer(shape=(dims[i], base_dim)))
+            else:
+                projs.append(None)
+        self.embeds = embeds
+        self.projs = projs
+
+    def load_data(self, func, batch_size, val=True):
+        return super().load_data(func, batch_size, val, sep=True)
+
+    def md_solver(self, num_embed_fields, alpha, num_dim=None, mem_cap=None, round_dim=True, freq=None):
+        # inherited from dlrm repo
+        indices, num_embed_fields = zip(
+            *sorted(enumerate(num_embed_fields), key=lambda x: x[1]))
+        num_embed_fields = np.array(num_embed_fields)
+        if freq is not None:
+            num_embed_fields /= freq[indices]
+        if num_dim is not None:
+            # use max dimension
+            lamb = num_dim * (num_embed_fields[0] ** alpha)
+        elif mem_cap is not None:
+            # use memory capacity
+            lamb = mem_cap / np.sum(num_embed_fields ** (1 - alpha))
+        else:
+            raise ValueError("Must specify either num_dim or mem_cap")
+        d = lamb * (num_embed_fields ** (-alpha))
+        d = np.round(np.maximum(d, 1))
+        if round_dim:
+            d = 2 ** np.round(np.log2(d))
+        d = d.astype(int)
+        undo_sort = [0] * len(indices)
+        for i, v in enumerate(indices):
+            undo_sort[v] = i
+        return d[undo_sort]
+
+    def __call__(self, xs):
+        results = []
+        for x, embed, proj in zip(xs, self.embeds, self.projs):
+            with ht.context(self.ctx):
+                res = ht.embedding_lookup_op(embed, x)
+            if proj is not None:
+                res = ht.matmul_op(res, proj)
+            results.append(res)
+        result = ht.concatenate_op(results, axis=0)
+        return result

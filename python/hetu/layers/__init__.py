@@ -4,7 +4,9 @@ from .concatenate import Concatenate, ConcatenateLayers
 from .conv import Conv2d
 from .dropout import DropOut
 from .embedding import Embedding
-from .compressed_embedding import HashEmbedding, CompositionalEmbedding, LearningEmbedding, DPQEmbedding, AutoDimEmbedding
+from .compressed_embedding import HashEmbedding, \
+    CompositionalEmbedding, LearningEmbedding, \
+    DPQEmbedding, AutoDimEmbedding, MDEmbedding
 from .identity import Identity
 from .linear import Linear
 from .normalization import BatchNorm, LayerNorm
