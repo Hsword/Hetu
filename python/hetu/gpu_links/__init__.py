@@ -85,6 +85,7 @@ from .GroupTopKIdxLink import *
 from .SamMaxLink import *
 from .CompressedEmbeddingLink import *
 from .TrilLookupLink import *
+from .PruneLink import *
 
 __all__ = [
     'matrix_elementwise_add_by_const',
@@ -242,4 +243,6 @@ __all__ = [
     'mod_hash',
     'compo_hash',
     'learn_hash',
+    'num_less_than',
+    'set_less_than',
 ]

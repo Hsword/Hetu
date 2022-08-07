@@ -6,7 +6,8 @@ from .dropout import DropOut
 from .embedding import Embedding
 from .compressed_embedding import HashEmbedding, \
     CompositionalEmbedding, LearningEmbedding, \
-    DPQEmbedding, AutoDimEmbedding, MDEmbedding
+    DPQEmbedding, AutoDimEmbedding, MDEmbedding, \
+    DeepLightEmbedding
 from .identity import Identity
 from .linear import Linear
 from .normalization import BatchNorm, LayerNorm

@@ -1104,6 +1104,12 @@ HETUSYS_EXTERN_C {
                        DLArrayHandle output, int nbucket, bool normal,
                        float eps, DLStreamHandle stream_handle);
 
+    int DLGpuNumLessThan(const DLArrayHandle input, DLArrayHandle middle,
+                         DLArrayHandle output, float threshold, int *axes,
+                         int num_ax, DLStreamHandle stream_handle);
+    int DLGpuSetLessThan(const DLArrayHandle arr, float threshold,
+                         DLStreamHandle stream_handle);
+
 } // HETUSYS_EXTERN_C
 
 #endif // HETUSYS_RUNTIME_C_RUNTIME_API_H_

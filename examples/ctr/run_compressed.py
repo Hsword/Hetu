@@ -170,6 +170,11 @@ def worker(args):
         round_dim = True
         embed_layer = htl.MDEmbedding(
             num_embed_fields, num_dim, alpha, round_dim, initializer=initializer, ctx=ectx)
+    elif args.method == 'prune':
+        target_sparse = 0.9 * 0.444
+        warm = 2
+        embed_layer = htl.DeepLightEmbedding(
+            num_embed, num_dim, target_sparse, warm, initializer=initializer, ctx=ectx)
     else:
         raise NotImplementedError
 
@@ -186,7 +191,8 @@ def worker(args):
 
     model = args.model(num_dim, 26, 13)
 
-    embed_input, dense_input, y_ = embed_layer.compute_all(func, batch_size, args.val)
+    embed_input, dense_input, y_ = embed_layer.compute_all(
+        func, batch_size, args.val)
     loss, prediction = model(embed_input, dense_input, y_)
     if args.method == 'dpq' and embed_layer.mode == 'vq':
         loss = ht.add_op(loss, embed_layer.reg)
@@ -209,6 +215,8 @@ def worker(args):
         eval_nodes = {'train': [loss, prediction, y_, train_op]}
         if args.method == 'dpq':
             eval_nodes['train'].append(embed_layer.codebook_update)
+        elif args.method == 'prune':
+            eval_nodes['train'].append(embed_layer.make_prune_op())
         if args.val:
             print('Validation enabled...')
             if args.method != 'dpq':
@@ -252,7 +260,8 @@ def worker(args):
                 if prev_auc is not None and cur_auc <= prev_auc:
                     print("Switch to retrain stage...")
                     check_auc = False
-                    embed_input = embed_layer.make_retrain(process_all_criteo_data_by_day, num_embed_fields, executor.config.placeholder_to_arr_map, executor.config.comp_stream)
+                    embed_input = embed_layer.make_retrain(
+                        process_all_criteo_data_by_day, num_embed_fields, executor.config.placeholder_to_arr_map, executor.config.comp_stream)
                     loss, prediction = model(embed_input, dense_input, y_)
                     opt = ht.optim.AdamOptimizer(learning_rate=learning_rate)
                     train_op = opt.minimize(loss)

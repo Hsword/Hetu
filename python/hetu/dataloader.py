@@ -27,6 +27,7 @@ class Dataloader(object):
         self.dp_nrank = None
         self.parts = None
         self.slices = None
+        self.batch_num = None
 
     def init_states(self):
         if self.dp_nrank is not None:
@@ -40,8 +41,7 @@ class Dataloader(object):
         self.batch_size = min(int(self.batch_size),
                               self.samples_num // self.queue_size)
         assert self.batch_size > 0, 'Batch size %d invalid.' % self.batch_size
-        self.batch_num = int(np.ceil(self.samples_num / self.batch_size)) if not self.drop_last else \
-            self.samples_num // self.batch_size
+        self.batch_num = self.get_batch_num(self.samples_num)
         self.shape = tuple([self.batch_size] + list(self.raw_data.shape[1:]))
         self.set_slices()
         self.seq = np.arange(self.samples_num)
@@ -152,6 +152,12 @@ class Dataloader(object):
     def get_cur_shape(self):
         return tuple(self.arrs[self.arr_map[self.batch_index]].shape)
 
+    def get_batch_num(self, samples_num=None):
+        if samples_num is None:
+            samples_num = len(self.raw_data)
+        return int(np.ceil(samples_num / self.batch_size)) \
+            if not self.drop_last else samples_num // self.batch_size
+
 
 class GNNDataLoaderOp(Op):
     graph = None
@@ -221,7 +227,10 @@ class DataloaderOp(Op):
             dataloader.set_mp_parts(cur_part, parts)
 
     def get_batch_num(self, name):
-        return self.dataloaders[name].batch_num
+        if self.dataloaders[name].batch_num is None:
+            return self.dataloaders[name].get_batch_num()
+        else:
+            return self.dataloaders[name].batch_num
 
     def get_arr(self, name):
         return self.dataloaders[name].get_arr()

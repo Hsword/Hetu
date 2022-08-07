@@ -99,6 +99,7 @@ from .GroupTopKIdx import group_topk_idx_op
 from .SamMax import sam_max_op
 from .CompressedEmbedding import mod_hash_op, compo_hash_op, learn_hash_op
 from .TrilLookup import tril_lookup_op, tril_lookup_gradient_op
+from .Prune import prune_low_magnitude_op
 
 __all__ = [
     'Executor',
@@ -255,4 +256,5 @@ __all__ = [
     'learn_hash_op',
     'tril_lookup_op',
     'tril_lookup_gradient_op',
+    'prune_low_magnitude_op',
 ]
