@@ -26,7 +26,7 @@ class PlaceholderOp(Op):
             trainable = False
         elif value is not None:
             assert initializer is None, 'Value already specified, initializer should be None.'
-            assert isinstance(value, (np.ndarray, ndarray.NDArray)),\
+            assert isinstance(value, (np.ndarray, ndarray.NDArray, ndarray.ND_Sparse_Array)),\
                 'Value data type %s not valid.' % str(type(value))
             self.shape = value.shape
         else:
@@ -68,11 +68,12 @@ class PlaceholderOp(Op):
                 self.initializer = None
             elif self.tensor_value is not None:
                 value = self.tensor_value
-                assert isinstance(value, (np.ndarray, ndarray.NDArray)), \
+                assert isinstance(value, (np.ndarray, ndarray.NDArray, ndarray.ND_Sparse_Array)), \
                     'Parameters should be initialized as numpy.ndarray or ndarray.NDArray .'
                 if isinstance(value, np.ndarray):
                     value = ndarray.array(value, self.ctx)
                 elif value.ctx != self.ctx:
+                    assert not isinstance(value, ndarray.ND_Sparse_Array)
                     new_value = ndarray.empty(value.shape, self.ctx)
                     value.copyto(new_value)
                     value = new_value

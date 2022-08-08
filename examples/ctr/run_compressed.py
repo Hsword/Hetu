@@ -260,8 +260,9 @@ def worker(args):
                 if prev_auc is not None and cur_auc <= prev_auc:
                     print("Switch to retrain stage...")
                     check_auc = False
+                    executor.return_tensor_values()
                     embed_input = embed_layer.make_retrain(
-                        process_all_criteo_data_by_day, num_embed_fields, executor.config.placeholder_to_arr_map, executor.config.comp_stream)
+                        process_all_criteo_data_by_day, num_embed_fields, executor.config.comp_stream)
                     loss, prediction = model(embed_input, dense_input, y_)
                     opt = ht.optim.AdamOptimizer(learning_rate=learning_rate)
                     train_op = opt.minimize(loss)
@@ -273,13 +274,30 @@ def worker(args):
                 prev_auc = cur_auc
             if early_stop:
                 print('Early stop!')
-                exit()
+                break
     else:
         total_epoch = args.nepoch if args.nepoch > 0 else 50
         train_batch_num = executor.get_batch_num('train')
         for ep in range(total_epoch):
             print("epoch %d" % ep)
             run_epoch(train_batch_num)
+
+    if args.method == 'prune':
+        # check inference; use sparse embedding
+        executor.return_tensor_values()
+        val_embed_input = embed_layer.make_inference(executor)
+        val_loss, val_prediction = model(
+            val_embed_input, dense_input, y_)
+        eval_nodes = {'validate': [val_loss, val_prediction, y_]}
+        executor = ht.Executor(eval_nodes, ctx=ctx, seed=123,
+                               log_path=executor_log_path)
+        val_loss, val_acc, val_auc, early_stop = validate(
+            executor.get_batch_num('validate'))
+        printstr = "infer_loss: %.4f, infer_acc: %.4f, infer_auc: %.4f"\
+            % (val_loss, val_acc, val_auc)
+        print(printstr)
+        if log_file is not None:
+            print(printstr, file=log_file, flush=True)
 
 
 if __name__ == '__main__':

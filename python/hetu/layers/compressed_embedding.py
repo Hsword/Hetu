@@ -423,12 +423,10 @@ class AutoDimEmbedding(Embedding):
             'train', convert_to_numpy_ret_vals=True)  # train data
         return results
 
-    def make_retrain(self, func, separate_num_embeds, var2arr, stream):
+    def make_retrain(self, func, separate_num_embeds, stream):
         from ..gpu_links import argmax
         _, xs, _ = super().load_data(func, self.batch_size,
                                      val=True, sep=True, only_sparse=True)
-        for node, value in var2arr.items():
-            node.tensor_value = value
         dim_choice = ht.empty((self.num_slot, ), ctx=self.ctx)
         argmax(self.alpha.tensor_value, dim_choice, 1, stream=stream)
         stream.sync()
@@ -568,3 +566,12 @@ class DeepLightEmbedding(Embedding):
         batch_num = self.y_op.get_batch_num('train')
         rate_updater = self.make_adaptive_rate(batch_num)
         return ht.prune_low_magnitude_op(self.embedding_table, rate_updater)
+
+    def make_inference(self, executor):
+        # not for validate; convert to csr format for inference
+        from ..ndarray import dense_to_sparse
+        executor.config.comp_stream.sync()
+        embeddings = executor.config.placeholder_to_arr_map[self.embedding_table]
+        self.sparse_embedding_table = ht.Variable(
+            'sparse_embedding', value=dense_to_sparse(embeddings), ctx=embeddings.ctx)
+        return ht.sparse_embedding_lookup_op(self.sparse_embedding_table, self.sparse_op)

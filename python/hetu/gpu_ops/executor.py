@@ -625,6 +625,10 @@ class Executor(object):
     def clearTimer(self, name: str = 'default') -> None:
         self.subexecutor[name].clearTimer()
 
+    def return_tensor_values(self) -> None:
+        for k, v in self.config.placeholder_to_arr_map.items():
+            k.tensor_value = v
+
     def __del__(self) -> None:
         if self.config.comp_stream is not None:
             self.config.comp_stream.sync()

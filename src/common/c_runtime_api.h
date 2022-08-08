@@ -347,6 +347,11 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle output_grad, const DLArrayHandle ids,
         DLArrayHandle input_grad, DLStreamHandle stream_handle);
 
+    int DLGpuSparseEmbeddingLookUp(
+        const DLArrayHandle value, const DLArrayHandle row,
+        const DLArrayHandle col, const DLArrayHandle ids,
+        DLArrayHandle input_grad, DLStreamHandle stream_handle);
+
     int DLGpuMinDist(const DLArrayHandle lookup, const DLArrayHandle key,
                      DLArrayHandle codebook, DLArrayHandle indices,
                      DLArrayHandle output, bool mode,

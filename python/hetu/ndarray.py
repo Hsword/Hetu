@@ -491,15 +491,18 @@ def numpyasdlarrayhandle(data):
 
 
 class ND_Sparse_Array(object):
-    __slots__ = ["data", "row", "col", "nrow", "ncol", "lazy"]
+    __slots__ = ["data", "row", "col", "nrow", "ncol", "lazy", "ctx"]
 
-    def __init__(self, data, row, col, nrow, ncol):
+    def __init__(self, data, row, col, nrow, ncol, ctx=None):
         self.data = data
         self.row = row
         self.col = col
         self.nrow = nrow
         self.ncol = ncol
         self.lazy = False
+        if ctx is None:
+            ctx = data.ctx
+        self.ctx = ctx
 
     @property
     def shape(self):
@@ -507,8 +510,21 @@ class ND_Sparse_Array(object):
         return tuple((self.nrow, self.ncol))
 
 
+def csr_sparse_array(mat, shape, ctx=cpu(0)):
+    values = mat.data
+    rows = mat.indptr
+    cols = mat.indices
+    values_ret = empty(values.shape, ctx)
+    values_ret._sync_copyfrom(values)
+    row_ret = empty(rows.shape, ctx, dtype=np.int32)
+    row_ret._sync_copyfrom(rows, np.int32)
+    col_ret = empty(cols.shape, ctx, dtype=np.int32)
+    col_ret._sync_copyfrom(cols, np.int32)
+    return ND_Sparse_Array(values_ret, row_ret, col_ret, shape[0], shape[1])
+
+
 def sparse_array(values, indices, shape, ctx=cpu(0)):
-    """Create an sparse array from source arrs.
+    """Create an sparse array from source coo arrs.
     ----------
     values : numpy.ndarray
         The value array to be copied from
@@ -525,16 +541,15 @@ def sparse_array(values, indices, shape, ctx=cpu(0)):
     assert len(values) == len(indices[0]) == len(indices[1])
     assert isinstance(indices, tuple)
     mat = scipy.sparse.csr_matrix((values, indices), shape)
-    values = mat.data
-    rows = mat.indptr
-    cols = mat.indices
-    values_ret = empty(values.shape, ctx)
-    values_ret._sync_copyfrom(values)
-    row_ret = empty(rows.shape, ctx, dtype=np.int32)
-    row_ret._sync_copyfrom(rows, np.int32)
-    col_ret = empty(cols.shape, ctx, dtype=np.int32)
-    col_ret._sync_copyfrom(cols, np.int32)
-    return ND_Sparse_Array(values_ret, row_ret, col_ret, shape[0], shape[1])
+    return csr_sparse_array(mat, shape, ctx)
+
+
+def dense_to_sparse(arr):
+    ctx = arr.ctx
+    arr = arr.asnumpy()
+    shape = arr.shape
+    mat = scipy.sparse.csr_matrix(arr, shape)
+    return csr_sparse_array(mat, shape, ctx)
 
 
 class IndexedSlices(object):

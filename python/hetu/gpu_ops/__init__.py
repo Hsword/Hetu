@@ -51,6 +51,7 @@ from .Transpose import transpose_op
 from .Variable import Variable, placeholder_op
 from .ZerosLike import zeroslike_op
 from .EmbeddingLookUp import embedding_lookup_op, embedding_lookup_gradient_op
+from .SparseEmbeddingLookUp import sparse_embedding_lookup_op
 from .Where import where_op, where_const_op
 from .BatchMatrixMult import batch_matmul_op
 from .LayerNorm import layer_normalization_op
@@ -194,6 +195,7 @@ __all__ = [
     'zeroslike_op',
     "embedding_lookup_op",
     "embedding_lookup_gradient_op",
+    "sparse_embedding_lookup_op",
     'where_op',
     'where_const_op',
     'batch_matmul_op',

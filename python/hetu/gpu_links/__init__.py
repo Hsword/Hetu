@@ -41,6 +41,7 @@ from .SparseSetLink import *
 from .TanhLink import *
 from .SliceLink import *
 from .EmbeddingLookUpLink import *
+from .SparseEmbeddingLookUpLink import *
 from .MinDistLink import *
 from .WhereLink import *
 from .BatchMatrixMultLink import *
@@ -158,6 +159,7 @@ __all__ = [
     'matrix_slice_gradient_simple',
     'embedding_lookup',
     'embedding_lookup_gradient',
+    'sparse_embedding_lookup',
     'minimum_distance_vector',
     'where',
     'where_const',
