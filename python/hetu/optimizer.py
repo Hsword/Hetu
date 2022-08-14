@@ -61,6 +61,7 @@ class Optimizer(object):
         if self.tensors is None:
             self.tensors = [config.placeholder_to_arr_map[node]
                             for node in self.params]
+        self.full_prec = [t.handle.contents.nbits == 32 for t in self.tensors]
         self.initiated = True
 
     def uninitiate_states(self):
@@ -133,6 +134,10 @@ class OptimizerOp(Op):
             node.inplace = False
 
         self.optimizer.initiate_states(config)
+        for i, n in enumerate(self.inputs):
+            if not self.optimizer.full_prec[i]:
+                n.opt = self
+                n.opt_index = i
         self.on_cpu = self.on_gpu = None
         self.comm_mode = config.comm_mode
         # some things todo.
@@ -195,33 +200,37 @@ class SGDOptimizer(Optimizer):
         params_size = len(self.params)
         assert params_size == len(grads)
         for i in range(params_size):
-            if grads[i] == None:
+            if grads[i] == None or not self.full_prec[i]:
                 continue
-            if self.params[i].on_gpu:
-                sgd_update(
-                    self.tensors[i], grads[i], self.learning_rate, self.l2reg, stream_handle)
+            self.update_one(
+                self.params[i], self.tensors[i], grads[i], i, stream_handle)
+
+    def update_one(self, param, tensor, grad, index, stream):
+        if param.on_gpu:
+            sgd_update(
+                tensor, grad, self.learning_rate, self.l2reg, stream)
+        else:
+            if DNNL_LIB['cpu_SGDOptimizerSparseUpdate'] and DNNL_LIB['cpu_SGDOptimizerUpdate']:
+                cpu_sgd_update(
+                    tensor, grad, self.learning_rate, self.l2reg)
             else:
-                if DNNL_LIB['cpu_SGDOptimizerSparseUpdate'] and DNNL_LIB['cpu_SGDOptimizerUpdate']:
-                    cpu_sgd_update(
-                        self.tensors[i], grads[i], self.learning_rate, self.l2reg)
+                # not implement regularization
+                if isinstance(grad, IndexedSlices):
+                    np_indices = grad.indices.asnumpy()
+                    np_tensor = tensor.asnumpy()
+                    np_values = grad.values.asnumpy().reshape(
+                        (-1, np_tensor.shape[-1]))
+                    for j, ind in enumerate(np_indices.reshape(-1)):
+                        if ind < 0:
+                            continue
+                        np_tensor[ind] -= self.learning_rate * np_values[j]
+                    tensor[:] = np_tensor
                 else:
-                    # not implement regularization
-                    if isinstance(grads[i], IndexedSlices):
-                        np_indices = grads[i].indices.asnumpy()
-                        np_tensor = self.tensors[i].asnumpy()
-                        np_values = grads[i].values.asnumpy().reshape(
-                            (-1, np_tensor.shape[-1]))
-                        for j, ind in enumerate(np_indices.reshape(-1)):
-                            if ind < 0:
-                                continue
-                            np_tensor[ind] -= self.learning_rate * np_values[j]
-                        self.tensors[i][:] = np_tensor
-                    else:
-                        prev_param = self.tensors[i].asnumpy()
-                        grad = grads[i].asnumpy(
-                        ) + self.l2reg * prev_param if self.l2reg > 0 else grads[i].asnumpy()
-                        self.tensors[i][:] = prev_param - \
-                            self.learning_rate * grad
+                    prev_param = tensor.asnumpy()
+                    grad = grad.asnumpy(
+                    ) + self.l2reg * prev_param if self.l2reg > 0 else grad.asnumpy()
+                    tensor[:] = prev_param - \
+                        self.learning_rate * grad
 
 
 class MomentumOptimizer(Optimizer):
@@ -250,32 +259,37 @@ class MomentumOptimizer(Optimizer):
         params_size = len(self.params)
         assert params_size == len(grads)
         for i in range(params_size):
-            if grads[i] == None:
+            if grads[i] == None or not self.full_prec[i]:
                 continue
-            if self.params[i].on_gpu:
-                momentum_update(self.tensors[i], grads[i], self.velocity[i], self.learning_rate, self.momentum,
-                                self.nesterov, self.l2reg, stream_handle)
+            self.update_one(
+                self.params[i], self.tensors[i], grads[i], i, stream_handle)
+
+    def update_one(self, param, tensor, grad, index, stream):
+        velocity = self.velocity[index]
+        if param.on_gpu:
+            momentum_update(tensor, grad, velocity, self.learning_rate, self.momentum,
+                            self.nesterov, self.l2reg, stream)
+        else:
+            if DNNL_LIB['cpu_MomentumOptimizerUpdate']:
+                cpu_momentum_update(tensor, grad, velocity,
+                                    self.learning_rate, self.momentum, self.nesterov, self.l2reg)
             else:
-                if DNNL_LIB['cpu_MomentumOptimizerUpdate']:
-                    cpu_momentum_update(self.tensors[i], grads[i], self.velocity[i],
-                                        self.learning_rate, self.momentum, self.nesterov, self.l2reg)
+                if isinstance(grad, IndexedSlices):
+                    raise NotImplementedError
                 else:
-                    if isinstance(grads[i], IndexedSlices):
-                        raise NotImplementedError
+                    prev_param = tensor.asnumpy()
+                    grad = grad.asnumpy(
+                    ) + self.l2reg * prev_param if self.l2reg > 0 else grad.asnumpy()
+                    velo = velocity.asnumpy()
+                    if self.nesterov:
+                        lr_grads = -self.learning_rate * grad
+                        velocity[:] = self.momentum * \
+                            (velo + lr_grads)
+                        tensor[:] = prev_param + velo + lr_grads
                     else:
-                        prev_param = self.tensors[i].asnumpy()
-                        grad = grads[i].asnumpy(
-                        ) + self.l2reg * prev_param if self.l2reg > 0 else grads[i].asnumpy()
-                        velo = self.velocity[i].asnumpy()
-                        if self.nesterov:
-                            lr_grads = -self.learning_rate * grad
-                            self.velocity[i][:] = self.momentum * \
-                                (velo + lr_grads)
-                            self.tensors[i][:] = prev_param + velo + lr_grads
-                        else:
-                            self.velocity[i][:] = self.momentum * \
-                                velo - self.learning_rate * grad
-                            self.tensors[i][:] = prev_param + velo
+                        velocity[:] = self.momentum * \
+                            velo - self.learning_rate * grad
+                        tensor[:] = prev_param + velo
 
 
 class AdaGradOptimizer(Optimizer):
@@ -308,47 +322,52 @@ class AdaGradOptimizer(Optimizer):
         params_size = len(self.params)
         assert params_size == len(grads)
         for i in range(params_size):
-            if grads[i] == None:
+            if grads[i] == None or not self.full_prec[i]:
                 continue
-            if self.params[i].on_gpu:
-                adagrad_update(self.tensors[i], grads[i], self.accumulator_value[i],
-                               self.learning_rate, self.eps, self.l2reg, stream_handle)
+            self.update_one(self.params[i], self.tensors[i],
+                            grads[i], i, stream_handle)
+
+    def update_one(self, param, tensor, grad, index, stream):
+        accum = self.accumulator_value[index]
+        if param.on_gpu:
+            adagrad_update(tensor, grad, accum,
+                           self.learning_rate, self.eps, self.l2reg, stream)
+        else:
+            if DNNL_LIB['cpu_AdaGradOptimizerSparseUpdate'] and DNNL_LIB['cpu_AdaGradOptimizerUpdate']:
+                cpu_adagrad_update(
+                    tensor, grad, accum, self.learning_rate, self.l2reg, self.eps)
             else:
-                if DNNL_LIB['cpu_AdaGradOptimizerSparseUpdate'] and DNNL_LIB['cpu_AdaGradOptimizerUpdate']:
-                    cpu_adagrad_update(
-                        self.tensors[i], grads[i], self.accumulator_value[i], self.learning_rate, self.l2reg, self.eps)
+                if isinstance(grad, IndexedSlices):
+                    np_indices = grad.indices.asnumpy()
+                    np_tensor = tensor.asnumpy()
+                    np_values = grad.values.asnumpy().reshape(
+                        (-1, np_tensor.shape[-1]))
+                    np_acc = accum.asnumpy()
+                    np_unique_indices, inverse = np.unique(
+                        np_indices, return_inverse=True)
+                    new_value = np.zeros(
+                        (len(np_unique_indices), np_values.shape[-1]), dtype=np.float32)
+                    for j, ind in enumerate(inverse):
+                        new_value[ind] += np_values[j]
+                    for j, ind in enumerate(np_unique_indices.reshape(-1)):
+                        if ind < 0:
+                            continue
+                        np_acc[ind] += (new_value[j] ** 2)
+                        np_tensor[ind] -= self.learning_rate * \
+                            new_value[j] / \
+                            (np.sqrt(np_acc[ind]) + self.eps)
+                    accum[:] = np_acc
+                    tensor[:] = np_tensor
                 else:
-                    if isinstance(grads[i], IndexedSlices):
-                        np_indices = grads[i].indices.asnumpy()
-                        np_tensor = self.tensors[i].asnumpy()
-                        np_values = grads[i].values.asnumpy().reshape(
-                            (-1, np_tensor.shape[-1]))
-                        np_acc = self.accumulator_value[i].asnumpy()
-                        np_unique_indices, inverse = np.unique(
-                            np_indices, return_inverse=True)
-                        new_value = np.zeros(
-                            (len(np_unique_indices), np_values.shape[-1]), dtype=np.float32)
-                        for j, ind in enumerate(inverse):
-                            new_value[ind] += np_values[j]
-                        for j, ind in enumerate(np_unique_indices.reshape(-1)):
-                            if ind < 0:
-                                continue
-                            np_acc[ind] += (new_value[j] ** 2)
-                            np_tensor[ind] -= self.learning_rate * \
-                                new_value[j] / \
-                                (np.sqrt(np_acc[ind]) + self.eps)
-                        self.accumulator_value[i][:] = np_acc
-                        self.tensors[i][:] = np_tensor
-                    else:
-                        prev_param = self.tensors[i].asnumpy()
-                        grad = grads[i].asnumpy(
-                        ) + self.l2reg * prev_param if self.l2reg > 0 else grads[i].asnumpy()
-                        self.accumulator_value[i][:] = self.accumulator_value[i].asnumpy(
-                        ) + np.power(grad, 2)
-                        self.tensors[i][:] = \
-                            prev_param - self.learning_rate * grad / \
-                            (np.sqrt(
-                                self.accumulator_value[i].asnumpy()) + self.eps)
+                    prev_param = tensor.asnumpy()
+                    grad = grad.asnumpy(
+                    ) + self.l2reg * prev_param if self.l2reg > 0 else grad.asnumpy()
+                    accum[:] = accum.asnumpy(
+                    ) + np.power(grad, 2)
+                    tensor[:] = \
+                        prev_param - self.learning_rate * grad / \
+                        (np.sqrt(
+                            accum.asnumpy()) + self.eps)
 
 
 class AdamOptimizer(Optimizer):
@@ -399,72 +418,79 @@ class AdamOptimizer(Optimizer):
         self.beta1_t *= self.beta1
         self.beta2_t *= self.beta2
         for i in range(params_size):
-            if grads[i] == None:
+            if grads[i] == None or not self.full_prec[i]:
                 continue
-            if self.params[i].on_gpu:
-                adam_update(self.tensors[i], grads[i], self.m[i], self.v[i], self.maxv[i], self.learning_rate, self.beta1,
-                            self.beta2, self.beta1_t, self.beta2_t, self.epsilon, self.l2reg, stream_handle)
+            self.update_one(
+                self.params[i], self.tensors[i], grads[i], i, stream_handle)
+
+    def update_one(self, param, tensor, grad, index, stream):
+        m = self.m[index]
+        v = self.v[index]
+        maxv = self.maxv[index]
+        if param.on_gpu:
+            adam_update(tensor, grad, m, v, maxv, self.learning_rate, self.beta1,
+                        self.beta2, self.beta1_t, self.beta2_t, self.epsilon, self.l2reg, stream_handle)
+        else:
+            if DNNL_LIB['cpu_AdamOptimizerSparseUpdate'] and DNNL_LIB['cpu_AdamOptimizerUpdate']:
+                cpu_adam_update(tensor, grad, m, v, maxv, self.learning_rate,
+                                self.beta1, self.beta2, self.beta1_t, self.beta2_t, self.l2reg, self.epsilon)
             else:
-                if DNNL_LIB['cpu_AdamOptimizerSparseUpdate'] and DNNL_LIB['cpu_AdamOptimizerUpdate']:
-                    cpu_adam_update(self.tensors[i], grads[i], self.m[i], self.v[i], self.maxv[i], self.learning_rate,
-                                    self.beta1, self.beta2, self.beta1_t, self.beta2_t, self.l2reg, self.epsilon)
-                else:
-                    if isinstance(grads[i], IndexedSlices):
-                        np_indices = grads[i].indices.asnumpy()
-                        np_tensor = self.tensors[i].asnumpy()
-                        np_values = grads[i].values.asnumpy().reshape(
-                            (-1, np_tensor.shape[-1]))
-                        np_m = self.m[i].asnumpy()
-                        np_v = self.v[i].asnumpy()
+                if isinstance(grad, IndexedSlices):
+                    np_indices = grad.indices.asnumpy()
+                    np_tensor = tensor.asnumpy()
+                    np_values = grad.values.asnumpy().reshape(
+                        (-1, np_tensor.shape[-1]))
+                    np_m = m.asnumpy()
+                    np_v = v.asnumpy()
+                    if self.amsgrad:
+                        np_maxv = maxv.asnumpy()
+                    np_unique_indices, inverse = np.unique(
+                        np_indices, return_inverse=True)
+                    new_value = np.zeros(
+                        (len(np_unique_indices), np_values.shape[-1]), dtype=np.float32)
+                    for j, ind in enumerate(inverse):
+                        new_value[ind] += np_values[j]
+                    for j, ind in enumerate(np_unique_indices.reshape(-1)):
+                        if ind < 0:
+                            continue
+                        np_m[ind] = self.beta1 * np_m[ind] + \
+                            (1 - self.beta1) * new_value[j]
+                        np_v[ind] = self.beta2 * np_v[ind] + \
+                            (1 - self.beta2) * new_value[j] * new_value[j]
+                        mc = np_m[ind] / (1 - self.beta1_t)
+                        vc = np_v[ind] / (1 - self.beta2_t)
                         if self.amsgrad:
-                            np_maxv = self.maxv[i].asnumpy()
-                        np_unique_indices, inverse = np.unique(
-                            np_indices, return_inverse=True)
-                        new_value = np.zeros(
-                            (len(np_unique_indices), np_values.shape[-1]), dtype=np.float32)
-                        for j, ind in enumerate(inverse):
-                            new_value[ind] += np_values[j]
-                        for j, ind in enumerate(np_unique_indices.reshape(-1)):
-                            if ind < 0:
-                                continue
-                            np_m[ind] = self.beta1 * np_m[ind] + \
-                                (1 - self.beta1) * new_value[j]
-                            np_v[ind] = self.beta2 * np_v[ind] + \
-                                (1 - self.beta2) * new_value[j] * new_value[j]
-                            mc = np_m[ind] / (1 - self.beta1_t)
-                            vc = np_v[ind] / (1 - self.beta2_t)
-                            if self.amsgrad:
-                                np_maxv[ind] = np.maximum(vc, np_maxv[ind])
-                                np_tensor[ind] -= self.learning_rate * \
-                                    mc / (np.sqrt(np_maxv[ind]) + self.epsilon)
-                            else:
-                                np_tensor[ind] -= self.learning_rate * \
-                                    mc / (np.sqrt(np_maxv[ind]) + self.epsilon)
-                        self.m[i][:] = np_m
-                        self.v[i][:] = np_v
-                        self.tensors[i][:] = np_tensor
-                        if self.amsgrad:
-                            self.maxv[i][:] = np_maxv
-                    else:
-                        prev_param = self.tensors[i].asnumpy()
-                        grad = grads[i].asnumpy(
-                        ) + self.l2reg * prev_param if self.l2reg > 0 else grads[i].asnumpy()
-                        self.m[i][:] = self.beta1 * \
-                            self.m[i].asnumpy() + (1 - self.beta1) * grad
-                        self.v[i][:] = self.beta2 * self.v[i].asnumpy() + \
-                            (1 - self.beta2) * grad * grad
-                        mc = self.m[i].asnumpy() / (1 - self.beta1_t)
-                        vc = self.v[i].asnumpy() / (1 - self.beta2_t)
-                        if self.amsgrad:
-                            cur_maxv = np.maximum(vc, self.maxv[i].asnumpy())
-                            self.tensors[i][:] = prev_param - \
-                                self.learning_rate * mc / \
-                                (np.sqrt(cur_maxv) + self.epsilon)
-                            self.maxv[i][:] = cur_maxv
+                            np_maxv[ind] = np.maximum(vc, np_maxv[ind])
+                            np_tensor[ind] -= self.learning_rate * \
+                                mc / (np.sqrt(np_maxv[ind]) + self.epsilon)
                         else:
-                            self.tensors[i][:] = prev_param - \
-                                self.learning_rate * mc / \
-                                (np.sqrt(vc) + self.epsilon)
+                            np_tensor[ind] -= self.learning_rate * \
+                                mc / (np.sqrt(np_maxv[ind]) + self.epsilon)
+                    m[:] = np_m
+                    v[:] = np_v
+                    tensor[:] = np_tensor
+                    if self.amsgrad:
+                        maxv[:] = np_maxv
+                else:
+                    prev_param = tensor.asnumpy()
+                    grad = grad.asnumpy(
+                    ) + self.l2reg * prev_param if self.l2reg > 0 else grad.asnumpy()
+                    m[:] = self.beta1 * \
+                        m.asnumpy() + (1 - self.beta1) * grad
+                    v[:] = self.beta2 * v.asnumpy() + \
+                        (1 - self.beta2) * grad * grad
+                    mc = m.asnumpy() / (1 - self.beta1_t)
+                    vc = v.asnumpy() / (1 - self.beta2_t)
+                    if self.amsgrad:
+                        cur_maxv = np.maximum(vc, maxv.asnumpy())
+                        tensor[:] = prev_param - \
+                            self.learning_rate * mc / \
+                            (np.sqrt(cur_maxv) + self.epsilon)
+                        maxv[:] = cur_maxv
+                    else:
+                        tensor[:] = prev_param - \
+                            self.learning_rate * mc / \
+                            (np.sqrt(vc) + self.epsilon)
 
 
 class AMSGradOptimizer(AdamOptimizer):

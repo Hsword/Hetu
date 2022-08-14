@@ -51,7 +51,7 @@ HETUSYS_EXTERN_C {
      * -1 when failure happens
      */
     int DLArrayAlloc(const index_t *shape, const index_t *stride, index_t ndim,
-                     DLContext ctx, DLArrayHandle *out);
+                     DLContext ctx, DLArrayHandle *out, int nbits);
 
     /*!
      * \brief Free the DL Array.
@@ -1114,6 +1114,25 @@ HETUSYS_EXTERN_C {
                          int num_ax, DLStreamHandle stream_handle);
     int DLGpuSetLessThan(const DLArrayHandle arr, float threshold,
                          DLStreamHandle stream_handle);
+
+    int DLGpuQuantize(const DLArrayHandle input, DLArrayHandle output,
+                      int digit, float scale, int64_t zero_point,
+                      DLStreamHandle stream_handle);
+    int DLGpuDequantize(const DLArrayHandle input, DLArrayHandle output,
+                        int digit, float scale, int64_t zero_point,
+                        DLStreamHandle stream_handle);
+
+    int DLGpuPrepackEmbedding(const DLArrayHandle input, DLArrayHandle output,
+                              DLArrayHandle qparams, int digit,
+                              DLStreamHandle stream_handle);
+    int DLGpuQuantizedEmbeddingLookup(
+        const DLArrayHandle input, const DLArrayHandle indices,
+        DLArrayHandle output, DLArrayHandle qparams, int digit,
+        DLStreamHandle stream_handle);
+    int DLGpuUpdateQuantizedEmbedding(
+        const DLArrayHandle grad, const DLArrayHandle indices,
+        DLArrayHandle embed, DLArrayHandle qparams, int digit,
+        DLStreamHandle stream_handle);
 
 } // HETUSYS_EXTERN_C
 

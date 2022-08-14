@@ -63,7 +63,8 @@ class DLArray(ctypes.Structure):
                 ("ctx", DLContext),
                 ("ndim", ctypes.c_int),
                 ("shape", ctypes.POINTER(ctypes.c_int64)),
-                ("stride", ctypes.POINTER(ctypes.c_int64))]
+                ("stride", ctypes.POINTER(ctypes.c_int64)),
+                ("nbits", ctypes.c_int)]
 
 
 DLArrayHandle = ctypes.POINTER(DLArray)
@@ -151,6 +152,24 @@ def convert_dtype(dtype):
     return dtype
 
 
+def get_nbits(dtype):
+    if isinstance(dtype, np.dtype):
+        dtype = dtype.type
+    if dtype in (int, float):
+        res = 32
+    else:
+        name = dtype.__name__
+        if name.endswith('32'):
+            res = 32
+        elif name.endswith('16'):
+            res = 16
+        elif name.endswith('64'):
+            res = 64
+        else:
+            res = int(name[-1])
+    return res
+
+
 class NDArray(object):
     """Lightweight NDArray class of DL runtime.
     Strictly this is only an Array Container(a buffer object)
@@ -158,7 +177,7 @@ class NDArray(object):
     """
     __slots__ = ["handle", "no_free", "dtype"]
 
-    def __init__(self, handle, dtype=np.float32):
+    def __init__(self, handle, dtype=np.float32, force32=True):
         """Initialize the function with handle
         Parameters
         ----------
@@ -167,7 +186,8 @@ class NDArray(object):
         """
         self.handle = handle
         self.no_free = False
-        self.dtype = convert_dtype(dtype)
+        if force32:
+            self.dtype = convert_dtype(dtype)
 
     def __del__(self):
         if self.no_free:
@@ -286,6 +306,7 @@ class NDArray(object):
         arr.shape = shape
         arr.stride = stride
         arr.ndim = data.ndim
+        arr.nbits = get_nbits(data.dtype)
         # CPU device
         arr.ctx = cpu(0)
         return arr, shape, stride
@@ -338,6 +359,7 @@ class NDArray(object):
         arr.data = self.handle.contents.data
         arr.ctx = self.handle.contents.ctx
         arr.ndim = len(shape)
+        arr.nbits = self.handle.contents.nbits
         arr.shape = c_array(ctypes.c_int64, shape)
         arr.stride = c_array(ctypes.c_int64, shape_to_stride(shape))
         target.handle = ctypes.pointer(arr)
@@ -357,6 +379,7 @@ class NDArray(object):
         arr.ndim = self.handle.contents.ndim
         arr.shape = self.handle.contents.shape
         arr.stride = self.handle.contents.stride
+        arr.nbits = self.handle.contents.nbits
         target.handle = ctypes.pointer(arr)
         target.no_free = True
 
@@ -406,6 +429,7 @@ class NDArray(object):
         arr.ndim = arr_ndim
         arr.shape = c_array(ctypes.c_int64, tuple(shape))
         arr.stride = c_array(ctypes.c_int64, tuple(target_stride))
+        arr.nbits = self.handle.contents.nbits
         target.handle = ctypes.pointer(arr)
         target.no_free = True
 
@@ -417,7 +441,7 @@ class NDArray(object):
         ndim = ctypes.c_int(len(self.shape))
         handle = DLArrayHandle()
         check_call(_LIB.DLArrayAlloc(shape, stride, ndim,
-                                     self.handle.contents.ctx, ctypes.byref(handle)))
+                                     self.handle.contents.ctx, ctypes.byref(handle), get_nbits(self.dtype)))
         check_call(_LIB.DLGpuArrayLazyCallback(
             self.handle, handle, stream.handle if stream else None))
         self.handle = handle
@@ -451,7 +475,7 @@ def array(arr, ctx, dtype=np.float32):
     return ret
 
 
-def empty(shape, ctx=cpu(0), dtype=np.float32):
+def empty(shape, ctx=cpu(0), dtype=np.float32, force32=True):
     """Create an empty array given shape and device
     Parameters
     ----------
@@ -467,10 +491,12 @@ def empty(shape, ctx=cpu(0), dtype=np.float32):
     shape = c_array(ctypes.c_int64, shape)
     stride = c_array(ctypes.c_int64, shape_to_stride(shape))
     ndim = ctypes.c_int(len(shape))
+    if force32:
+        dtype = convert_dtype(dtype)
     handle = DLArrayHandle()
     check_call(_LIB.DLArrayAlloc(
-        shape, stride, ndim, ctx, ctypes.byref(handle)))
-    return NDArray(handle, dtype=dtype)
+        shape, stride, ndim, ctx, ctypes.byref(handle), get_nbits(dtype)))
+    return NDArray(handle, dtype=dtype, force32=force32)
 
 
 def empty_like(arr):
@@ -486,6 +512,7 @@ def numpyasdlarrayhandle(data):
     arr.shape = shape
     arr.stride = c_array(ctypes.c_int64, shape_to_stride(data.shape))
     arr.ndim = data.ndim
+    arr.nbits = get_nbits(data.dtype)
     arr.ctx = cpu(0)
     return arr
 

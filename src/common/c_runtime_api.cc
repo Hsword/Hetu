@@ -76,8 +76,7 @@ inline size_t GetDataSize(DLArray *arr) {
     for (index_t i = 0; i < arr->ndim; ++i) {
         size *= arr->shape[i];
     }
-    // assume 32-bit float
-    size *= 4;
+    size *= (arr->nbits / 8);
     return size;
 }
 
@@ -91,7 +90,7 @@ inline size_t GetDataAlignment(DLArray *arr) {
 using namespace hetusys::runtime;
 
 int DLArrayAlloc(const index_t *shape, const index_t *stride, index_t ndim,
-                 DLContext ctx, DLArrayHandle *out) {
+                 DLContext ctx, DLArrayHandle *out, int nbits) {
     DLArray *arr = nullptr;
     API_BEGIN();
     // shape
@@ -110,6 +109,7 @@ int DLArrayAlloc(const index_t *shape, const index_t *stride, index_t ndim,
     size_t alignment = GetDataAlignment(arr);
     arr->data =
         DeviceAPIManager::Get(ctx)->AllocDataSpace(ctx, size, alignment);
+    arr->nbits = nbits;
     *out = arr;
     API_END_HANDLE_ERROR(DLArrayFree_(arr));
 }

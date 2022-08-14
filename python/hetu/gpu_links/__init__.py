@@ -87,6 +87,8 @@ from .SamMaxLink import *
 from .CompressedEmbeddingLink import *
 from .TrilLookupLink import *
 from .PruneLink import *
+from .QuantizeLink import *
+from .QuantizeEmbeddingLink import *
 
 __all__ = [
     'matrix_elementwise_add_by_const',
@@ -247,4 +249,9 @@ __all__ = [
     'learn_hash',
     'num_less_than',
     'set_less_than',
+    'tensor_quantize',
+    'tensor_dequantize',
+    'embedding_prepack',
+    'quantized_embedding_lookup',
+    'update_quantized_embedding',
 ]

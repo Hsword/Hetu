@@ -52,6 +52,8 @@ HETUSYS_EXTERN_C {
         int64_t *shape;
         /*! \brief The stride of the tensor */
         int64_t *stride;
+        /*! \brief The bytes number of each value */
+        int nbits = 32;
     } DLArray;
 
     typedef struct {

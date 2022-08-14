@@ -575,3 +575,21 @@ class DeepLightEmbedding(Embedding):
         self.sparse_embedding_table = ht.Variable(
             'sparse_embedding', value=dense_to_sparse(embeddings), ctx=embeddings.ctx)
         return ht.sparse_embedding_lookup_op(self.sparse_embedding_table, self.sparse_op)
+
+
+class QuantizedEmbedding(Embedding):
+    def __init__(self, num_embeddings, embedding_dim, digit, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+        assert digit in (8, 16)
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.digit = digit
+        self.name = name
+        self.ctx = ctx
+        self.embedding_table = initializer(
+            shape=(self.num_embeddings, self.embedding_dim), name=self.name, ctx=ctx)
+        self.qparams = ht.init.GenEmpty()(shape=(self.num_embeddings, 2),
+                                          name='qparams', trainable=False, ctx=ctx)
+
+    def __call__(self, x):
+        with ht.context(self.ctx):
+            return ht.quantized_embedding_lookup_op(self.embedding_table, self.qparams, x, self.digit)

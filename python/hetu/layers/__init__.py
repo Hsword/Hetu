@@ -7,7 +7,7 @@ from .embedding import Embedding
 from .compressed_embedding import HashEmbedding, \
     CompositionalEmbedding, LearningEmbedding, \
     DPQEmbedding, AutoDimEmbedding, MDEmbedding, \
-    DeepLightEmbedding
+    DeepLightEmbedding, QuantizedEmbedding
 from .identity import Identity
 from .linear import Linear
 from .normalization import BatchNorm, LayerNorm

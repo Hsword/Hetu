@@ -101,6 +101,8 @@ from .SamMax import sam_max_op
 from .CompressedEmbedding import mod_hash_op, compo_hash_op, learn_hash_op
 from .TrilLookup import tril_lookup_op, tril_lookup_gradient_op
 from .Prune import prune_low_magnitude_op
+from .Quantize import quantize_op, dequantize_op
+from .QuantizeEmbedding import quantized_embedding_lookup_op, quantized_embedding_gradient_op
 
 __all__ = [
     'Executor',
@@ -259,4 +261,8 @@ __all__ = [
     'tril_lookup_op',
     'tril_lookup_gradient_op',
     'prune_low_magnitude_op',
+    'quantize_op',
+    'dequantize_op',
+    'quantized_embedding_lookup_op',
+    'quantized_embedding_gradient_op',
 ]
