@@ -429,7 +429,7 @@ class AdamOptimizer(Optimizer):
         maxv = self.maxv[index]
         if param.on_gpu:
             adam_update(tensor, grad, m, v, maxv, self.learning_rate, self.beta1,
-                        self.beta2, self.beta1_t, self.beta2_t, self.epsilon, self.l2reg, stream_handle)
+                        self.beta2, self.beta1_t, self.beta2_t, self.epsilon, self.l2reg, stream)
         else:
             if DNNL_LIB['cpu_AdamOptimizerSparseUpdate'] and DNNL_LIB['cpu_AdamOptimizerUpdate']:
                 cpu_adam_update(tensor, grad, m, v, maxv, self.learning_rate,

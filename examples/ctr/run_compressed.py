@@ -176,7 +176,7 @@ def worker(args):
         embed_layer = htl.DeepLightEmbedding(
             num_embed, num_dim, target_sparse, warm, initializer=initializer, ctx=ectx)
     elif args.method == 'quantize':
-        digit = 8
+        digit = 16
         embed_layer = htl.QuantizedEmbedding(
             num_embed, num_dim, digit, initializer=initializer, ctx=ectx)
     else:

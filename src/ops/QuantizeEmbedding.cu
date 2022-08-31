@@ -193,34 +193,34 @@ int DLGpuQuantizedEmbeddingLookup(const DLArrayHandle input,
                                   int digit,
                                   DLStreamHandle stream_handle = NULL) {
     assert(input->ndim == 2);
-    size_t rsize = input->shape[0];
+    size_t size = ArrSize(indices);
     size_t dim = input->shape[1];
     const int *indices_data = (const int *)indices->data;
     float *qparam_data = (float *)qparams->data;
     float *output_data = (float *)output->data;
     dim3 blocks;
     dim3 threads;
-    ThreadBlock1D(threads, blocks, rsize);
+    ThreadBlock1D(threads, blocks, size);
     if (digit == 8) {
         uint8_t *input_data = (uint8_t *)input->data;
 
         if (stream_handle)
             quantized_embedding_lookup_kernel_8<<<
                 blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
-                input_data, indices_data, output_data, qparam_data, dim, rsize);
+                input_data, indices_data, output_data, qparam_data, dim, size);
         else
             quantized_embedding_lookup_kernel_8<<<blocks, threads>>>(
-                input_data, indices_data, output_data, qparam_data, dim, rsize);
+                input_data, indices_data, output_data, qparam_data, dim, size);
     } else if (digit == 16) {
         uint16_t *input_data = (uint16_t *)input->data;
 
         if (stream_handle)
             quantized_embedding_lookup_kernel_16<<<
                 blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
-                input_data, indices_data, output_data, qparam_data, dim, rsize);
+                input_data, indices_data, output_data, qparam_data, dim, size);
         else
             quantized_embedding_lookup_kernel_16<<<blocks, threads>>>(
-                input_data, indices_data, output_data, qparam_data, dim, rsize);
+                input_data, indices_data, output_data, qparam_data, dim, size);
 
     } else {
         assert(false);
@@ -234,32 +234,32 @@ int DLGpuUpdateQuantizedEmbedding(const DLArrayHandle grad,
                                   int digit,
                                   DLStreamHandle stream_handle = NULL) {
     assert(embed->ndim == 2);
-    size_t rsize = embed->shape[0];
+    size_t size = ArrSize(indices);
     size_t dim = embed->shape[1];
     const float *grad_data = (const float *)grad->data;
     const int *indices_data = (const int *)indices->data;
     float *qparam_data = (float *)qparams->data;
     dim3 blocks;
     dim3 threads;
-    ThreadBlock1D(threads, blocks, rsize);
+    ThreadBlock1D(threads, blocks, size);
     if (digit == 8) {
         uint8_t *embed_data = (uint8_t *)embed->data;
         if (stream_handle)
             update_quantized_embedding_kernel_8<<<
                 blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
-                grad_data, indices_data, embed_data, qparam_data, dim, rsize);
+                grad_data, indices_data, embed_data, qparam_data, dim, size);
         else
             update_quantized_embedding_kernel_8<<<blocks, threads>>>(
-                grad_data, indices_data, embed_data, qparam_data, dim, rsize);
+                grad_data, indices_data, embed_data, qparam_data, dim, size);
     } else if (digit == 16) {
         uint16_t *embed_data = (uint16_t *)embed->data;
         if (stream_handle)
             update_quantized_embedding_kernel_16<<<
                 blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
-                grad_data, indices_data, embed_data, qparam_data, dim, rsize);
+                grad_data, indices_data, embed_data, qparam_data, dim, size);
         else
             update_quantized_embedding_kernel_16<<<blocks, threads>>>(
-                grad_data, indices_data, embed_data, qparam_data, dim, rsize);
+                grad_data, indices_data, embed_data, qparam_data, dim, size);
     } else {
         assert(false);
     }

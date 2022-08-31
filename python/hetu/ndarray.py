@@ -188,6 +188,8 @@ class NDArray(object):
         self.no_free = False
         if force32:
             self.dtype = convert_dtype(dtype)
+        else:
+            self.dtype = dtype
 
     def __del__(self):
         if self.no_free:
@@ -441,7 +443,7 @@ class NDArray(object):
         ndim = ctypes.c_int(len(self.shape))
         handle = DLArrayHandle()
         check_call(_LIB.DLArrayAlloc(shape, stride, ndim,
-                                     self.handle.contents.ctx, ctypes.byref(handle), get_nbits(self.dtype)))
+                                     self.handle.contents.ctx, ctypes.byref(handle), ctypes.c_int(get_nbits(self.dtype))))
         check_call(_LIB.DLGpuArrayLazyCallback(
             self.handle, handle, stream.handle if stream else None))
         self.handle = handle
@@ -455,7 +457,7 @@ class NDArray(object):
             self.lazy_callback(stream)
 
 
-def array(arr, ctx, dtype=np.float32):
+def array(arr, ctx, dtype=np.float32, force32=True):
     """Create an array from source arr.
     Parameters
     ----------
@@ -470,7 +472,7 @@ def array(arr, ctx, dtype=np.float32):
     """
     if not isinstance(arr, np.ndarray):
         arr = np.array(arr, dtype=dtype)
-    ret = empty(arr.shape, ctx, dtype=dtype)
+    ret = empty(arr.shape, ctx, dtype=dtype, force32=force32)
     ret._sync_copyfrom(arr, dtype=dtype)
     return ret
 
@@ -495,7 +497,7 @@ def empty(shape, ctx=cpu(0), dtype=np.float32, force32=True):
         dtype = convert_dtype(dtype)
     handle = DLArrayHandle()
     check_call(_LIB.DLArrayAlloc(
-        shape, stride, ndim, ctx, ctypes.byref(handle), get_nbits(dtype)))
+        shape, stride, ndim, ctx, ctypes.byref(handle), ctypes.c_int(get_nbits(dtype))))
     return NDArray(handle, dtype=dtype, force32=force32)
 
 

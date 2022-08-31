@@ -97,6 +97,7 @@ int DLArrayAlloc(const index_t *shape, const index_t *stride, index_t ndim,
     arr = DLArrayCreate_();
     // ndim
     arr->ndim = ndim;
+    arr->nbits = nbits;
     index_t *shape_copy = new index_t[ndim];
     std::copy(shape, shape + ndim, shape_copy);
     arr->shape = shape_copy;
@@ -109,7 +110,6 @@ int DLArrayAlloc(const index_t *shape, const index_t *stride, index_t ndim,
     size_t alignment = GetDataAlignment(arr);
     arr->data =
         DeviceAPIManager::Get(ctx)->AllocDataSpace(ctx, size, alignment);
-    arr->nbits = nbits;
     *out = arr;
     API_END_HANDLE_ERROR(DLArrayFree_(arr));
 }

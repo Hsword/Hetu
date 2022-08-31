@@ -27,7 +27,7 @@ class QuantizedEmbeddingLookUpOp(Op):
         return [grad_node, None, None]
 
     def infer_shape(self, input_shapes):
-        assert len(input_shapes) == 2
+        assert len(input_shapes) == 3
         output_shape = list(input_shapes[2])
         output_shape.append(input_shapes[0][1])
         return tuple(output_shape)
@@ -39,16 +39,15 @@ class QuantizedEmbeddingLookUpOp(Op):
         ori_embed = config.placeholder_to_arr_map[embed_var]
         qparam_arr = config.placeholder_to_arr_map[qparam_var]
         if self.digit == 8:
-            dtype = np.int8
+            dtype = np.uint8
         else:
-            dtype = np.int16
+            dtype = np.uint16
         new_embed = empty(ori_embed.shape, ctx=self.ctx,
                           dtype=dtype, force32=False)
         config.placeholder_to_arr_map[embed_var] = new_embed
         embedding_prepack(ori_embed, new_embed, qparam_arr,
                           self.digit, config.comp_stream)
         config.comp_stream.sync()
-        ori_embed.__del__()
 
 
 def quantized_embedding_lookup_op(embed, qparams, indices, digit, ctx=None):

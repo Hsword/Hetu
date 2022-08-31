@@ -29,5 +29,5 @@ def update_quantized_embedding(grad_arr, ind_arr, embed, qparams, lookup, digit,
     assert isinstance(embed, _nd.NDArray)
     assert isinstance(qparams, _nd.NDArray)
     assert isinstance(lookup, _nd.NDArray)
-    _LIB.DLGpuSGDUpdateQuantizedEmbedding(grad_arr.handle, ind_arr.handle, embed.handle,
-                                       qparams.handle, lookup.handle, ctypes.c_int(digit), stream.handle if stream else None)
+    _LIB.DLGpuUpdateQuantizedEmbedding(grad_arr.handle, ind_arr.handle, embed.handle,
+                                       qparams.handle, ctypes.c_int(digit), stream.handle if stream else None)
