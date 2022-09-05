@@ -38,7 +38,7 @@ __global__ void argmax_kernel(const float *input, float *output, size_t befor_di
 
 int DLGpuArgmax(const DLArrayHandle input, DLArrayHandle output, int dim,
                 DLStreamHandle stream_handle) {
-    assert(input->ndim == output->ndim - 1);
+    assert(input->ndim == output->ndim + 1);
     size_t befor_dim_size, reduce_dim_size, after_dim_size;
     befor_dim_size = reduce_dim_size = after_dim_size = 1;
     for (int i = 0; i < input->ndim; ++i) {

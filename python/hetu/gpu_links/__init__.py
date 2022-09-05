@@ -1,6 +1,7 @@
 from __future__ import absolute_import
 from .AddConstLink import *
 from .AddElewiseLink import *
+from .Argmax import *
 from .ArraySetLink import *
 from .AvgPoolLink import *
 from .BroadcastLink import *
