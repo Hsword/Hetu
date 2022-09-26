@@ -281,7 +281,7 @@ def test_layer_norm_op(shape=(5, 3)):
     y_ = scale.reshape(bc_shape) * normed_input + \
         bias.reshape(bc_shape)
 
-    np.testing.assert_allclose(y_, y, atol=1e-6)
+    np.testing.assert_allclose(y_, y, rtol=1e-6, atol=1e-6)
     # print(y_)
 
     prev_grad = np.ones(y_.shape).astype(np.float32)
@@ -339,3 +339,4 @@ def test_layer_norm_op(shape=(5, 3)):
 test_layer_norm_op()
 test_layer_norm_op(shape=(4, 5, 6))
 test_layer_norm_op(shape=(2, 256, 768))
+test_layer_norm_op(shape=(2, 64, 3072))

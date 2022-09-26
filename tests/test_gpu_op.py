@@ -1451,6 +1451,57 @@ def test_onehot():
     print(arr_y.asnumpy())
 
 
+def test_gelu():
+    shape = (2000, 2500)
+    ctx = ht.gpu(0)
+    x = np.random.uniform(-1, 1, shape).astype(np.float32)
+    arr_x = ht.array(x, ctx=ctx)
+    arr_y = ht.empty(shape, ctx=ctx)
+    gpu_op.gelu(arr_x, arr_y)
+    y = arr_y.asnumpy()
+    import torch
+    import torch.nn.functional as F
+    ans = F.gelu(torch.Tensor(x)).numpy()
+    np.testing.assert_allclose(ans, y, rtol=1e-5)
+
+
+def test_sigmoid():
+    shape = (2000, 2500)
+    ctx = ht.gpu(0)
+    x = np.random.uniform(-1, 1, shape).astype(np.float32)
+    arr_x = ht.array(x, ctx=ctx)
+    arr_y = ht.empty(shape, ctx=ctx)
+    gpu_op.sigmoid(arr_x, arr_y)
+    y = arr_y.asnumpy()
+    import torch
+    ans = torch.sigmoid(torch.Tensor(x)).numpy()
+    np.testing.assert_allclose(ans, y, rtol=1e-6)
+
+
+def test_argmax():
+    def unit_test(shape, shapeY, dim):
+        ctx = ht.gpu(0)
+        num_items = 1
+        for num in shape:
+            num_items *= num
+        # make sure the tensor has unique max value
+        x = np.arange(num_items)
+        np.random.shuffle(x)
+        x = x.reshape(shape).astype(np.float32)
+        arr_x = ht.array(x, ctx=ctx)
+        arr_y = ht.empty(shapeY, ctx=ctx)
+        gpu_op.argmax(arr_x, arr_y, dim=dim)
+        y = arr_y.asnumpy()
+        import torch
+        ans = torch.argmax(torch.Tensor(x), dim=dim).numpy()
+        np.testing.assert_allclose(ans, y)
+
+    unit_test((5, 1000), (5, ), 1)
+    unit_test((5, 1000, 30), (5, 1000), 2)
+    unit_test((5, 500, 100), (5, 100), 1)
+    unit_test((5, 2048, 10), (5, 10), 1)
+
+
 test_array_set()
 test_broadcast_to()
 test_reduce_sum_axis_zero()
@@ -1496,3 +1547,6 @@ test_dropout2d()
 test_instance_norm2d()
 test_instance_norm2d_gradient()
 test_onehot()
+test_gelu()
+test_sigmoid()
+test_argmax()
