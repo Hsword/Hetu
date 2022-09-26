@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from .AddConstLink import *
 from .AddElewiseLink import *
 from .ArraySetLink import *
+from .Argmax import *
 from .AvgPoolLink import *
 from .BroadcastLink import *
 from .BinaryCrossEntropyLink import *
@@ -134,6 +135,7 @@ __all__ = [
     'matrix_transpose_simple',
     'sigmoid',
     'tanh',
+    'tanh_gradient',
     'matrix_slice',
     'matrix_slice_simple',
     'matrix_slice_gradient',
@@ -141,6 +143,7 @@ __all__ = [
     'embedding_lookup',
     'embedding_lookup_gradient',
     'where',
+    'where_const',
     'batch_matrix_multiply',
     'layer_normalization',
     'layer_normalization_gradient',

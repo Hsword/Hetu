@@ -144,5 +144,6 @@ extern std::map<size_t, cublasHandle_t> cublas_map;
 void cublas_init(size_t dev_id = 0, DLStreamHandle stream = NULL);
 
 void cuda_init();
+int GetThreadNum(int cnt);
 
 #endif
