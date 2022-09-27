@@ -116,3 +116,12 @@ int DLEventElapsedTime(DLEventHandle start, DLEventHandle ending,
                                    *(cudaEvent_t *)ending->handle));
     return 0;
 }
+
+int GetThreadNum(int cnt) {
+    if (cnt >= 1048576) return 1024;
+    if (cnt >= 262144) return 512;
+    if (cnt >= 65536) return 256;
+    if (cnt >= 16384) return 128;
+    if (cnt >= 256) return 64;
+    return 32;
+}

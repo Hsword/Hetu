@@ -1,27 +1,40 @@
-#include "gpu_runtime.h"
+#include "gpu_reduce.h"
 
-__global__ void minus_mean_n_square_kernel(const float *in_arr,
-                                           const float *mean, float *out_arr,
-                                           int last_dim, size_t size) {
-    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= size)
-        return;
-    float temp = in_arr[ind] - mean[ind / last_dim];
-    out_arr[ind] = temp * temp;
-}
+__global__ void layer_norm_forward(const float *x,
+                                   const float *scale,
+                                   const float *bias,
+                                   float* y,
+                                   float *mean, float *var,
+                                   const float eps, const int C) {
+    __shared__ float var_share;
+    __shared__ float mean_share;
+    __shared__ float shared_var[32];
+    __shared__ float shared_mean[32];
 
-__global__ void rescale_kernel(const float *in_arr, const float *mean_arr,
-                               const float *var_arr, const float *ln_scale,
-                               const float *ln_bias, float *out_arr,
-                               int last_dim, float eps, size_t size) {
-    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= size)
-        return;
-    size_t mo_ind = ind / last_dim;
-    size_t ln_ind = ind % last_dim;
-    out_arr[ind] = (in_arr[ind] - mean_arr[mo_ind])
-                       / sqrtf(var_arr[mo_ind] + eps) * ln_scale[ln_ind]
-                   + ln_bias[ln_ind];
+    int begin = blockIdx.x * C + threadIdx.x;
+    int end = (blockIdx.x + 1) * C;
+
+    float mean_thread = 0, var_thread = 0;
+    for (int i = begin; i < end; i += blockDim.x) {
+        mean_thread += x[i];
+        var_thread += (x[i] * x[i]);
+    }
+
+    BlockReduceSum(mean_thread, shared_mean);
+    BlockReduceSum(var_thread, shared_var);
+    if (threadIdx.x == 0) {
+        mean[blockIdx.x] = mean_share = mean_thread / C;
+        var_share = var_thread / C - mean_share * mean_share;
+        if (var_share < 0) var_share = 0;
+        var[blockIdx.x] = var_share;
+    }
+    __syncthreads();
+
+    mean_thread = mean_share;
+    var_thread = var_share;
+    float tmp = 1.0f / sqrtf(var_thread + eps);
+    for (int i = begin, j = threadIdx.x; i < end; i += blockDim.x, j += blockDim.x)
+        y[i] = (x[i] - mean_thread) * tmp * scale[j] + bias[j];
 }
 
 int DLGpuLayerNormalization(const DLArrayHandle in_arr,
@@ -29,110 +42,22 @@ int DLGpuLayerNormalization(const DLArrayHandle in_arr,
                             const DLArrayHandle ln_bias, DLArrayHandle mean_arr,
                             DLArrayHandle var_arr, DLArrayHandle out_arr,
                             float eps, DLStreamHandle stream_handle) {
-    int dev_id = (in_arr->ctx).device_id;
-    cudaSetDevice(dev_id);
-    cudnn_init(dev_id, stream_handle);
-
-    float one = 1.0f;
-    float zero = 0.0f;
-
-    cudnnReduceTensorDescriptor_t rtd;
-    CUDNN_CALL(cudnnCreateReduceTensorDescriptor(&rtd));
-    CUDNN_CALL(cudnnSetReduceTensorDescriptor(
-        rtd, CUDNN_REDUCE_TENSOR_AVG, CUDNN_DATA_FLOAT, CUDNN_PROPAGATE_NAN,
-        CUDNN_REDUCE_TENSOR_NO_INDICES, CUDNN_32BIT_INDICES));
-
-    cudnnTensorDescriptor_t adesc;
-    cudnnTensorDescriptor_t cdesc;
-    CUDNN_CALL(cudnnCreateTensorDescriptor(&adesc));
-    CUDNN_CALL(cudnnCreateTensorDescriptor(&cdesc));
-
     int ndim = in_arr->ndim;
-    int last_dim = in_arr->shape[ndim - 1];
-    if (ndim < 4)
-        ndim = 4;
-    size_t cpu_mem = ndim * sizeof(int);
-    int *dimA = (int *)malloc(cpu_mem);
-    int *strideA = (int *)malloc(cpu_mem);
-    int *dimC = (int *)malloc(cpu_mem);
-    int *strideC = (int *)malloc(cpu_mem);
-
-    int temp_strideA = 1;
-    int temp_strideC = 1;
-
-    for (int i = ndim - 1; i >= 0; --i) {
-        dimA[i] = i < in_arr->ndim ? (int)in_arr->shape[i] : 1;
-        dimC[i] = i < in_arr->ndim - 1 ? (int)in_arr->shape[i] : 1;
-        strideA[i] = temp_strideA;
-        strideC[i] = temp_strideC;
-        temp_strideA *= dimA[i];
-        temp_strideC *= dimC[i];
-    }
-    size_t size = temp_strideA * sizeof(float);
-
-    CUDNN_CALL(cudnnSetTensorNdDescriptor(adesc, CUDNN_DATA_FLOAT, ndim, dimA,
-                                          strideA));
-    CUDNN_CALL(cudnnSetTensorNdDescriptor(cdesc, CUDNN_DATA_FLOAT, ndim, dimC,
-                                          strideC));
-
-    CUDNN_CALL(cudnnReduceTensor(cudnn_map[dev_id], rtd, NULL, 0,
-                                 (void *)out_arr->data, size, &one, adesc,
-                                 (const void *)in_arr->data, &zero, cdesc,
-                                 (void *)mean_arr->data));
-
-    dim3 blocks;
-    dim3 threads;
-    if (temp_strideA <= 1024) {
-        threads.x = temp_strideA;
-        blocks.x = 1;
-    } else {
-        threads.x = 1024;
-        blocks.x = (temp_strideA + 1023) / 1024;
-    }
+    int B = 1, C = in_arr->shape[ndim - 1];
+    for(int i = 0; i < ndim - 1; ++i)
+        B *= in_arr->shape[i];
+    int threads = GetThreadNum(C);
 
     if (stream_handle)
-        minus_mean_n_square_kernel<<<blocks, threads, 0,
-                                     *(cudaStream_t *)stream_handle->handle>>>(
-            (const float *)in_arr->data, (const float *)mean_arr->data,
-            (float *)out_arr->data, last_dim, temp_strideA);
+        layer_norm_forward<<<B, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
+                (const float *)in_arr->data, (const float *)ln_scale->data,
+                (const float *)ln_bias->data, (float *)out_arr->data,
+                (float *)mean_arr->data, (float *)var_arr->data, eps, C);
     else
-        minus_mean_n_square_kernel<<<blocks, threads>>>(
-            (const float *)in_arr->data, (const float *)mean_arr->data,
-            (float *)out_arr->data, last_dim, temp_strideA);
-
-    CUDNN_CALL(cudnnReduceTensor(cudnn_map[dev_id], rtd, NULL, 0,
-                                 (void *)out_arr->data, size, &one, adesc,
-                                 (const void *)out_arr->data, &zero, cdesc,
-                                 (void *)var_arr->data));
-
-    if (temp_strideA <= 1024) {
-        threads.x = temp_strideA;
-        blocks.x = 1;
-    } else {
-        threads.x = 1024;
-        blocks.x = (temp_strideA + 1023) / 1024;
-    }
-    if (stream_handle)
-        rescale_kernel<<<blocks, threads, 0,
-                         *(cudaStream_t *)stream_handle->handle>>>(
-            (const float *)in_arr->data, (const float *)mean_arr->data,
-            (const float *)var_arr->data, (const float *)ln_scale->data,
-            (const float *)ln_bias->data, (float *)out_arr->data, last_dim, eps,
-            temp_strideA);
-    else
-        rescale_kernel<<<blocks, threads>>>(
-            (const float *)in_arr->data, (const float *)mean_arr->data,
-            (const float *)var_arr->data, (const float *)ln_scale->data,
-            (const float *)ln_bias->data, (float *)out_arr->data, last_dim, eps,
-            temp_strideA);
-
-    CUDNN_CALL(cudnnDestroyTensorDescriptor(adesc));
-    CUDNN_CALL(cudnnDestroyTensorDescriptor(cdesc));
-    CUDNN_CALL(cudnnDestroyReduceTensorDescriptor(rtd));
-    free(dimA);
-    free(dimC);
-    free(strideA);
-    free(strideC);
+        layer_norm_forward<<<B, threads, 0>>>(
+                (const float *)in_arr->data, (const float *)ln_scale->data,
+                (const float *)ln_bias->data, (float *)out_arr->data,
+                (float *)mean_arr->data, (float *)var_arr->data, eps, C);
     return 0;
 }
 
