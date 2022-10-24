@@ -37,6 +37,21 @@ HETUSYS_EXTERN_C {
     int DLEventElapsedTime(DLEventHandle start, DLEventHandle ending,
                            float *duration);
 
+    int DLGpuAbs(const DLArrayHandle input, DLArrayHandle output,
+                 DLStreamHandle stream_handle);
+    int DLGpuAbsGradient(const DLArrayHandle grad, const DLArrayHandle input,
+                         DLArrayHandle output, DLStreamHandle stream_handle);
+    int DLGpuAddmm(const DLArrayHandle input, const DLArrayHandle matA,
+                   const DLArrayHandle matB, float alpha, float beta,
+                   DLArrayHandle matC, DLStreamHandle stream_handle);
+    int DLGpuAddmmGradient(const DLArrayHandle input, DLArrayHandle output,
+                           int axis, float beta, DLStreamHandle stream_handle);
+    int DLGpuArange(float start, float end, float step, DLArrayHandle output,
+                    DLStreamHandle stream_handle);
+
+    int DLGpuArgsort(const DLArrayHandle input, DLArrayHandle output,
+                     DLArrayHandle index, DLArrayHandle output_index, int dim,
+                     bool descending, DLStreamHandle stream_handle);
     // Array related apis for quick proptying
     /*!
      * \brief Allocate a nd-array's memory,
@@ -76,6 +91,17 @@ HETUSYS_EXTERN_C {
     int DLGpuArraySet(DLArrayHandle arr, float value,
                       DLStreamHandle stream_handle);
 
+    int DLGpuBaddbmm(const DLArrayHandle input, const DLArrayHandle matA,
+                     const DLArrayHandle matB, float alpha, float beta,
+                     DLArrayHandle matC, DLStreamHandle stream_handle);
+
+    int DLGpuBool(const DLArrayHandle input, DLArrayHandle output,
+                  DLStreamHandle stream_handle);
+    int DLGpuBoolVal(const DLArrayHandle input, float val, DLArrayHandle output,
+                     int cond, DLStreamHandle stream_handle);
+    int DLGpuBoolMatrix(const DLArrayHandle input_A,
+                        const DLArrayHandle input_B, DLArrayHandle output,
+                        int cond, DLStreamHandle stream_handle);
     /*!
      * \brief Broadcast input array to output array.
      * \param input The input array.
@@ -85,6 +111,22 @@ HETUSYS_EXTERN_C {
     int DLGpuBroadcastTo(const DLArrayHandle input, DLArrayHandle output,
                          DLStreamHandle stream_handle);
 
+    int DLGpuClamp(const DLArrayHandle input, float min, float max,
+                   DLArrayHandle output, DLStreamHandle stream_handle);
+    int DLGpuClampMin(const DLArrayHandle input, float min,
+                      DLArrayHandle output, DLStreamHandle stream_handle);
+    int DLGpuClampMax(const DLArrayHandle input, float max,
+                      DLArrayHandle output, DLStreamHandle stream_handle);
+    int DLGpuClampMat(const DLArrayHandle input, const DLArrayHandle min_mat,
+                      const DLArrayHandle max_mat, DLArrayHandle output,
+                      DLStreamHandle stream_handle);
+    int DLGpuConstPow(const DLArrayHandle input, float val,
+                      DLArrayHandle output, DLStreamHandle stream_handle);
+    int DLGpuConstPowGradient(
+        const DLArrayHandle input, const DLArrayHandle grad, float val,
+        DLArrayHandle output, DLStreamHandle stream_handle);
+    int DLGpuCos(const DLArrayHandle input, DLArrayHandle output,
+                 DLStreamHandle stream_handle);
     /*!
      * \brief Reduce sum input array by axis=0 and store to output.
      * \param input The input array.
@@ -96,6 +138,19 @@ HETUSYS_EXTERN_C {
     int _DLGpuReduceSumAxisZero(const DLArrayHandle input, DLArrayHandle output,
                                 DLArrayHandle arr_workspace,
                                 DLStreamHandle stream_handle);
+    int DLGpuExp(const DLArrayHandle input, DLArrayHandle output,
+                 DLStreamHandle stream_handle);
+    int DLGpuFloor(const DLArrayHandle input, DLArrayHandle output,
+                   DLStreamHandle stream_handle);
+    int DLGpuGather(const DLArrayHandle input, const DLArrayHandle index,
+                    DLArrayHandle output, int dim,
+                    DLStreamHandle stream_handle);
+    int DLGpuGatherGradient(const DLArrayHandle input,
+                            const DLArrayHandle index, DLArrayHandle output,
+                            int dim, DLStreamHandle stream_handle);
+    int DLGpuMaskedFill(const DLArrayHandle input, const DLArrayHandle mask,
+                        float val, DLArrayHandle output,
+                        DLStreamHandle stream_handle);
     /*!
      * \brief Elementwise add two matrices and store to output.
      * \param matA The left input array.
@@ -168,6 +223,10 @@ HETUSYS_EXTERN_C {
     int DLGpuMatrixDivConst(float val, const DLArrayHandle input,
                             DLArrayHandle output, DLStreamHandle stream_handle);
 
+    int DLGpuMin(const DLArrayHandle input, DLArrayHandle output_val, int dim,
+                 DLStreamHandle stream_handle);
+    int DLGpuMinMat(const DLArrayHandle matA, const DLArrayHandle matB,
+                    DLArrayHandle output, DLStreamHandle stream_handle);
     /*!
      * \brief Compute opposite number on all array elements, and store to
      * output. \param input The input array. \param output The output value.
@@ -175,6 +234,9 @@ HETUSYS_EXTERN_C {
      */
     int DLGpuOpposite(const DLArrayHandle input, DLArrayHandle output,
                       DLStreamHandle stream_handle);
+
+    int DLGpuOuter(const DLArrayHandle input, const DLArrayHandle vector,
+                   DLArrayHandle output, DLStreamHandle stream_handle);
 
     /*!
      * \brief Matrix multiply two matrices and store to output.
@@ -188,6 +250,12 @@ HETUSYS_EXTERN_C {
     int DLGpuMatrixMultiply(const DLArrayHandle matA, bool transposeA,
                             const DLArrayHandle matB, bool transposeB,
                             DLArrayHandle matC, DLStreamHandle stream_handle);
+
+    int DLGpuPow(const DLArrayHandle input, DLArrayHandle output, float exp,
+                 DLStreamHandle stream_handle);
+    int DLGpuPowGradient(const DLArrayHandle input, const DLArrayHandle in_grad,
+                         DLArrayHandle output, float exp,
+                         DLStreamHandle stream_handle);
 
     /*!
      * \brief Compute sqrt on all array elements, and store to output.
@@ -269,6 +337,8 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle input, const DLArrayHandle in_grad,
         const float alpha, DLArrayHandle output, DLStreamHandle stream_handle);
 
+    int DLGpuSin(const DLArrayHandle input, DLArrayHandle output,
+                 DLStreamHandle stream_handle);
     /*!
      * \brief Compute softmax on matrix, and store to output.
      * \param input The input array.
@@ -277,7 +347,8 @@ HETUSYS_EXTERN_C {
      */
     int DLGpuTanh(const DLArrayHandle input, DLArrayHandle output,
                   DLStreamHandle stream_handle);
-
+    int DLGpuTanhGradient(const DLArrayHandle forward, const DLArrayHandle grad,
+                          DLArrayHandle output, DLStreamHandle stream_handle);
     /*!
      * \brief Compute Tanh, and store to output.
      * \param input The input array.
@@ -406,15 +477,23 @@ HETUSYS_EXTERN_C {
     int DLGpuScatter(const DLArrayHandle target, int dim, DLArrayHandle index,
                      DLArrayHandle src, DLStreamHandle stream_handle);
 
+    int DLGpuMinusByConst(const DLArrayHandle input, DLArrayHandle output,
+                          float val, DLStreamHandle stream_handle);
     int DLGpuMinusElewise(const DLArrayHandle input1, DLArrayHandle input2,
                           DLArrayHandle output, DLStreamHandle stream_handle);
-
+    int DLGpuNorm(const DLArrayHandle in_arr, DLArrayHandle out_arr, int axis,
+                  int p, DLStreamHandle stream_handle);
+    int DLGpuNormGradient(const DLArrayHandle in_arr,
+                          const DLArrayHandle in_arr_y,
+                          const DLArrayHandle grad_y, DLArrayHandle out_arr,
+                          int axis, int p, DLStreamHandle stream_handle);
     int DLGpuClone(const DLArrayHandle input, DLArrayHandle output,
                    DLStreamHandle stream_handle);
 
-    int DLGpuMax(const DLArrayHandle input, DLArrayHandle output_idx,
-                 DLArrayHandle output_val, int dim,
+    int DLGpuMax(const DLArrayHandle input, DLArrayHandle output_val, int dim,
                  DLStreamHandle stream_handle);
+    int DLGpuMaxMat(const DLArrayHandle matA, const DLArrayHandle matB,
+                    DLArrayHandle output, DLStreamHandle stream_handle);
 
     int CuDNN_DLGpuConv2d(
         const DLArrayHandle input_x, const DLArrayHandle input_f,
@@ -506,12 +585,22 @@ HETUSYS_EXTERN_C {
                                   DLArrayHandle i_grad, int axis, int offset,
                                   DLStreamHandle stream_handle);
 
+    int DLGpuBicubicInterpolate(const DLArrayHandle input, DLArrayHandle output,
+                                bool align_corners,
+                                DLStreamHandle stream_handle);
+    int DLGpuBicubicInterpolateGradient(
+        DLArrayHandle input, const DLArrayHandle output, bool align_corners,
+        DLStreamHandle stream_handle);
+
+    int DLGpuRoll(const DLArrayHandle input, int *shift, int *axis, int nums,
+                  DLArrayHandle output, DLStreamHandle stream_handle);
+
     int DLGpuTranspose(const DLArrayHandle input, DLArrayHandle output,
-		       int *perm, DLStreamHandle stream_handle);
-    
+                       int *perm, DLStreamHandle stream_handle);
+
     int DLGpuTransposeSimple(const DLArrayHandle input, DLArrayHandle output,
-                              const DLArrayHandle gpu_buffer,
-                              DLStreamHandle stream_handle);
+                             const DLArrayHandle gpu_buffer,
+                             DLStreamHandle stream_handle);
 
     int CuSparse_DLGpuCsrmv(
         const DLArrayHandle data_handle, const DLArrayHandle row_handle,
@@ -542,6 +631,9 @@ HETUSYS_EXTERN_C {
     int DLGpuWhere(const DLArrayHandle cond, const DLArrayHandle arr1,
                    const DLArrayHandle arr2, DLArrayHandle output,
                    DLStreamHandle stream_handle);
+    int DLGpuWhereConst(const DLArrayHandle cond, const DLArrayHandle arr1,
+                        float const_attr, DLArrayHandle output,
+                        DLStreamHandle stream_handle);
 
     int DLGpuBatchMatrixMultiply(
         const DLArrayHandle matA, bool transposeA, const DLArrayHandle matB,
@@ -593,9 +685,9 @@ HETUSYS_EXTERN_C {
                      DLArrayHandle output, unsigned long long *pseed,
                      DLStreamHandle stream_handle);
 
-    int DLGpuDropoutGradient_recompute(const DLArrayHandle grad, const float dropout,
-                              DLArrayHandle output, unsigned long long seed,
-                              DLStreamHandle stream_handle);
+    int DLGpuDropoutGradient_recompute(
+        const DLArrayHandle grad, const float dropout, DLArrayHandle output,
+        unsigned long long seed, DLStreamHandle stream_handle);
 
     int DLGpuDropoutGradient(const DLArrayHandle grad,
                              const DLArrayHandle fw_output, const float dropout,
@@ -927,6 +1019,11 @@ HETUSYS_EXTERN_C {
         DLArrayHandle output, int capacity,
         DLStreamHandle stream_handle = NULL);
 
+    int DLGpuRepeat(const DLArrayHandle input, DLArrayHandle output,
+                    DLStreamHandle stream_handle);
+    int DLGpuRepeatGradient(const DLArrayHandle input, DLArrayHandle output,
+                            DLStreamHandle stream_handle);
+
     int DLGpuReverseLayoutTransformTop1GradientData(
         const DLArrayHandle input, DLArrayHandle indice, DLArrayHandle location,
         DLArrayHandle gate, DLArrayHandle output, int capacity,
@@ -943,6 +1040,25 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle combined_output, DLArrayHandle expert_output,
         DLArrayHandle indice, DLArrayHandle location, DLArrayHandle output,
         int capacity, DLStreamHandle stream_handle = NULL);
+
+    int DLGpuSliceAssign(const DLArrayHandle input, DLArrayHandle output,
+                         float val, int *begin_pos, int *end_pos,
+                         DLStreamHandle stream_handle);
+
+    int DLGpuSliceAssignMatrix(
+        const DLArrayHandle input_A, const DLArrayHandle input_B,
+        DLArrayHandle output, int *begin_pos_A, int *end_pos_A,
+        int *begin_pos_B, DLStreamHandle stream_handle);
+
+    int DLGpuSliceByMatrix(const DLArrayHandle in_arr,
+                           const DLArrayHandle index1,
+                           const DLArrayHandle index2, DLArrayHandle out_arr,
+                           DLStreamHandle stream_handle);
+
+    int DLGpuSliceByMatrixGradient(
+        const DLArrayHandle in_arr, const DLArrayHandle index1,
+        const DLArrayHandle index2, DLArrayHandle out_arr,
+        DLStreamHandle stream_handle);
 
     int DLGpuIndexing(const DLArrayHandle input, DLArrayHandle index,
                       DLArrayHandle output,

@@ -11,7 +11,7 @@ from ..gpu_links import matrix_elementwise_add_by_const,\
     array_set,\
     matrix_elementwise_add_simple,\
     matrix_elementwise_add_lazy
-from .DataTransfer import DataD2HSparseOp
+from .DataTransfer import DataD2HSparseOp, DataH2DSparseOp
 from .EmbeddingLookUp import EmbeddingLookUp_Gradient
 import numpy as np
 
@@ -133,7 +133,7 @@ class SumOp(Op):
         self.middle_results = [None for _ in self.inputs]
         self.need_deduce = [False for _ in self.inputs]
         for ind, node in enumerate(self.inputs):
-            if isinstance(node, (EmbeddingLookUp_Gradient, DataD2HSparseOp)):
+            if isinstance(node, (EmbeddingLookUp_Gradient, DataD2HSparseOp, DataH2DSparseOp)):
                 self.callbacks[ind] = self._indexed_cpu_callback if self.on_cpu else self._indexed_gpu_callback
             elif self.on_cpu:
                 self.callbacks[ind] = self._simple_cpu_callback
@@ -141,5 +141,60 @@ class SumOp(Op):
                 self.need_deduce[ind] = True
 
 
-def sum_op(node_list, ctx=None):
+class SparseSumOp(Op):
+    def __init__(self, node_list, ctx=None):
+        super().__init__(SparseSumOp, list(node_list), ctx)
+        self.lazy_execution = True
+        self.compute_to_be_config = False
+
+    def compute(self, input_vals, output_val, stream_handle=None):
+        assert isinstance(output_val, ndarray.IndexedSlices)
+        for input_val in input_vals:
+            output_val.merge(input_val)
+        if self.on_cpu:
+            output_val.cpu_deduplicate()
+        else:
+            output_val.deduplicate(stream_handle)
+
+    def gradient(self, output_grad):
+        return [output_grad for _ in self.inputs]
+
+    def infer_shape(self, input_shapes):
+        """Need to handle input_vals[0].shape != input_vals[1].shape"""
+        assert len(input_shapes) == len(self.inputs)
+        result_shape = tuple(input_shapes[0])
+        for shape in input_shapes[1:]:
+            shape = tuple(shape)
+            if shape != result_shape:
+                if result_shape == (1,):
+                    result_shape = shape
+                elif shape != (1,):
+                    # here needs broadcast
+                    resind = len(result_shape) - 1
+                    curind = len(shape) - 1
+                    temp_shape = []
+                    while resind >= 0 and curind >= 0:
+                        temp_shape.insert(
+                            0, max(result_shape[resind], shape[curind]))
+                        resind -= 1
+                        curind -= 1
+                    while resind >= 0:
+                        temp_shape.insert(0, result_shape[resind])
+                        resind -= 1
+                    while curind >= 0:
+                        temp_shape.insert(0, shape[curind])
+                        curind -= 1
+                    result_shape = tuple(temp_shape)
+        return result_shape
+
+    def forward_hook(self, config):
+        super().forward_hook(config)
+        for node in self.inputs:
+            assert isinstance(node, (EmbeddingLookUp_Gradient,
+                              DataD2HSparseOp, DataH2DSparseOp))
+
+
+def sum_op(node_list, ctx=None, sparse=False):
+    if sparse:
+        return SparseSumOp(node_list, ctx=ctx)
     return SumOp(node_list, ctx=ctx)

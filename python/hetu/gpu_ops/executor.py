@@ -11,8 +11,8 @@ from ..dataloader import DataloaderOp, GNNDataLoaderOp
 from .AllReduceCommunicate import AllReduceCommunicateOp
 from .AllToAll import AllToAllOp
 from .ParameterServerCommunicate import ParameterServerCommunicateOp, ParameterServerSparsePullOp, parameterServerSparsePull_op
-from .Sum import sum_op
-from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp
+from .Sum import sum_op, SumOp, SparseSumOp
+from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp, DataH2DSparseOp
 from ..communicator.mpi_nccl_comm import ncclDataType_t, GroupStart, GroupEnd
 from .EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient
 from ..optimizer import OptimizerOp
@@ -21,7 +21,6 @@ from ..stream import create_stream_handle, Event
 from ..context import get_current_context, get_launch_config_by_traverse_nodes, assign_context_by_traverse_nodes, DeviceGroup
 from .PipelineSend import PipelineSendOp
 from .PipelineReceive import PipelineReceiveOp
-from .Sum import SumOp
 from .Split import SplitOp
 from .Concatenate import ConcatenateOp
 from .Dropout import DropoutOp
@@ -817,7 +816,7 @@ class SubExecutor(object):
             if shape is None:
                 self.node_to_arr_map[node] = None
                 return
-            if isinstance(node, (EmbeddingLookUp_Gradient, DataD2HSparseOp)):
+            if isinstance(node, (EmbeddingLookUp_Gradient, DataD2HSparseOp, DataH2DSparseOp, SparseSumOp)):
                 if not self.from_memory_pool((shape, 'IndexedSlices'), node):
                     self.node_to_arr_map[node] = ndarray.IndexedSlices(
                         dense_shape=shape)
@@ -825,7 +824,7 @@ class SubExecutor(object):
             if isinstance(node, EmbeddingLookUp) and (self.use_sparse_pull or self.cstable_policy) and self.config.prefetch:
                 self.node_to_arr_map[node] = self.param_psval_map[node.inputs[0]]
                 return
-            if isinstance(node, AllReduceCommunicateOp) and isinstance(node.inputs[0], EmbeddingLookUp_Gradient):
+            if isinstance(node, AllReduceCommunicateOp) and isinstance(node.inputs[0], (EmbeddingLookUp_Gradient, SparseSumOp)):
                 self.node_to_arr_map[node] = ndarray.IndexedSlices(
                     dense_shape=shape)
                 return
@@ -862,14 +861,14 @@ class SubExecutor(object):
                 if shape is None:
                     self.node_to_arr_map[node] = None
                     continue
-                if isinstance(node, (EmbeddingLookUp_Gradient, DataD2HSparseOp)):
+                if isinstance(node, (EmbeddingLookUp_Gradient, DataD2HSparseOp, DataH2DSparseOp, SparseSumOp)):
                     self.node_to_arr_map[node] = ndarray.IndexedSlices(
                         dense_shape=shape)
                     continue
                 if isinstance(node, EmbeddingLookUp) and (self.use_sparse_pull or self.cstable_policy) and self.config.prefetch:
                     self.node_to_arr_map[node] = self.param_psval_map[node.inputs[0]]
                     continue
-                if isinstance(node, AllReduceCommunicateOp) and isinstance(node.inputs[0], EmbeddingLookUp_Gradient):
+                if isinstance(node, AllReduceCommunicateOp) and isinstance(node.inputs[0], (EmbeddingLookUp_Gradient, SparseSumOp)):
                     self.node_to_arr_map[node] = ndarray.IndexedSlices(
                         dense_shape=shape)
                     continue
@@ -981,7 +980,7 @@ class SubExecutor(object):
             self.node_ref_cnt[node] = None
             key = self.node_to_shape_map[node]
             if key is not None:
-                if isinstance(node, (EmbeddingLookUp_Gradient, DataD2HSparseOp)):
+                if isinstance(node, (EmbeddingLookUp_Gradient, DataD2HSparseOp, DataH2DSparseOp, SparseSumOp)):
                     key = (key, 'IndexedSlices')
                 self.to_memory_pool(key, node)
             else:
@@ -990,7 +989,7 @@ class SubExecutor(object):
             if node.inplace: # if inplace node is freed, need to take care of its inputs node
                 for n in node.inputs:
                     if n in self.computing_nodes and n not in self.eval_node_list \
-                        and not (isinstance(n, AllReduceCommunicateOp) and isinstance(n.inputs[0], EmbeddingLookUp_Gradient)):
+                        and not (isinstance(n, AllReduceCommunicateOp) and isinstance(n.inputs[0], (EmbeddingLookUp_Gradient, SparseSumOp))):
                         self.node_ref_cnt[n] -= 1
                         if self.node_ref_cnt[n] <= 0:
                             free_node(n)
@@ -999,7 +998,7 @@ class SubExecutor(object):
             if self.dynamic_memory and not node.inplace:
                 for n in node.inputs:
                     if n in self.computing_nodes and n not in self.eval_node_list \
-                        and not (isinstance(n, AllReduceCommunicateOp) and isinstance(n.inputs[0], EmbeddingLookUp_Gradient)):
+                        and not (isinstance(n, AllReduceCommunicateOp) and isinstance(n.inputs[0], (EmbeddingLookUp_Gradient, SparseSumOp))):
                         self.node_ref_cnt[n] -= 1
                         if self.node_ref_cnt[n] <= 0:
                             free_node(n)
@@ -1077,8 +1076,8 @@ class SubExecutor(object):
                 elif isinstance(node, (AllReduceCommunicateOp, AllToAllOp)):
                     node.compute(input_vals, node_val, self.nccl_stream)
 
-                elif isinstance(node, DataH2DOp):
-                    node.compute(input_vals, node_val, self.h2d_stream)
+                elif isinstance(node, (DataH2DOp, DataH2DSparseOp)):
+                    node.compute(input_vals, node_val, self.h2d_stream)  
 
                 elif isinstance(node, (DataD2HOp, DataD2HSparseOp)):
                     node.compute(input_vals, node_val, self.d2h_stream)
@@ -1147,7 +1146,6 @@ def gradients(output_node, node_list, insert_grad=None, return_all=False):
     from .LayerNorm import Layer_NormalizationOp
     from .AddElewise import AddOp
     from .AddConst import AddByConstOp
-    from .Sum import SumOp
     # TODO: add support for Csrmm, Division, MatrixDot, Sigmoid, Sqrt, Tanh, Where
     backward2forward = {}  # key: backward node; value: tuple of forward nodes
     forward2backward = {}  # key: forward node; value: list of generated backward nodes
@@ -1169,10 +1167,13 @@ def gradients(output_node, node_list, insert_grad=None, return_all=False):
         # TODO: when implement PS strategy for context semantics, modify here
         if isinstance(node, EmbeddingLookUp):
             output_grad = sum_node_list(
-                node_to_output_grads_list[node], node_to_output_grads_list[node][0].raw_ctx)
+                node_to_output_grads_list[node], node_to_output_grads_list[node][0].raw_ctx, sparse=False)
+        elif isinstance(node, PlaceholderOp) and node.is_embed:
+            output_grad = sum_node_list(
+                node_to_output_grads_list[node], node.raw_ctx, sparse=True)
         else:
             output_grad = sum_node_list(
-                node_to_output_grads_list[node], node.raw_ctx)
+                node_to_output_grads_list[node], node.raw_ctx, sparse=False)
         if output_grad is None:
             for n in node.inputs:
                 if n not in node_to_output_grads_list:
@@ -1385,7 +1386,7 @@ def fetch_dense_parameter_value(node_list, config):
         node.event.update()
 
 
-def sum_node_list(node_list, ctx):
+def sum_node_list(node_list, ctx, sparse):
     """Custom sum func to avoid creating redundant nodes in Python sum func."""
     node_list = [n for n in node_list if n is not None]
     if node_list == []:
@@ -1393,7 +1394,7 @@ def sum_node_list(node_list, ctx):
     elif len(node_list) == 1:
         return node_list[0]
     else:
-        return sum_op(node_list, ctx=ctx)
+        return sum_op(node_list, ctx=ctx, sparse=sparse)
 
 
 def reorder_for_group(topo_order, layer_indices):
@@ -1410,7 +1411,7 @@ def reorder_for_group(topo_order, layer_indices):
         return topo_order
     labels = {}
     for node in topo_order:
-        if isinstance(node, (DataH2DOp, DataD2HOp, DataD2HSparseOp)):
+        if isinstance(node, (DataH2DOp, DataD2HOp, DataD2HSparseOp, DataH2DSparseOp, SparseSumOp)):
             layer_indices[node] = layer_indices[node.inputs[0]] + 0.5
         cur_with_pipeline = layer_indices[node] in has_pipeline_ops
         if cur_with_pipeline and isinstance(node, SplitOp):

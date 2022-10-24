@@ -133,17 +133,21 @@ class Op(object):
         return self.infer_shape(input_shapes)
 
     def add_transfer_op(self, src_node, dst_ctx, h2d_ops, d2h_ops):
-        from .DataTransfer import datah2d_op, datad2h_op, datad2h_sparse_op
+        from .DataTransfer import datah2d_op, datad2h_op, datad2h_sparse_op, datah2d_sparse_op
+        from .EmbeddingLookUp import EmbeddingLookUp_Gradient
+        from .Sum import SparseSumOp
 
         def add_h2d(prev_node, cur_ctx):
             if prev_node not in h2d_ops:
-                h2d_ops[prev_node] = datah2d_op(prev_node, cur_ctx)
+                if isinstance(prev_node, (EmbeddingLookUp_Gradient, SparseSumOp)):
+                    h2d_ops[prev_node] = datah2d_sparse_op(prev_node, cur_ctx)
+                else:
+                    h2d_ops[prev_node] = datah2d_op(prev_node, cur_ctx)
             return h2d_ops[prev_node]
 
         def add_d2h(prev_node):
-            from .EmbeddingLookUp import EmbeddingLookUp_Gradient
             if prev_node not in d2h_ops:
-                if isinstance(prev_node, EmbeddingLookUp_Gradient):
+                if isinstance(prev_node, (EmbeddingLookUp_Gradient, SparseSumOp)):
                     d2h_ops[prev_node] = datad2h_sparse_op(prev_node)
                 else:
                     d2h_ops[prev_node] = datad2h_op(prev_node)

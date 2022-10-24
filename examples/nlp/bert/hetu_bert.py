@@ -54,16 +54,22 @@ Bert
 '''
 BertEmbeddings:
 --------------------------------------------------------------------------------------------------'''
+
+
 class BertEmbeddings(object):
     """Construct the embeddings from word, position and token_type embeddings.
     """
+
     def __init__(self, config):
         self.seq_len = config.max_position_embeddings
         self.batch_size = config.batch_size
 
-        self.word_embeddings = Embedding(config.vocab_size, config.hidden_size, "word_embeddings")
-        self.position_embeddings = Embedding(config.max_position_embeddings, config.hidden_size, 'position_embeddings')
-        self.token_type_embeddings = Embedding(config.type_vocab_size, config.hidden_size, 'token_type_embeddings')
+        self.word_embeddings = Embedding(
+            config.vocab_size, config.hidden_size, "word_embeddings")
+        self.position_embeddings = Embedding(
+            config.max_position_embeddings, config.hidden_size, 'position_embeddings')
+        self.token_type_embeddings = Embedding(
+            config.type_vocab_size, config.hidden_size, 'token_type_embeddings')
 
         self.LayerNorm = BertLayerNorm(config.hidden_size, eps=1e-12)
         self.dropout = Dropout(config.hidden_dropout_prob)
@@ -77,10 +83,10 @@ class BertEmbeddings(object):
         outputs:
             embeddings: [batch_size, seq_len, hidden_size]
         '''
-        seq_length= self.seq_len
+        seq_length = self.seq_len
         batch_size = self.batch_size
-        position_ids = ht.Variable('position_ids', value=np.arange(seq_length).reshape((1,-1)).repeat(batch_size,axis=0), dtype=np.long, trainable=False, ctx=input_ids.ctx)
-
+        position_ids = ht.Variable('position_ids', value=np.arange(seq_length).reshape(
+            (1, -1)).repeat(batch_size, axis=0), dtype=np.long, trainable=False, ctx=input_ids.ctx)
 
         '''Embedding Size
         inputs_id:[batch_size, seq_len], embedding_table:[vocab_size, hidden_size] 
@@ -97,16 +103,21 @@ class BertEmbeddings(object):
         embeddings = self.LayerNorm(embeddings)
         embeddings = self.dropout(embeddings)
         return embeddings
+
+
 '''-----------------------------------------------------------------------------------------------'''
 
 
 '''
 BertEncoder & BertLayer:
 --------------------------------------------------------------------------------------------------'''
+
+
 class BertEncoder(object):
     def __init__(self, config):
         self.output_hidden_states = config.output_hidden_states
-        self.layer = [BertLayer(config) for _ in range(config.num_hidden_layers)]
+        self.layer = [BertLayer(config)
+                      for _ in range(config.num_hidden_layers)]
 
     def __call__(self, hidden_states, attention_mask=None):
         '''
@@ -121,6 +132,7 @@ class BertEncoder(object):
         for i, layer_module in enumerate(self.layer):
             hidden_states = layer_module(hidden_states, attention_mask)
         return hidden_states  # last-layer hidden state
+
 
 class BertLayer(object):
     def __init__(self, config):
@@ -140,12 +152,16 @@ class BertLayer(object):
         intermediate_output = self.intermediate(attention_output)
         layer_output = self.output(intermediate_output, attention_output)
         return layer_output
+
+
 '''-----------------------------------------------------------------------------------------------'''
 
 
 '''
 BertAttention & BertSelfAttention & BertSelfOutput
 --------------------------------------------------------------------------------------------------'''
+
+
 class BertAttention(object):
     def __init__(self, config):
         self.self = BertSelfAttention(config)
@@ -163,6 +179,7 @@ class BertAttention(object):
         attention_output = self.output(self_output, input_tensor)
         return attention_output
 
+
 class BertSelfAttention(object):
     def __init__(self, config):
         if config.hidden_size % config.num_attention_heads != 0:
@@ -170,16 +187,21 @@ class BertSelfAttention(object):
                 "The hidden size (%d) is not a multiple of the number of attention "
                 "heads (%d)" % (config.hidden_size, config.num_attention_heads))
         self.num_attention_heads = config.num_attention_heads
-        self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
-        self.all_head_size = self.num_attention_heads * self.attention_head_size #all_head_size == hidden_size
+        self.attention_head_size = int(
+            config.hidden_size / config.num_attention_heads)
+        self.all_head_size = self.num_attention_heads * \
+            self.attention_head_size  # all_head_size == hidden_size
         self.hidden_size = config.hidden_size
         self.seq_len = config.max_position_embeddings
         self.batch_size = config.batch_size
 
         linear_input_shape = [self.batch_size, self.seq_len, self.hidden_size]
-        self.query = Linear(config.hidden_size, self.all_head_size, input_shape=linear_input_shape)
-        self.key = Linear(config.hidden_size, self.all_head_size, input_shape=linear_input_shape)
-        self.value = Linear(config.hidden_size, self.all_head_size, input_shape=linear_input_shape)
+        self.query = Linear(config.hidden_size,
+                            self.all_head_size, input_shape=linear_input_shape)
+        self.key = Linear(config.hidden_size, self.all_head_size,
+                          input_shape=linear_input_shape)
+        self.value = Linear(config.hidden_size,
+                            self.all_head_size, input_shape=linear_input_shape)
 
         self.dropout = Dropout(config.attention_probs_dropout_prob)
 
@@ -205,21 +227,31 @@ class BertSelfAttention(object):
         '''
 
         # linear transformation
-        mixed_query_layer = self.query(hidden_states) # [batch_size, seq_len, hidden_size]
-        mixed_key_layer = self.key(hidden_states) # [batch_size, seq_len, hidden_size]
-        mixed_value_layer = self.value(hidden_states) # [batch_size, seq_len, hidden_size]
+        # [batch_size, seq_len, hidden_size]
+        mixed_query_layer = self.query(hidden_states)
+        # [batch_size, seq_len, hidden_size]
+        mixed_key_layer = self.key(hidden_states)
+        # [batch_size, seq_len, hidden_size]
+        mixed_value_layer = self.value(hidden_states)
 
         # transpose
-        query_layer = self.transpose_for_scores(mixed_query_layer) # [batch_size, num_heads, seq_len, head_size]
-        key_layer = self.transpose_key_for_scores(mixed_key_layer) # [batch_size, num_heads, head_size, seq_len]
-        value_layer = self.transpose_for_scores(mixed_value_layer) # [batch_size, num_heads, seq_len, head_size]
+        # [batch_size, num_heads, seq_len, head_size]
+        query_layer = self.transpose_for_scores(mixed_query_layer)
+        # [batch_size, num_heads, head_size, seq_len]
+        key_layer = self.transpose_key_for_scores(mixed_key_layer)
+        # [batch_size, num_heads, seq_len, head_size]
+        value_layer = self.transpose_for_scores(mixed_value_layer)
 
         # score
-        key_layer_scaled = key_layer * (1.0 / np.sqrt(float(self.attention_head_size)))
-        attention_scores = ht.batch_matmul_op(query_layer, key_layer_scaled) # [batch_size, num_heads, seq_len, seq_len]
+        key_layer_scaled = key_layer * \
+            (1.0 / np.sqrt(float(self.attention_head_size)))
+        # [batch_size, num_heads, seq_len, seq_len]
+        attention_scores = ht.batch_matmul_op(query_layer, key_layer_scaled)
 
         # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
-        attention_scores = attention_scores + ht.broadcastto_op(attention_mask, attention_scores)  # [batch_size, num_heads, seq_len, seq_len]
+        # [batch_size, num_heads, seq_len, seq_len]
+        attention_scores = attention_scores + \
+            ht.broadcastto_op(attention_mask, attention_scores)
 
         # Normalize the attention scores to probabilities.
         attention_probs = ht.softmax_op(attention_scores)
@@ -228,15 +260,22 @@ class BertSelfAttention(object):
         # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = self.dropout(attention_probs)
 
-        context_layer = ht.batch_matmul_op(attention_probs, value_layer) # [batch_size, num_heads, seq_len, head_size]
-        context_layer = ht.transpose_op(context_layer, [0, 2, 1, 3]) # [batch_size, seq_len, num_heads, head_size]
-        context_layer = ht.array_reshape_op(context_layer, [-1, self.seq_len, self.all_head_size]) # [batch_size, seq_len, hidden_size]
+        # [batch_size, num_heads, seq_len, head_size]
+        context_layer = ht.batch_matmul_op(attention_probs, value_layer)
+        # [batch_size, seq_len, num_heads, head_size]
+        context_layer = ht.transpose_op(context_layer, [0, 2, 1, 3])
+        # [batch_size, seq_len, hidden_size]
+        context_layer = ht.array_reshape_op(
+            context_layer, [-1, self.seq_len, self.all_head_size])
         return context_layer
+
 
 class BertSelfOutput(object):
     def __init__(self, config):
-        linear_input_shape = [config.batch_size, config.max_position_embeddings, config.hidden_size]
-        self.dense = Linear(config.hidden_size, config.hidden_size, input_shape=linear_input_shape)
+        linear_input_shape = [config.batch_size,
+                              config.max_position_embeddings, config.hidden_size]
+        self.dense = Linear(config.hidden_size,
+                            config.hidden_size, input_shape=linear_input_shape)
         self.LayerNorm = BertLayerNorm(config.hidden_size, eps=1e-12)
         self.dropout = Dropout(config.hidden_dropout_prob)
 
@@ -252,20 +291,26 @@ class BertSelfOutput(object):
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
         return hidden_states
+
+
 '''-----------------------------------------------------------------------------------------------'''
 
 
 '''
 BertIntermediate & BertOutput （2-layer FeedForward)
 --------------------------------------------------------------------------------------------------'''
+
+
 class BertIntermediate(object):
     def __init__(self, config):
         if config.hidden_act == "relu":
             self.intermediate_act_fn = ht.relu_op
         elif config.hidden_act == "gelu":
             self.intermediate_act_fn = ht.gelu_op
-        linear_input_shape = [config.batch_size, config.max_position_embeddings, config.hidden_size]
-        self.dense = Linear(config.hidden_size, config.intermediate_size, activation = self.intermediate_act_fn, input_shape=linear_input_shape)
+        linear_input_shape = [config.batch_size,
+                              config.max_position_embeddings, config.hidden_size]
+        self.dense = Linear(config.hidden_size, config.intermediate_size,
+                            activation=self.intermediate_act_fn, input_shape=linear_input_shape)
 
     def __call__(self, hidden_states):
         '''
@@ -277,10 +322,13 @@ class BertIntermediate(object):
         hidden_states = self.dense(hidden_states)
         return hidden_states
 
+
 class BertOutput(object):
     def __init__(self, config):
-        linear_input_shape = [config.batch_size, config.max_position_embeddings, config.intermediate_size]
-        self.dense = Linear(config.intermediate_size, config.hidden_size, input_shape=linear_input_shape)
+        linear_input_shape = [
+            config.batch_size, config.max_position_embeddings, config.intermediate_size]
+        self.dense = Linear(config.intermediate_size,
+                            config.hidden_size, input_shape=linear_input_shape)
         self.LayerNorm = BertLayerNorm(config.hidden_size, eps=1e-12)
         self.dropout = Dropout(config.hidden_dropout_prob)
 
@@ -295,17 +343,23 @@ class BertOutput(object):
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
         return hidden_states
+
+
 '''-----------------------------------------------------------------------------------------------'''
 
 
 '''
 BertPooler
 --------------------------------------------------------------------------------------------------'''
+
+
 class BertPooler(object):
     def __init__(self, config):
-        self.dense = Linear(config.hidden_size, config.hidden_size, activation = ht.tanh_op)
+        self.dense = Linear(config.hidden_size,
+                            config.hidden_size, activation=ht.tanh_op)
         self.batch_size = config.batch_size
         self.hidden_size = config.hidden_size
+
     def __call__(self, hidden_states):
         '''
         inputs:
@@ -313,23 +367,31 @@ class BertPooler(object):
         outputs:
             pooled_output: [batch_size, hidden_size]
         '''
-        first_token_tensor = ht.slice_op(hidden_states,(0,0,0),(self.batch_size,1,self.hidden_size))
-        first_token_tensor = ht.array_reshape_op(first_token_tensor, [self.batch_size, self.hidden_size])
+        first_token_tensor = ht.slice_op(
+            hidden_states, (0, 0, 0), (self.batch_size, 1, self.hidden_size))
+        first_token_tensor = ht.array_reshape_op(
+            first_token_tensor, [self.batch_size, self.hidden_size])
         pooled_output = self.dense(first_token_tensor)
         return pooled_output
+
+
 '''-----------------------------------------------------------------------------------------------'''
 
 '''
 Bert Downstream Heads
 --------------------------------------------------------------------------------------------------'''
+
+
 class BertPredictionHeadTransform(object):
     def __init__(self, config):
         if config.hidden_act == "relu":
             self.hidden_act = ht.relu_op
         elif config.hidden_act == "gelu":
             self.hidden_act = ht.gelu_op
-        linear_input_shape = [config.batch_size, config.max_position_embeddings, config.hidden_size]
-        self.dense_act = Linear(config.hidden_size, config.hidden_size, activation=self.hidden_act, input_shape=linear_input_shape)
+        linear_input_shape = [config.batch_size,
+                              config.max_position_embeddings, config.hidden_size]
+        self.dense_act = Linear(config.hidden_size, config.hidden_size,
+                                activation=self.hidden_act, input_shape=linear_input_shape)
         self.LayerNorm = BertLayerNorm(config.hidden_size, eps=1e-12)
 
     def __call__(self, hidden_states):
@@ -343,6 +405,7 @@ class BertPredictionHeadTransform(object):
         hidden_states = self.LayerNorm(hidden_states)
         return hidden_states
 
+
 class BertLMPredictionHead(object):
     def __init__(self, config, bert_model_embedding_weights):
         '''
@@ -350,8 +413,10 @@ class BertLMPredictionHead(object):
         '''
         self.transform = BertPredictionHeadTransform(config)
 
-        linear_input_shape = [config.batch_size, config.max_position_embeddings, config.hidden_size]
-        self.decoder = Linear(config.hidden_size, config.vocab_size, bias_initializer=ht.init.zeros,input_shape=linear_input_shape)
+        linear_input_shape = [config.batch_size,
+                              config.max_position_embeddings, config.hidden_size]
+        self.decoder = Linear(config.hidden_size, config.vocab_size,
+                              bias_initializer=ht.init.zeros, input_shape=linear_input_shape)
         #self.decoder.weights = ht.transpose_op(bert_model_embedding_weights)
         self.decoder.weights = bert_model_embedding_weights
 
@@ -369,7 +434,8 @@ class BertLMPredictionHead(object):
 
 class BertOnlyMLMHead(object):
     def __init__(self, config, bert_model_embedding_weights):
-        self.predictions = BertLMPredictionHead(config, bert_model_embedding_weights)
+        self.predictions = BertLMPredictionHead(
+            config, bert_model_embedding_weights)
 
     def __call__(self, sequence_output):
         '''
@@ -399,7 +465,8 @@ class BertOnlyNSPHead(object):
 
 class BertPreTrainingHeads(object):
     def __init__(self, config, bert_model_embedding_weights):
-        self.predictions = BertLMPredictionHead(config, bert_model_embedding_weights)
+        self.predictions = BertLMPredictionHead(
+            config, bert_model_embedding_weights)
         self.seq_relationship = Linear(config.hidden_size, 2)
 
     def __call__(self, sequence_output, pooled_output):
@@ -415,12 +482,15 @@ class BertPreTrainingHeads(object):
         seq_relationship_score = self.seq_relationship(pooled_output)
         return prediction_scores, seq_relationship_score
 
+
 '''-----------------------------------------------------------------------------------------------'''
 
 
 '''
 BertModel:
 --------------------------------------------------------------------------------------------------'''
+
+
 class BertModel(object):
     """BERT model ("Bidirectional Embedding Representations from a Transformer").
 
@@ -464,22 +534,26 @@ class BertModel(object):
     all_encoder_layers, pooled_output = model(input_ids, token_type_ids, input_mask)
     ```
     """
+
     def __init__(self, config):
         self.embeddings = BertEmbeddings(config)
         self.encoder = BertEncoder(config)
         self.pooler = BertPooler(config)
-        self.batch_size=config.batch_size
-        self.seq_len=config.max_position_embeddings
+        self.batch_size = config.batch_size
+        self.seq_len = config.max_position_embeddings
 
     def __call__(self, input_ids, token_type_ids, attention_mask):
-        extended_attention_mask = ht.array_reshape_op(attention_mask, [self.batch_size, 1, 1, self.seq_len])
+        extended_attention_mask = ht.array_reshape_op(
+            attention_mask, [self.batch_size, 1, 1, self.seq_len])
         extended_attention_mask = (extended_attention_mask+(-1.0)) * 10000.0
 
         embedding_output = self.embeddings(input_ids, token_type_ids)
-        sequence_output = self.encoder(embedding_output, extended_attention_mask)
+        sequence_output = self.encoder(
+            embedding_output, extended_attention_mask)
         pooled_output = self.pooler(sequence_output)
 
         return sequence_output, pooled_output
+
 
 '''-----------------------------------------------------------------------------------------------'''
 
@@ -487,6 +561,8 @@ class BertModel(object):
 '''
 BertForPreTraining:
 --------------------------------------------------------------------------------------------------'''
+
+
 class BertForPreTraining(object):
     """BERT model with pre-training heads.
     This module comprises the BERT model followed by the two pre-training heads:
@@ -540,13 +616,19 @@ class BertForPreTraining(object):
 
     def __init__(self, config):
         self.bert = BertModel(config)
-        self.cls = BertPreTrainingHeads(config, self.bert.embeddings.word_embeddings.weight)
+        index_all = ht.Variable('index_all', value=np.arange(
+            config.vocab_size), dtype=np.long, trainable=False)
+        self.cls = BertPreTrainingHeads(
+            config, self.bert.embeddings.word_embeddings(index_all))
+        # self.cls = BertPreTrainingHeads(config, self.bert.embeddings.word_embeddings.weight)
 
-        self.vocab_size=config.vocab_size
+        self.vocab_size = config.vocab_size
 
     def __call__(self, input_ids, token_type_ids, attention_mask, masked_lm_labels=None, next_sentence_label=None):
-        sequence_output, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
-        prediction_scores, seq_relationship_score = self.cls(sequence_output, pooled_output)
+        sequence_output, pooled_output = self.bert(
+            input_ids, token_type_ids, attention_mask)
+        prediction_scores, seq_relationship_score = self.cls(
+            sequence_output, pooled_output)
 
         return_op = [prediction_scores, seq_relationship_score]
         if masked_lm_labels is not None and next_sentence_label is not None:
@@ -562,8 +644,10 @@ class BertForPreTraining(object):
 
             # masked_lm_loss = ht.softmaxcrossentropy_sparse_op(prediction_scores, masked_lm_labels, ignored_index=-1)
             # next_sentence_loss = ht.softmaxcrossentropy_sparse_op(seq_relationship_score, next_sentence_label, ignored_index=-1)
-            masked_lm_loss = ht.crossentropy_sparse_op(ht.softmax_op(prediction_scores), masked_lm_labels, ignored_index=-1)
-            next_sentence_loss = ht.crossentropy_sparse_op(ht.softmax_op(seq_relationship_score), next_sentence_label,ignored_index=-1)
+            masked_lm_loss = ht.crossentropy_sparse_op(ht.softmax_op(
+                prediction_scores), masked_lm_labels, ignored_index=-1)
+            next_sentence_loss = ht.crossentropy_sparse_op(ht.softmax_op(
+                seq_relationship_score), next_sentence_label, ignored_index=-1)
 
             return_op += [masked_lm_loss, next_sentence_loss]
         return return_op
@@ -611,13 +695,16 @@ class BertForMaskedLM(object):
     masked_lm_logits_scores = model(input_ids, token_type_ids, input_mask)
     ```
     """
+
     def __init__(self, config):
         self.bert = BertModel(config)
-        self.cls = BertOnlyMLMHead(config, self.bert.embeddings.word_embeddings.weight)
-        self.vocab_size=config.vocab_size
+        self.cls = BertOnlyMLMHead(
+            config, self.bert.embeddings.word_embeddings.weight)
+        self.vocab_size = config.vocab_size
 
     def __call__(self, input_ids, token_type_ids=None, attention_mask=None, masked_lm_labels=None):
-        sequence_output, _ = self.bert(input_ids, token_type_ids, attention_mask)
+        sequence_output, _ = self.bert(
+            input_ids, token_type_ids, attention_mask)
         prediction_scores = self.cls(sequence_output)
 
         return_op = [prediction_scores]
@@ -629,7 +716,8 @@ class BertForMaskedLM(object):
             masked_lm_loss: [batch_size*seq_len]
             '''
             # masked_lm_loss = ht.softmaxcrossentropy_sparse_op(prediction_scores, masked_lm_labels, ignored_index=-1)
-            masked_lm_loss = ht.crossentropy_sparse_op(ht.softmax_op(prediction_scores), masked_lm_labels, ignored_index=-1)
+            masked_lm_loss = ht.crossentropy_sparse_op(ht.softmax_op(
+                prediction_scores), masked_lm_labels, ignored_index=-1)
             return_op += [masked_lm_loss]
 
         return return_op
@@ -678,6 +766,7 @@ class BertForNextSentencePrediction(object):
     seq_relationship_logits = model(input_ids, token_type_ids, input_mask)
     ```
     """
+
     def __init__(self, config):
         self.bert = BertModel(config)
         self.cls = BertOnlyNSPHead(config)
@@ -695,10 +784,12 @@ class BertForNextSentencePrediction(object):
             next_sentence_loss: [batch_size]
             '''
             # next_sentence_loss = ht.softmaxcrossentropy_sparse_op(seq_relationship_score, next_sentence_label, ignored_index=-1)
-            next_sentence_loss = ht.crossentropy_sparse_op(ht.softmax_op(seq_relationship_score), next_sentence_label,ignored_index=-1)
+            next_sentence_loss = ht.crossentropy_sparse_op(ht.softmax_op(
+                seq_relationship_score), next_sentence_label, ignored_index=-1)
             return_op += [next_sentence_loss]
 
         return return_op
+
 
 '''-----------------------------------------------------------------------------------------------'''
 
@@ -706,6 +797,8 @@ class BertForNextSentencePrediction(object):
 '''
 Downstream tasks:
 --------------------------------------------------------------------------------------------------'''
+
+
 class BertForSequenceClassification(object):
     """BERT model for classification.
     This module is composed of the BERT model with a linear layer on top of
@@ -751,6 +844,7 @@ class BertForSequenceClassification(object):
     logits = model(input_ids, token_type_ids, input_mask)
     ```
     """
+
     def __init__(self, config, num_labels):
         self.num_labels = num_labels
         self.bert = BertModel(config)
@@ -760,68 +854,89 @@ class BertForSequenceClassification(object):
     def __call__(self, input_ids, token_type_ids=None, attention_mask=None, labels=None):
         _, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
         pooled_output = self.dropout(pooled_output)
-        logits = self.classifier(pooled_output) # [batch_size, num_labels]
+        logits = self.classifier(pooled_output)  # [batch_size, num_labels]
 
         if labels is not None:
             # loss = ht.softmaxcrossentropy_sparse_op(logits, labels, ignored_index = -1)
-            loss = ht.crossentropy_sparse_op(ht.softmax_op(logits), labels, ignored_index=-1)
+            loss = ht.crossentropy_sparse_op(
+                ht.softmax_op(logits), labels, ignored_index=-1)
             return loss, logits
         else:
             return logits
-'''-----------------------------------------------------------------------------------------------'''
 
+
+'''-----------------------------------------------------------------------------------------------'''
 
 
 '''
 Bert Layer utils (Embedding & BerLayerNorm & Dropout & Linear)
 --------------------------------------------------------------------------------------------------'''
+
+
 class Embedding(object):
     def __init__(self, num_embeddings, embedding_dim, embedding_name=None, initializer=ht.init.xavier_normal):
-        self.weight = initializer(name=embedding_name, shape=(num_embeddings, embedding_dim))
+        self.weight = initializer(
+            name=embedding_name, shape=(num_embeddings, embedding_dim))
+
     def __call__(self, input_tensor):
         return ht.embedding_lookup_op(self.weight, input_tensor)
 
+
 class BertLayerNorm(object):
     def __init__(self, hidden_size, eps=1e-12):
-        self.eps=eps
-        self.scale = ht.init.ones(name='layer_norm_scale', shape=(hidden_size, ))
-        self.bias = ht.init.zeros(name='layer_norm_bias', shape=(hidden_size, ))
+        self.eps = eps
+        self.scale = ht.init.ones(
+            name='layer_norm_scale', shape=(hidden_size, ))
+        self.bias = ht.init.zeros(
+            name='layer_norm_bias', shape=(hidden_size, ))
+
     def __call__(self, input_tensor):
         return ht.layer_normalization_op(input_tensor, self.scale, self.bias, eps=self.eps)
+
 
 class Dropout(object):
     def __init__(self, dropout_prob=None):
         self.dropout_prob = dropout_prob
+
     def __call__(self, input_tensor):
         if self.dropout_prob is None or self.dropout_prob == 0.0:
             return input_tensor
-        output = ht.dropout_op(input_tensor, 1.0 - self.dropout_prob, recompute = True)
+        output = ht.dropout_op(input_tensor, 1.0 -
+                               self.dropout_prob, recompute=True)
         return output
+
 
 class Linear(object):
     def __init__(self, in_features, out_features, bias=True, activation=None, kernel_initializer=ht.init.xavier_normal, bias_initializer=ht.init.zeros, input_shape=None):
         self.bias_flag = bias
         self.activation = activation
         #self.weights = kernel_initializer(name='dense_weights', shape=(in_features, out_features))
-        self.weights = kernel_initializer(name='dense_weights', shape=(out_features, in_features))
+        self.weights = kernel_initializer(
+            name='dense_weights', shape=(out_features, in_features))
         if self.bias_flag:
-            self.bias = bias_initializer(name='dense_bias', shape=(out_features,))
-        self.input_shape=input_shape
+            self.bias = bias_initializer(
+                name='dense_bias', shape=(out_features,))
+        self.input_shape = input_shape
         self.in_features = in_features
         self.out_features = out_features
-        if self.input_shape is not None and self.input_shape[-1]!=in_features:
+        if self.input_shape is not None and self.input_shape[-1] != in_features:
             print("Specified in_features is not equal to input_shape[-1].")
-            assert(False)
+            assert (False)
+
     def __call__(self, input_tensor):
-        if self.input_shape is not None and len(self.input_shape)!=2:
-            input_tensor = ht.array_reshape_op(input_tensor, [-1, self.in_features])
+        if self.input_shape is not None and len(self.input_shape) != 2:
+            input_tensor = ht.array_reshape_op(
+                input_tensor, [-1, self.in_features])
         #outputs = ht.matmul_op(input_tensor, self.weights)
-        outputs = ht.matmul_op(input_tensor, self.weights, trans_B = True)
+        outputs = ht.matmul_op(input_tensor, self.weights, trans_B=True)
         if self.bias_flag:
             outputs = outputs + ht.broadcastto_op(self.bias, outputs)
         if self.activation is not None:
             outputs = self.activation(outputs)
-        if self.input_shape is not None and len(self.input_shape)!=2:
-            outputs = ht.array_reshape_op(outputs, self.input_shape[:-1]+[self.out_features])
+        if self.input_shape is not None and len(self.input_shape) != 2:
+            outputs = ht.array_reshape_op(
+                outputs, self.input_shape[:-1]+[self.out_features])
         return outputs
+
+
 '''-----------------------------------------------------------------------------------------------'''
