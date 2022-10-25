@@ -1,9 +1,10 @@
 from .concatenate import Concatenate, ConcatenateLayers
 from .conv import Conv2d
 from .dropout import DropOut
+from .embedding import Embedding
 from .identity import Identity
 from .linear import Linear
-from .normalization import BatchNorm
+from .normalization import BatchNorm, LayerNorm
 from .pooling import MaxPool2d, AvgPool2d
 from .relu import Relu
 from .reshape import Reshape

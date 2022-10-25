@@ -497,7 +497,8 @@ def sparse_array(values, indices, shape, ctx=cpu(0)):
 
 
 class IndexedSlices(object):
-    __slots__ = ["indices", "values", "dense_shape", "deduplicated", "lazy", "to_dense_flag"]
+    __slots__ = ["indices", "values", "dense_shape",
+                 "deduplicated", "lazy", "to_dense_flag"]
 
     def __init__(self, indices=None, values=None, dense_shape=None):
         self.indices = indices
@@ -573,7 +574,8 @@ class IndexedSlices(object):
         new_values = empty(new_value_shape, ctx=self.values.ctx)
         _LIB.DLGpuArraySet(new_values.handle, ctypes.c_float(
             0), stream.handle if stream else None)
-        _LIB.IndexedSlices2Dense(self.values.handle, self.indices.handle, new_values.handle, stream.handle if stream else None)
+        _LIB.IndexedSlices2Dense(self.values.handle, self.indices.handle,
+                                 new_values.handle, stream.handle if stream else None)
         self.free_deduplicate()
         self.values = new_values
         self.indices = indices_all_on_ctx
@@ -586,3 +588,15 @@ class IndexedSlices(object):
             self.indices = None
             self.values = None
             self.to_dense_flag = False
+
+    def merge(self, node):
+        assert isinstance(node, IndexedSlices)
+        if self.indices and self.values:
+            vocab_size = self.values.shape[-1]
+            new_indices = array(np.concatenate([self.indices.asnumpy(
+            ).reshape(-1), node.indices.asnumpy().reshape(-1)]), ctx=self.indices.ctx)
+            new_values = array(np.concatenate([self.values.asnumpy(
+            ).reshape(-1, vocab_size), node.values.asnumpy().reshape(-1, vocab_size)], axis=0), ctx=self.values.ctx)
+            self.update(new_indices, new_values, node.dense_shape)
+        else:
+            self.update(node.indices, node.values, node.dense_shape)
