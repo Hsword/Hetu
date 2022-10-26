@@ -162,9 +162,10 @@ The prerequisites for different modules in Hetu is listed as follows:
   Tips for preparing the prerequisites
   
   Preparing CUDA, CUDNN, CUB, NCCL(NCCl is already in conda environment):
-  1. download from https://developer.nvidia.com
-  2. install
-  3. modify paths in cmake/config.cmake if necessary
+  1. download from https://developer.nvidia.com 
+  2. download CUB from https://github.com/NVIDIA/cub/releases/tag/1.12.1
+  3. install
+  4. modify paths in cmake/config.cmake if necessary
   
   Preparing OpenMP:
   Your just need to ensure your compiler support openmp.

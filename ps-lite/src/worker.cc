@@ -148,7 +148,6 @@ void Worker::sparse_push(int node_name, const DLArray *index,
                                           -node_name);
         },
         indices, data, index_size, evt);
-    node2pushthread[node_name].wait();
 }
 
 void Worker::sd_pushpull(int node_name, const DLArray *index,

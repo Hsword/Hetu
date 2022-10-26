@@ -129,18 +129,18 @@ class ParameterServerCommunicateOp(Op):
     def forward_hook(self, config):
         # disable inplace if not lazy execution
         # previously we use array reshape lazy callback to do this, which is deprecated (not efficient)
+        self.inputs[0].inplace = False
+
+        self.ctx = self.inputs[0].ctx
+        self.on_gpu = ndarray.is_gpu_ctx(self.ctx)
+        self.on_cpu = not self.on_gpu
+
         if self.parameter.is_embed and self.on_gpu:
             self.on_cpu = True
             self.on_gpu = False
             self.ctx = cpu()
             self.inputs[0] = self.add_transfer_op(
                 self.inputs[0], self.ctx, config.h2d_ops, config.d2h_ops)
-
-        self.inputs[0].inplace = False
-
-        self.ctx = self.inputs[0].ctx
-        self.on_gpu = ndarray.is_gpu_ctx(self.ctx)
-        self.on_cpu = not self.on_gpu
 
         if self.on_gpu and self.inputs[0].event is None:
             self.inputs[0].event = stream.create_event_handle(self.ctx)
