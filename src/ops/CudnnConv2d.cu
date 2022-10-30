@@ -55,8 +55,10 @@ int CuDNN_DLGpuConv2d(const DLArrayHandle input_x, const DLArrayHandle input_f,
     CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm_v7(
         cudnn_map[dev_id], input_desc, filter_desc, conv_desc, out_desc,
         request_cnt, &return_cnt, algo_perf));
-    
-    cudaError_t err;
+
+    if (is_chunk_init(dev_id) == false)
+        chunk_init(dev_id);
+
     size_t workspace_size;
     void *work_data = nullptr;
     cudnnConvolutionFwdAlgo_t algo;
@@ -64,8 +66,8 @@ int CuDNN_DLGpuConv2d(const DLArrayHandle input_x, const DLArrayHandle input_f,
         CUDNN_CALL(cudnnGetConvolutionForwardWorkspaceSize(
             cudnn_map[dev_id], input_desc, filter_desc, conv_desc, out_desc, algo_perf[i].algo,
             &workspace_size));
-        err = cudaMalloc(&work_data, workspace_size);
-        if (err == cudaSuccess) {
+        work_data = find_chunk(workspace_size, dev_id, false);
+        if (work_data) {
             algo = algo_perf[i].algo;
             break;
         }
@@ -78,7 +80,7 @@ int CuDNN_DLGpuConv2d(const DLArrayHandle input_x, const DLArrayHandle input_f,
         filter_data, conv_desc, algo, work_data, workspace_size, &beta,
         out_desc, output_data));
 
-    cudaFree(work_data);
+    del_chunk(work_data, dev_id);
     CUDNN_CALL(cudnnDestroyTensorDescriptor(out_desc));
     CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
     CUDNN_CALL(cudnnDestroyFilterDescriptor(filter_desc));
