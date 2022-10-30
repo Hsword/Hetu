@@ -89,12 +89,6 @@ def test_linear():
     tester.test([(1, 5), (3, 1), (3,)], atol=1e-6)
 
 
-def test_conv2d_add_bias():
-    tester = HetuTester(ht.conv2d_add_bias_op, 3)
-    tester.test([(4, 3, 28, 28), (7, 3, 5, 5), (7,)], atol=1e-5)
-    tester.test([(2, 5, 13, 13), (3, 5, 3, 3), (3,)], atol=1e-5)
-
-
 test_add_const()
 test_add_elewise()
 test_broadcast_to()
@@ -103,4 +97,3 @@ test_concatenate_gradient()
 test_sum()
 test_ns_like_set()
 test_linear()
-test_conv2d_add_bias()

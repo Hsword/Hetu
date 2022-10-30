@@ -1,6 +1,5 @@
 from __future__ import absolute_import
 import numpy as np
-from torch import embedding
 from .Node import Op
 from .._base import DNNL_LIB
 from ..gpu_links import nll_loss_link, nll_loss_grad_link

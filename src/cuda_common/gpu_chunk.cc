@@ -49,14 +49,20 @@ void del_chunk(void *ptr, size_t dev_id) {
     free_chunk_set[dev_id].insert(Chunk(ptr, all_malloced_chunk[dev_id][ptr]));
 }
 
-void *find_chunk(size_t _chunk_size, size_t dev_id) {
+void *find_chunk(size_t _chunk_size, size_t dev_id, bool debug) {
     std::multiset<Chunk>::iterator it;
     it = free_chunk_set[dev_id].lower_bound(Chunk(NULL, _chunk_size));
     if ((it == free_chunk_set[dev_id].end())
         || (it->chunk_size != _chunk_size)) {
         void *work_data = NULL;
         cudaSetDevice(dev_id);
-        DebugCudaMalloc(cudaMalloc(&work_data, _chunk_size));
+        if (debug)
+            DebugCudaMalloc(cudaMalloc(&work_data, _chunk_size));
+        else {
+            cudaError_t err = cudaMalloc(&work_data, _chunk_size);
+            if (err != cudaSuccess)
+                return NULL;
+        }
         all_malloced_chunk[dev_id].insert(
             std::pair<void *, size_t>(work_data, _chunk_size));
         return work_data;

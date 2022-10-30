@@ -129,7 +129,7 @@ extern std::map<int, std::multiset<Chunk>> free_chunk_set;
 bool is_chunk_init(size_t dev_id = 0);
 void chunk_init(size_t dev_id = 0);
 void del_chunk(void *ptr, size_t dev_id = 0);
-void *find_chunk(size_t _chunk_size, size_t dev_id = 0);
+void *find_chunk(size_t _chunk_size, size_t dev_id = 0, bool debug = true);
 
 extern std::map<size_t, bool> is_cudnn_init;
 extern std::map<size_t, cudnnHandle_t> cudnn_map;
