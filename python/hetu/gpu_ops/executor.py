@@ -5,6 +5,7 @@ import numpy as np
 from scipy.sparse import spmatrix, coo_matrix
 from .. import ndarray
 from .._base import DNNL_LIB
+from ..gpu_links import array_set
 from ..cpu_links import array_set as cpu_array_set
 from .Variable import PlaceholderOp  # add for optimizer
 from ..dataloader import DataloaderOp, GNNDataLoaderOp
@@ -781,16 +782,20 @@ class SubExecutor(object):
         if len(grouping_nodes) > 0:
             make_group()
 
-    def from_memory_pool(self, key, node):
+    def from_memory_pool(self, key, node, ctx):
+        key = (key, ctx)
         if key in self.memory_pool:
             self.node_to_arr_map[node] = self.memory_pool[key].pop()
+            if node.on_gpu and isinstance(self.node_to_arr_map[node], ndarray.NDArray):
+                array_set(self.node_to_arr_map[node], 0.0)
             if not len(self.memory_pool[key]):
                 del self.memory_pool[key]
             return True
         else:
             return False
 
-    def to_memory_pool(self, key, node):
+    def to_memory_pool(self, key, node, ctx):
+        key = (key, ctx)
         if isinstance(self.node_to_arr_map[node], ndarray.NDArray) and self.node_to_arr_map[node].no_free:
             self.node_to_arr_map[node] = None
             return
@@ -817,7 +822,7 @@ class SubExecutor(object):
                 self.node_to_arr_map[node] = None
                 return
             if isinstance(node, (EmbeddingLookUp_Gradient, DataD2HSparseOp, DataH2DSparseOp, SparseSumOp)):
-                if not self.from_memory_pool((shape, 'IndexedSlices'), node):
+                if not self.from_memory_pool((shape, 'IndexedSlices'), node, node.ctx):
                     self.node_to_arr_map[node] = ndarray.IndexedSlices(
                         dense_shape=shape)
                 return
@@ -837,11 +842,11 @@ class SubExecutor(object):
                 elif self.inference and isinstance(node, DropoutOp):
                     self.node_to_arr_map[node] = self.node_to_arr_map[node.inputs[0]]
                 else:
-                    if not self.from_memory_pool(shape, node):
+                    if not self.from_memory_pool(shape, node, node.ctx):
                         self.node_to_arr_map[node] = ndarray.empty(
                             shape, ctx=node.ctx)
             else:
-                if not self.from_memory_pool(shape, node):
+                if not self.from_memory_pool(shape, node, node.ctx):
                     self.node_to_arr_map[node] = ndarray.empty(
                         shape, ctx=node.ctx)
 
@@ -982,7 +987,7 @@ class SubExecutor(object):
             if key is not None:
                 if isinstance(node, (EmbeddingLookUp_Gradient, DataD2HSparseOp, DataH2DSparseOp, SparseSumOp)):
                     key = (key, 'IndexedSlices')
-                self.to_memory_pool(key, node)
+                self.to_memory_pool(key, node, node.ctx)
             else:
                 del self.node_to_arr_map[node]
 
