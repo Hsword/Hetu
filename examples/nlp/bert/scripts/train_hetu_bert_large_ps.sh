@@ -1,7 +1,7 @@
 #!/bin/bash
 
 heturun -s 1 -w 4 python train_hetu_bert_ps.py \
---train_batch_size 4 \
+--train_batch_size 32 \
 --dataset wikicorpus_en \
 --vocab_size 30522 \
 --hidden_size 1024 \
