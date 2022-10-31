@@ -786,7 +786,7 @@ class SubExecutor(object):
         key = (key, ctx)
         if key in self.memory_pool:
             self.node_to_arr_map[node] = self.memory_pool[key].pop()
-            if isinstance(self.node_to_arr_map[node], ndarray.NDArray):
+            if node.on_gpu and isinstance(self.node_to_arr_map[node], ndarray.NDArray):
                 array_set(self.node_to_arr_map[node], 0.0)
             if not len(self.memory_pool[key]):
                 del self.memory_pool[key]
