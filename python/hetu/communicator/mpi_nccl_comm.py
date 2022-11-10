@@ -52,7 +52,7 @@ class ncclRedOp_t(Enum):
     ncclProd = 1
     ncclMax = 2
     ncclMin = 3
-    ncclAvg = 4 # only avaiable if nccl>=2.10
+    ncclAvg = 4  # only avaiable if nccl>=2.10
 
 
 class ncclUniqueId(Structure):
@@ -85,6 +85,7 @@ class MPI_Communicator(object):
         self.device_id.value = self.getDeviceFromLocalRank(
             self.localRank.value)
         self.getGlobalDevice()
+        self.hostname = socket.gethostname()
 
     @property
     def dev_id(self):
@@ -136,7 +137,7 @@ class MPI_Communicator(object):
         # hash
         result = 5381
         for c in hostname:
-            result = result * 33 + ord(c)
+            result = (result * 33 + ord(c)) % 1000003
         rank = 0
         while rank < self.nrank and (result != self.hostHashs[rank] or device_id != self.hostDevices[rank]):
             rank += 1
@@ -187,6 +188,7 @@ class NCCL_Communicator():
         if devices_context is None:
             self.ncclGetUniqueId()
             self.ncclCommInitRank()
+            self.group_list = None
         elif isinstance(devices_context, tuple):
             # add for preduce case
             global_rank = self.rank
@@ -194,11 +196,13 @@ class NCCL_Communicator():
             nrank = len(devices_context)
             self.nRanks = c_int32(nrank)
             self.myRank = c_int32(rank)
-            self.localRank = c_int32(rank) # we don't need to know about local rank in partial reduce
+            # we don't need to know about local rank in partial reduce
+            self.localRank = c_int32(rank)
             tag = hash(devices_context) % 10000007
             self.ncclGetGroupUniqueId(
-                    (c_int32 * nrank)(*devices_context), c_int32(global_rank), self.nRanks, c_int32(tag))
+                (c_int32 * nrank)(*devices_context), c_int32(global_rank), self.nRanks, c_int32(tag))
             self.ncclCommInitRank()
+            self.group_list = list(devices_context)
         else:
             assert isinstance(
                 devices_context, DeviceGroup), "Devices context should be a DeviceGroup."
@@ -206,6 +210,7 @@ class NCCL_Communicator():
             if len(set(group_list)) != len(group_list):
                 print("Warning: Repeated ranks are found in the group.")
                 group_list = list(set(group_list))
+            self.group_list = group_list
 
             # the group_list here is as list of ndarray.(Remote)DLContext
             global_rank = self.rank
@@ -264,8 +269,11 @@ class NCCL_Communicator():
         self.device_id.value = device_id
         lib_mpi_nccl.setDevice(self.device_id.value)
 
-    def getRankFromDevice(self, hostname, device_id):
-        return self.mpi_communicator.getRankFromDevice(hostname, device_id)
+    def getRankFromDevice(self, ctx):
+        if self.group_list is None:
+            return self.mpi_communicator.getRankFromDevice(ctx.hostname, ctx.device_id)
+        else:
+            return self.group_list.index(ctx)
 
     def ncclGetUniqueId(self, senderRank=0):
         lib_mpi_nccl.getNcclUniqueId(ctypes.byref(
@@ -299,6 +307,10 @@ class NCCL_Communicator():
     def dlarrayAllGather(self, input_arr, output_arr, datatype, executor_stream=None):
         lib_mpi_nccl.dlarrayAllGather(input_arr.handle, output_arr.handle, c_int(
             datatype.value), self.ncclcomm, executor_stream.handle if executor_stream else self.stream.handle)
+
+    def dlarrayReduceScatter(self, input_arr, output_arr, datatype, reduceop, executor_stream=None):
+        lib_mpi_nccl.dlarrayReduceScatter(input_arr.handle, output_arr.handle, c_int(datatype.value), c_int(
+            reduceop.value), self.ncclcomm, executor_stream.handle if executor_stream else self.stream.handle)
 
     def dlarraySend(self, arr, datatype, target, executor_stream=None):
         lib_mpi_nccl.dlarraySend(arr.handle, c_int(datatype.value), c_int(

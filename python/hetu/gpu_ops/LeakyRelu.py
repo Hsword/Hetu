@@ -14,7 +14,10 @@ class LeakyReluOp(Op):
     def __init__(self, node_A, const_val, ctx=None):
         super().__init__(LeakyReluOp, [node_A], ctx)
         self.const_attr = const_val
-        self.desc = self.name + '(%s, %s)' % (node_A.name, str(const_val))
+
+    @property
+    def desc(self):
+        return self.name + '(%s, %s)' % (self.inputs[0].name, str(self.const_attr))
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
@@ -35,8 +38,12 @@ class LeakyReluGradientOp(Op):
     def __init__(self, node_A, node_B, const_val, ctx=None):
         super().__init__(LeakyReluGradientOp, [node_A, node_B], ctx)
         self.const_attr = const_val
-        self.desc = self.name + \
-            '(%s, %s, %s)' % (node_A.name, node_B.name, str(const_val))
+
+    @property
+    def desc(self):
+        return self.name + \
+            '(%s, %s, %s)' % (self.inputs[0].name,
+                              self.inputs[1].name, str(self.const_attr))
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:

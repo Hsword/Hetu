@@ -10,6 +10,7 @@ __global__ void add_l2_regularization_sparse(const float *param,
     size_t ind = thread_ind / length;
     size_t offset = thread_ind % length;
     int grad_ind = indices_data[ind];
+    if (grad_ind < 0) return;
     const float cur_grad = grad_data[thread_ind];
     size_t total_offset = length * grad_ind + offset;
     const float *param_ptr = param + total_offset;
@@ -59,6 +60,7 @@ __global__ void sgd_sparse_update(const float *grad_data,
     size_t index = thread_ind / length;
     size_t offset = thread_ind % length;
     int id = indices_data[index];
+    if (id < 0) return;
     const float cur_grad = grad_data[thread_ind];
     float *param_ptr = param_data + length * id + offset;
     atomicAdd(param_ptr, -lr * cur_grad);
@@ -109,6 +111,7 @@ __global__ void nesterov_sparse_first_phase(float *param_data,
     size_t ind = thread_ind / length;
     size_t offset = thread_ind % length;
     int grad_ind = indices_data[ind];
+    if (grad_ind < 0) return;
     const float cur_grad = grad_data[thread_ind];
     size_t total_offset = length * grad_ind + offset;
     float *veloc_ptr = veloc_data + total_offset;
@@ -139,6 +142,7 @@ __global__ void momentum_sparse_first_phase(float *veloc_data,
     size_t ind = thread_ind / length;
     size_t offset = thread_ind % length;
     int grad_ind = indices_data[ind];
+    if (grad_ind < 0) return;
     const float cur_grad = grad_data[thread_ind];
     float *veloc_ptr = veloc_data + length * grad_ind + offset;
     atomicAdd(veloc_ptr, -lr * cur_grad);
@@ -240,6 +244,7 @@ __global__ void indexedslices2dense_kernel(const float *values_data,
     size_t ind = thread_ind / length;
     size_t offset = thread_ind % length;
     int to_ind = indices_data[ind];
+    if (to_ind < 0) return;
     const float cur_value = values_data[thread_ind];
     float *new_value_ptr = new_values_data + length * to_ind + offset;
     *new_value_ptr = cur_value;
@@ -339,6 +344,7 @@ __global__ void adagrad_sparse_update(float *param_data, const float *grad_data,
     size_t offset = thread_ind % length;
 
     int grad_ind = indices_data[ind];
+    if (grad_ind < 0) return;
     const float cur_grad = grad_data[thread_ind];
     size_t total_offset = length * grad_ind + offset;
     float *acc_ptr = acc_data + total_offset;
@@ -400,6 +406,7 @@ __global__ void adam_sparse_update(float *param, const float *grad_data,
     size_t offset = thread_ind % length;
 
     int grad_ind = indices_data[ind];
+    if (grad_ind < 0) return;
     const float cur_grad = grad_data[thread_ind];
     size_t total_offset = length * grad_ind + offset;
     float *m_ptr = m + total_offset;
@@ -466,6 +473,7 @@ __global__ void adamw_sparse_update(float *param, const float *grad_data,
     size_t offset = thread_ind % length;
 
     int grad_ind = indices_data[ind];
+    if (grad_ind < 0) return;
     const float cur_grad = grad_data[thread_ind];
     size_t total_offset = length * grad_ind + offset;
     float *m_ptr = m + total_offset;
@@ -531,6 +539,7 @@ __global__ void get_indexed_params(float *indexed_param, const float *param,
     size_t offset = thread_ind % length;
 
     int grad_ind = indices_data[ind];
+    if (grad_ind < 0) return;
     size_t total_offset = length * grad_ind + offset;
     const float *param_ptr = param + total_offset;
     indexed_param[thread_ind] = *(param_ptr);
@@ -548,6 +557,7 @@ __global__ void calc_lamb_update_sparse(float *update, const float *grad_data,
     size_t offset = thread_ind % length;
 
     int grad_ind = indices_data[ind];
+    if (grad_ind < 0) return;
     const float cur_grad = grad_data[thread_ind];
     size_t total_offset = length * grad_ind + offset;
     float *m_ptr = m + total_offset;
@@ -572,6 +582,7 @@ __global__ void lamb_update_step_sparse(float *param, const float *update, const
     size_t offset = thread_ind % length;
 
     int grad_ind = indices_data[ind];
+    if (grad_ind < 0) return;
     const float cur_update = update[thread_ind];
     size_t total_offset = length * grad_ind + offset;
     float *param_ptr = param + total_offset;

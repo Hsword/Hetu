@@ -9,6 +9,7 @@ from .pooling import MaxPool2d, AvgPool2d
 from .relu import Relu
 from .reshape import Reshape
 from .sequence import Sequence
+from .slice import Slice
 from .sum import SumLayers
 from .TopGate import TopKGate
 from .BalanceGate import BalanceAssignmentGate

@@ -44,6 +44,9 @@ if(${HETU_COMPILE_GPU})
     endif()
     find_package(CUDAToolkit REQUIRED)
     enable_language(CUDA)
+    if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_LESS "10.1")
+        message(FATAL_ERROR "Required CUDA version >= 10.1, while current CUDA version is ${CMAKE_CUDA_COMPILER_VERSION}")
+    endif()
 endif()
 
 include(FetchContent) # download third_party

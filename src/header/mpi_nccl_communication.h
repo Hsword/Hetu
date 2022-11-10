@@ -64,6 +64,9 @@ void dlarrayBroadcast(DLArray *input_array, DLArray *output_array, int datatype,
                       int root, ncclComm_t comm, DLStreamHandle stream_handle);
 void dlarrayAllGather(DLArray *array, DLArray *output_array, int datatype,
                       ncclComm_t comm, DLStreamHandle stream_handle);
+void dlarrayReduceScatter(DLArray *array, DLArray *output_array, int datatype,
+                          int op, ncclComm_t comm,
+                          DLStreamHandle stream_handle);
 void dlarraySend(DLArray *array, int datatype, int target, ncclComm_t comm,
                  DLStreamHandle stream_handle);
 void dlarrayRecv(DLArray *array, int datatype, int src, ncclComm_t comm,

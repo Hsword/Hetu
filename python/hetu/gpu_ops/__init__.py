@@ -82,7 +82,11 @@ from .ReduceMean import reduce_mean_op
 from .OneHot import one_hot_op
 from .Linear import linear_op
 from .Conv2dAddBias import conv2d_add_bias_op
-from .AllReduceCommunicate import allreduceCommunicate_op, groupallreduceCommunicate_op
+from .AllReduceCommunicate import allreduceCommunicate_op, groupallreduceCommunicate_op, allreduceCommunicatep2p_op
+from .AllGatherCommunicate import allgatherCommunicate_op
+from .ReduceScatterCommunicate import reducescatterCommunicate_op
+from .BroadcastCommunicate import broadcastCommunicate_op
+from .ReduceCommunicate import reduceCommunicate_op
 from .ParameterServerCommunicate import parameterServerCommunicate_op, parameterServerSparsePull_op
 from .DataTransfer import datah2d_op, datad2h_op
 from .MatrixDot import matrix_dot_op
@@ -249,6 +253,11 @@ __all__ = [
     'linear_op',
     'conv2d_add_bias_op',
     'allreduceCommunicate_op',
+    'allreduceCommunicatep2p_op',
+    'allgatherCommunicate_op',
+    'reducescatterCommunicate_op',
+    'broadcastCommunicate_op',
+    'reduceCommunicate_op',
     'parameterServerCommunicate_op',
     'datah2d_op',
     'datad2h_op',

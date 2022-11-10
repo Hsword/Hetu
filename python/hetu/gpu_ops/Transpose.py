@@ -61,7 +61,7 @@ class TransposeOp(Op):
                 out_stride *= res_shape[i]
             self.gpu_buffer = ndarray.array(
                 buffer, self.ctx, data_type=np.uintc)
-        return res_shape
+        return tuple(res_shape)
 
     def naive_infer_shape(self, input_shapes):
         assert len(input_shapes) == 1
@@ -76,7 +76,7 @@ class TransposeOp(Op):
                 self.perm) == set(range(len(self.perm)))
             res_shape = [ori_shape[self.perm[i]]
                          for i in range(len(ori_shape))]
-        return res_shape
+        return tuple(res_shape)
 
 
 def transpose_op(node_A, perm=None, ctx=None):

@@ -18,21 +18,21 @@ class Conv2d(BaseLayer):
         self.out_channels = out_channels
         self.stride = stride
         self.padding = padding
-        self.initializer = initializer
         self.bias = bias
         self.activation = activation
         self.name = name
+        self.weight_var = initializer(shape=(
+            self.out_channels, self.in_channels, self.height, self.width), name=self.name+'_weight')
+        if self.bias:
+            self.bias_var = ht.init.zeros(
+                shape=(self.out_channels,), name=self.name+'_bias')
 
     def __call__(self, x):
-        weight_var = self.initializer(shape=(self.out_channels, self.in_channels, self.height, self.width),
-                                      name=self.name+'_weight')
         if self.bias:
-            bias_var = ht.init.zeros(
-                shape=(self.out_channels,), name=self.name+'_bias')
             x = ht.conv2d_add_bias_op(
-                x, weight_var, bias_var, stride=self.stride, padding=self.padding)
+                x, self.weight_var, self.bias_var, stride=self.stride, padding=self.padding)
         else:
-            x = ht.conv2d_op(x, weight_var, stride=self.stride,
+            x = ht.conv2d_op(x, self.weight_var, stride=self.stride,
                              padding=self.padding)
         if self.activation is not None:
             x = self.activation(x)

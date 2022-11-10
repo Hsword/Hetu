@@ -21,9 +21,9 @@ class LayerNorm(BaseLayer):
         self.name = name
         self.eps = eps
         self.scale_var = ht.init.ones(
-            shape=(self.num_channels, ), name=self.name+'.weight')
+            shape=(self.num_channels, ), name=self.name+'_weight')
         self.bias_var = ht.init.zeros(
-            shape=(self.num_channels, ), name=self.name+'.bias')
+            shape=(self.num_channels, ), name=self.name+'_bias')
 
     def __call__(self, x):
         return ht.layer_normalization_op(x, self.scale_var, self.bias_var, eps=self.eps)

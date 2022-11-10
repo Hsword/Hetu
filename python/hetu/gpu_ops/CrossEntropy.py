@@ -28,22 +28,6 @@ class CrossEntropyOp(Op):
         assert len(input_shapes[0]) >= 2
         return input_shapes[0][:-1]
 
-    def forward_deduce_states(self, input_statuses, status, deduce_order):
-        # only allow data parallel in softmax cross entropy
-        assert len(input_statuses) == len(self.inputs)
-        for nst in input_statuses:
-            if nst.valid(deduce_order):
-                nst.check_state(1, deduce_order)
-                status.copy_from(nst, deduce_order)
-
-    def backward_deduce_states(self, status, input_statuses, deduce_order):
-        # only allow data parallel in softmax cross entropy
-        assert len(input_statuses) == len(self.inputs)
-        if status.valid(deduce_order):
-            status.check_state(1, deduce_order)
-            for nst in input_statuses:
-                nst.copy_from(status, deduce_order)
-
 
 class CrossEntropyGradientOp(Op):
     def __init__(self, node_grad, node_y, node_y_, ctx=None):
@@ -66,22 +50,6 @@ class CrossEntropyGradientOp(Op):
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 3
         return input_shapes[1]
-
-    def forward_deduce_states(self, input_statuses, status, deduce_order):
-        # only allow data parallel in softmax cross entropy
-        assert len(input_statuses) == len(self.inputs)
-        for nst in input_statuses:
-            if nst.valid(deduce_order):
-                nst.check_state(1, deduce_order)
-                status.copy_from(nst, deduce_order)
-
-    def backward_deduce_states(self, status, input_statuses, deduce_order):
-        # only allow data parallel in softmax cross entropy
-        assert len(input_statuses) == len(self.inputs)
-        if status.valid(deduce_order):
-            status.check_state(1, deduce_order)
-            for nst in input_statuses:
-                nst.copy_from(status, deduce_order)
 
 
 def crossentropy_op(node_y, node_y_, ctx=None):

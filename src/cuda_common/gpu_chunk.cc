@@ -72,3 +72,15 @@ void *find_chunk(size_t _chunk_size, size_t dev_id, bool debug) {
         return ans;
     }
 }
+
+void clear_chunk() {
+    init_free_chunk_set.clear();
+    free_chunk_set.clear();
+    for (auto it = all_malloced_chunk.begin(); it != all_malloced_chunk.end(); ++it) {
+        CUDA_CALL(cudaSetDevice(it->first));
+        for (auto iit = it->second.begin(); iit != it->second.end(); ++iit) {
+            CUDA_CALL(cudaFree(iit->first));
+        }
+    }
+    all_malloced_chunk.clear();
+}

@@ -1,29 +1,11 @@
 #include "gpu_runtime.h"
 
-__global__ void init_mean_and_var_kernel(float *mean, float *var, size_t size) {
-    size_t id = blockIdx.x * blockDim.x + threadIdx.x;
-    if (id >= size)
-        return;
-    mean[id] = 0;
-    var[id] = 0;
-}
-
-__global__ void copy_mean_and_var_kernel(float *mean, float *var,
-                                         float *saved_mean, float *saved_var,
-                                         size_t size) {
-    size_t id = blockIdx.x * blockDim.x + threadIdx.x;
-    if (id >= size)
-        return;
-    saved_mean[id] = mean[id];
-    saved_var[id] = var[id];
-}
-
 // the shape of bn_scale/bias   1*C*1*1
 int CuDNN_DLGpuBatch_Normalization(
     const DLArrayHandle input_X, const DLArrayHandle bn_scale,
-    const DLArrayHandle bn_bias, DLArrayHandle output_Y, float momentum,
-    float eps, DLArrayHandle save_mean_arr, DLArrayHandle save_var_arr,
-    DLArrayHandle running_mean_arr, DLArrayHandle running_var_arr,
+    const DLArrayHandle bn_bias, DLArrayHandle output_Y, double momentum,
+    double eps, DLArrayHandle running_mean, DLArrayHandle running_var,
+    DLArrayHandle save_mean, DLArrayHandle save_var,
     DLStreamHandle stream_handle = NULL) {
     int dev_id = (input_X->ctx).device_id;
     cudaSetDevice(dev_id);
@@ -64,18 +46,18 @@ int CuDNN_DLGpuBatch_Normalization(
     const float *bn_scale_data = (const float *)(bn_scale->data);
     const float *bn_bias_data = (const float *)(bn_bias->data);
 
-    void *save_mean = save_mean_arr->data;
-    void *save_var = save_var_arr->data;
-    void *running_mean = running_mean_arr->data;
-    void *running_var = running_var_arr->data;
+    void *running_mean_arr = running_mean->data;
+    void *running_var_arr = running_var->data;
+    void *save_mean_arr = save_mean->data;
+    void *save_var_arr = save_var->data;
     float alpha = 1.0f;
     float beta = 0.0f;
 
     CUDNN_CALL(cudnnBatchNormalizationForwardTraining(
         cudnn_map[dev_id], CUDNN_BATCHNORM_SPATIAL, &alpha, &beta, input_desc,
         input_data, output_desc, output_data, bnScaleBiasMeanVar_desc,
-        bn_scale_data, bn_bias_data, momentum, (float *)save_mean,
-        (float *)save_var, eps, running_mean, running_var));
+        bn_scale_data, bn_bias_data, momentum, running_mean_arr,
+        running_var_arr, eps, save_mean_arr, save_var_arr));
 
     CUDNN_CALL(cudnnDestroyTensorDescriptor(input_desc));
     CUDNN_CALL(cudnnDestroyTensorDescriptor(output_desc));
@@ -87,8 +69,8 @@ int CuDNN_DLGpuBatch_Normalization(
 int CuDNN_DLGpuBatch_Normalization_gradient(
     const DLArrayHandle gradient_Y, const DLArrayHandle input_X,
     const DLArrayHandle bn_scale, DLArrayHandle gradient_X,
-    DLArrayHandle gradient_bn_scale, DLArrayHandle gradient_bn_bias, float eps,
-    DLArrayHandle running_mean_arr, DLArrayHandle running_var_arr,
+    DLArrayHandle gradient_bn_scale, DLArrayHandle gradient_bn_bias, double eps,
+    DLArrayHandle save_mean, DLArrayHandle save_var,
     DLStreamHandle stream_handle = NULL) {
     int dev_id = (input_X->ctx).device_id;
     cudnn_init(dev_id, stream_handle);
@@ -131,8 +113,8 @@ int CuDNN_DLGpuBatch_Normalization_gradient(
     // bn gradient
     float *gradient_bn_bias_data = (float *)(gradient_bn_bias->data);
     float *gradient_bn_scale_data = (float *)(gradient_bn_scale->data);
-    void *running_mean = (float *)(running_mean_arr->data);
-    void *running_var = (float *)(running_var_arr->data);
+    void *save_mean_arr = save_mean->data;
+    void *save_var_arr = save_var->data;
     float one = 1.0f;
     float zero = 0.0f;
 
@@ -140,8 +122,8 @@ int CuDNN_DLGpuBatch_Normalization_gradient(
         cudnn_map[dev_id], CUDNN_BATCHNORM_SPATIAL_PERSISTENT, &one, &zero,
         &one, &zero, input_desc, input_data, output_desc, gradient_y_data,
         input_desc, gradient_x_data, bnScaleBiasMeanVar_desc, bn_scale_data,
-        gradient_bn_scale_data, gradient_bn_bias_data, eps, running_mean,
-        running_var));
+        gradient_bn_scale_data, gradient_bn_bias_data, eps, save_mean_arr,
+        save_var_arr));
 
     CUDNN_CALL(cudnnDestroyTensorDescriptor(input_desc));
     CUDNN_CALL(cudnnDestroyTensorDescriptor(output_desc));
@@ -151,8 +133,8 @@ int CuDNN_DLGpuBatch_Normalization_gradient(
 
 int CuDNN_DLGpuBatch_Normalization_inference(
     const DLArrayHandle input_X, const DLArrayHandle bn_scale,
-    const DLArrayHandle bn_bias, DLArrayHandle output_Y, float eps,
-    DLArrayHandle save_mean_arr, DLArrayHandle save_var_arr,
+    const DLArrayHandle bn_bias, DLArrayHandle output_Y, double eps,
+    DLArrayHandle estimated_mean, DLArrayHandle estimated_var,
     DLStreamHandle stream_handle = NULL) {
     int dev_id = (input_X->ctx).device_id;
     cudaSetDevice(dev_id);
@@ -193,8 +175,8 @@ int CuDNN_DLGpuBatch_Normalization_inference(
     const float *bn_scale_data = (const float *)(bn_scale->data);
     const float *bn_bias_data = (const float *)(bn_bias->data);
 
-    const float *save_mean = (const float *)save_mean_arr->data;
-    const float *save_var = (const float *)save_var_arr->data;
+    const float *estimated_mean_arr = (const float *)estimated_mean->data;
+    const float *estimated_var_arr = (const float *)estimated_var->data;
 
     float alpha = 1.0f;
     float beta = 0.0f;
@@ -202,7 +184,8 @@ int CuDNN_DLGpuBatch_Normalization_inference(
     CUDNN_CALL(cudnnBatchNormalizationForwardInference(
         cudnn_map[dev_id], CUDNN_BATCHNORM_SPATIAL, &alpha, &beta, input_desc,
         input_data, output_desc, output_data, bnScaleBiasMeanVar_desc,
-        bn_scale_data, bn_bias_data, save_mean, save_var, eps));
+        bn_scale_data, bn_bias_data, estimated_mean_arr, estimated_var_arr,
+        eps));
 
     CUDNN_CALL(cudnnDestroyTensorDescriptor(input_desc));
     CUDNN_CALL(cudnnDestroyTensorDescriptor(output_desc));

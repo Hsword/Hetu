@@ -1,9 +1,8 @@
 from __future__ import absolute_import
 import numpy as np
 
-from hetu.gpu_links.ReduceSumLink import reduce_sum
 from .Node import Op
-from .Conv2d import conv2d_gradient_of_data_op, conv2d_gradient_of_filter_op, conv2d_forward_deduce_states, conv2d_backward_deduce_states
+from .Conv2d import conv2d_gradient_of_data_op, conv2d_gradient_of_filter_op
 from .ReduceSum import reduce_sum_op
 from ..gpu_links import CuDNN_conv2d_with_bias
 
@@ -90,30 +89,6 @@ class Conv2dAddBiasOp(Op):
         out_H = (H + 2 * padding[0] - filter_H) // stride[0] + 1
         out_W = (W + 2 * padding[1] - filter_W) // stride[1] + 1
         return (N, f_O, out_H, out_W)
-
-    def forward_deduce_states(self, input_statuses, status, deduce_order):
-        assert len(input_statuses) == len(self.inputs)
-        l2res_map = {0: 0, 1: -1, -1: 1}
-        r2res_map = {-1: 0, 0: 1, 1: -1}
-        conv2d_forward_deduce_states(
-            input_statuses, status, deduce_order, l2res_map, r2res_map)
-
-    def backward_deduce_states(self, status, input_statuses, deduce_order):
-        assert len(input_statuses) == len(self.inputs)
-        l2res_map = {0: 0, 1: -1, -1: 1}
-        r2res_map = {-1: 0, 0: 1, 1: -1}
-        conv2d_backward_deduce_states(
-            status, input_statuses, deduce_order, l2res_map, r2res_map)
-        if not deduce_order and status.valid_state():
-            state, duplicate = status.get()
-            new_state = state.copy()
-            if 0 in new_state:
-                duplicate *= new_state[0]
-            if 1 in new_state:
-                new_state[0] = new_state.pop(1)
-            else:
-                new_state = {}
-            input_statuses[2].set_state(new_state, duplicate)
 
 
 def conv2d_add_bias_op(node_A, node_B, bias, padding=0, stride=1, ctx=None):
