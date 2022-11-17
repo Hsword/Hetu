@@ -338,7 +338,15 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle input_a, const DLArrayHandle input_b,
         const DLArrayHandle input_c, DLArrayHandle output,
         DLStreamHandle stream_handle);
+    
+    int DLGpuRobeLookUp(const DLArrayHandle input, const DLArrayHandle ids,
+                             DLArrayHandle output, int len,
+                             DLStreamHandle stream_handle);
 
+    int DLGpuRobeLookUp_Gradient(
+        const DLArrayHandle output_grad, const DLArrayHandle ids,
+        DLArrayHandle input_grad, DLStreamHandle stream_handle);
+    
     int DLGpuEmbeddingLookUp(const DLArrayHandle input, const DLArrayHandle ids,
                              DLArrayHandle output,
                              DLStreamHandle stream_handle);
@@ -1098,6 +1106,9 @@ HETUSYS_EXTERN_C {
                         DLArrayHandle output, int num_local_gpus,
                         DLStreamHandle stream_handle);
 
+    int DLGpuRobeHash(const DLArrayHandle input, DLArrayHandle output,
+                     int roarsz, int Bh, int Ch, int MO, DLStreamHandle stream_handle);
+    
     int DLGpuModHash(const DLArrayHandle input, DLArrayHandle output,
                      int nembed, DLStreamHandle stream_handle);
 

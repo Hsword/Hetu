@@ -2,8 +2,31 @@ from __future__ import absolute_import
 from .Node import Op
 from .._base import DNNL_LIB
 import numpy as np
-from ..gpu_links import mod_hash, compo_hash, learn_hash
+from ..gpu_links import robe_hash, mod_hash, compo_hash, learn_hash
+from random import randrange
 
+class RobeHashOp(Op):
+    def __init__(self, node, roarsz, ctx=None):
+        super().__init__(RobeHashOp, [node], ctx)
+        self.roarsz = roarsz #roarsz means ROBE array size
+        self.Bh=623987128#randrange(998244353)
+        self.Ch=423878919#randrange(998244353)
+        self.MO=998244353
+        self.dtype = np.int32
+
+    def compute(self, input_vals, output_val, stream_handle=None):
+        if self.on_cpu:
+            output_val[:] = ( ( np.array(
+                input_vals[0].asnumpy(), dtype=np.int32) * self.Bh + self.Ch) % self.MO + self.MO) % self.MO % self.roarsz
+        else:
+            robe_hash(input_vals[0], output_val, self.roarsz, self.Bh, self.Ch, self.MO, stream_handle)
+
+    def gradient(self, output_grad):
+        return [None]
+    
+    def infer_shape(self, input_shapes):
+        assert len(input_shapes) == 1
+        return input_shapes[0]
 
 class ModHashOp(Op):
     def __init__(self, node, nembed, ctx=None):
@@ -98,6 +121,9 @@ class LearnHashOp(Op):
         output_shape = list(input_shapes[0])
         output_shape.append(input_shapes[1][0])
         return tuple(output_shape)
+
+def robe_hash_op(node, roarsz, ctx=None):
+    return RobeHashOp(node, roarsz, ctx=ctx)
 
 
 def mod_hash_op(node, nembed, ctx=None):

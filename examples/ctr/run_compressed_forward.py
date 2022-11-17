@@ -91,9 +91,14 @@ def worker(args):
 
     def run_epoch(train_batch_num, log_file=None):
         ep_st = time()
+        '''
         train_loss, train_acc, train_auc = train(
             train_batch_num, tqdm_enabled=True)
         return_vals = (train_auc,)
+        '''
+        train_loss, train_acc, train_auc = 0.0,0.0,0.0
+        return_vals = (train_auc,)
+
         ep_en = time()
         if args.val:
             val_loss, val_acc, val_auc, early_stop = validate(
@@ -220,8 +225,9 @@ def worker(args):
         eval_nodes = embed_layer.make_subexecutors(
             model, dense_input, y_, prediction, loss, opt)
     else:
-        train_op = opt.minimize(loss)
-        eval_nodes = {'train': [loss, prediction, y_, train_op]}
+        #train_op = opt.minimize(loss)
+        eval_nodes = {'train': [loss]}
+        #eval_nodes = {'train': [loss, prediction, y_, train_op]}
         if args.method == 'dpq':
             eval_nodes['train'].append(embed_layer.codebook_update)
         elif args.method == 'prune':
@@ -229,6 +235,7 @@ def worker(args):
         if args.val:
             print('Validation enabled...')
             if args.method != 'dpq':
+                #eval_nodes['validate'] = [loss]
                 eval_nodes['validate'] = [loss, prediction, y_]
             else:
                 val_embed_input = embed_layer.make_inference()
