@@ -56,7 +56,7 @@ def finetune(args):
     # opt = ht.optim.SGDOptimizer(learning_rate=lr)
     train_op = opt.minimize(loss)
 
-    executor = ht.Executor([loss, logits, train_op],ctx=executor_ctx,dynamic_memory=True)
+    executor = ht.Executor([loss, logits, train_op], ctx=executor_ctx)
 
     for ep in range(num_epochs):
         for i in range(dataloader.batch_num):

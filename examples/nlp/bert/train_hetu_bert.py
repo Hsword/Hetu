@@ -62,7 +62,7 @@ def pretrain(args):
     # opt = ht.optim.SGDOptimizer(learning_rate=lr)
     train_op = opt.minimize(loss)
 
-    executor = ht.Executor([masked_lm_loss_mean, next_sentence_loss_mean, loss, train_op],ctx=executor_ctx,dynamic_memory=True)
+    executor = ht.Executor([masked_lm_loss_mean, next_sentence_loss_mean, loss, train_op], ctx=executor_ctx)
 
     global_step_num = 0
     for ep in range(num_epochs):

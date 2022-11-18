@@ -5,7 +5,7 @@ import torch
 
 def conv2d(x, in_channel, out_channel, stride=1, padding=1, kernel_size=3, name=''):
     a = torch.nn.Conv2d(in_channel, out_channel, kernel_size, stride=stride)
-    weight = ht.Variable(name=name+'_weight', value=a.weight.detach().numpy(), ctx=ndarray.gpu(0))
+    weight = ht.Variable(name=name+'_weight', value=a.weight.detach().numpy(), ctx=x.ctx)
     # weight = init.he_normal(
     #     shape=(out_channel, in_channel, kernel_size, kernel_size), name=name+'_weight')
     x = ht.conv2d_op(x, weight, stride=stride, padding=padding)
@@ -13,15 +13,15 @@ def conv2d(x, in_channel, out_channel, stride=1, padding=1, kernel_size=3, name=
 
 
 def batch_norm_with_relu(x, hidden, name):
-    scale = init.ones(shape=(1, hidden, 1, 1), name=name+'_scale')
-    bias = init.zeros(shape=(1, hidden, 1, 1), name=name+'_bias')
+    scale = init.ones(shape=(hidden,), name=name+'_scale')
+    bias = init.zeros(shape=(hidden,), name=name+'_bias')
     x = ht.batch_normalization_op(x, scale, bias, momentum=0.9, eps=1e-5)
     x = ht.relu_op(x)
     return x
 
 def batch_norm(x, hidden, name):
-    scale = init.ones(shape=(1, hidden, 1, 1), name=name+'_scale')
-    bias = init.zeros(shape=(1, hidden, 1, 1), name=name+'_bias')
+    scale = init.ones(shape=(hidden,), name=name+'_scale')
+    bias = init.zeros(shape=(hidden,), name=name+'_bias')
     x = ht.batch_normalization_op(x, scale, bias, momentum=0.9, eps=1e-5)
     return x
 
