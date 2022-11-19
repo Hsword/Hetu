@@ -324,4 +324,4 @@ def process_avazu(path=os.path.join(os.path.split(os.path.abspath(__file__))[0],
 
 if __name__ == '__main__':
     download_criteo(os.path.join(os.path.split(
-        os.path.abspath(__file__)), '../datasets/criteo'))
+        os.path.abspath(__file__))[0], '../datasets/criteo'))
