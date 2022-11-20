@@ -7,4 +7,6 @@ class DropOut(BaseLayer):
         self.p = p
 
     def __call__(self, x):
+        if self.p == 0:
+            return x
         return ht.dropout_op(x, 1-self.p)

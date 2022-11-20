@@ -187,18 +187,20 @@ def relu_gradient(input, in_grad, output):
     _LIB.DnnlRelu_Gradient(input.handle, in_grad.handle, output.handle)
 
 
-def batch_norm(input, bn_scale, bn_bias, output, mean, var, momentum=0.99, eps=0.01):
+def batch_norm(input, bn_scale, bn_bias, output, running_mean, running_var, save_mean, save_var, momentum=0.99, eps=0.01):
     assert isinstance(input, _nd.NDArray)
     assert isinstance(bn_scale, _nd.NDArray)
     assert isinstance(bn_bias, _nd.NDArray)
     assert isinstance(output, _nd.NDArray)
-    assert isinstance(mean, _nd.NDArray)
-    assert isinstance(var, _nd.NDArray)
-    _LIB.DnnlBatchNorm(input.handle, bn_scale.handle, bn_bias.handle, output.handle,
-                       mean.handle, var.handle, ctypes.c_float(momentum), ctypes.c_float(eps))
+    assert isinstance(running_mean, _nd.NDArray)
+    assert isinstance(running_var, _nd.NDArray)
+    assert isinstance(save_mean, _nd.NDArray)
+    assert isinstance(save_var, _nd.NDArray)
+    _LIB.DnnlBatchNorm(input.handle, bn_scale.handle, bn_bias.handle, output.handle, running_mean.handle,
+                       running_var.handle, save_mean.handle, save_var.handle, ctypes.c_float(momentum), ctypes.c_float(eps))
 
 
-def batch_norm_gradient(gradient_Y, input_X, bn_scale, bn_bias, gradient_X, gradient_bn_scale, gradient_bn_bias, mean,
+def batch_norm_gradient(gradient_Y, input_X, bn_scale, gradient_X, gradient_bn_scale, gradient_bn_bias, mean,
                         var, eps=0.01):
     assert isinstance(gradient_Y, _nd.NDArray)
     assert isinstance(input_X, _nd.NDArray)
@@ -206,15 +208,14 @@ def batch_norm_gradient(gradient_Y, input_X, bn_scale, bn_bias, gradient_X, grad
     assert isinstance(gradient_bn_scale, _nd.NDArray)
     assert isinstance(gradient_bn_bias, _nd.NDArray)
     assert isinstance(bn_scale, _nd.NDArray)
-    assert isinstance(bn_bias, _nd.NDArray)
     assert isinstance(mean, _nd.NDArray)
     assert isinstance(var, _nd.NDArray)
     _LIB.DnnlBatchNorm_Gradient(gradient_Y.handle, input_X.handle, bn_scale.handle,
-                                bn_bias.handle, gradient_X.handle, gradient_bn_scale.handle,
+                                gradient_X.handle, gradient_bn_scale.handle,
                                 gradient_bn_bias.handle, mean.handle, var.handle, ctypes.c_float(eps))
 
 
-def batch_norm_inference(input, bn_scale, bn_bias, output, mean, var, momentum=0.99, eps=0.01):
+def batch_norm_inference(input, bn_scale, bn_bias, output, mean, var, eps):
     assert isinstance(input, _nd.NDArray)
     assert isinstance(bn_scale, _nd.NDArray)
     assert isinstance(bn_bias, _nd.NDArray)
@@ -222,7 +223,7 @@ def batch_norm_inference(input, bn_scale, bn_bias, output, mean, var, momentum=0
     assert isinstance(mean, _nd.NDArray)
     assert isinstance(var, _nd.NDArray)
     _LIB.DnnlBatchNorm_Inference(input.handle, bn_scale.handle, bn_bias.handle, output.handle,
-                                 mean.handle, var.handle, ctypes.c_float(momentum), ctypes.c_float(eps))
+                                 mean.handle, var.handle, ctypes.c_float(eps))
 
 
 def concat(input_x, input_y, output, axis=0):
@@ -375,6 +376,7 @@ def truncated_normal_init(param, mean, stddev, seed):
     assert isinstance(param, _nd.NDArray)
     _LIB.cpu_TruncatedNormalInit(param.handle, ctypes.c_float(
         mean), ctypes.c_float(stddev), ctypes.c_ulonglong(seed))
+
 
 def gelu(in_arr, out_arr):
     assert isinstance(in_arr, _nd.NDArray)

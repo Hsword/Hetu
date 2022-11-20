@@ -4,8 +4,8 @@ from hetu import init
 
 def conv_bn_relu(x, in_channel, out_channel, name):
     weight = init.he_normal(shape=(out_channel, in_channel, 3, 3), name=name+'_weight')
-    bn_scale = init.ones(shape=(1, out_channel, 1, 1), name=name+'_bn_scale')
-    bn_bias = init.zeros(shape=(1, out_channel, 1, 1), name=name+'_bn_bias')
+    bn_scale = init.ones(shape=(out_channel,), name=name+'_bn_scale')
+    bn_bias = init.zeros(shape=(out_channel,), name=name+'_bn_bias')
 
     x = ht.conv2d_op(x, weight, padding=1, stride=1)
     x = ht.batch_normalization_op(x, bn_scale, bn_bias)

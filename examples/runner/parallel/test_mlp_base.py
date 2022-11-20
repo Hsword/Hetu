@@ -66,6 +66,7 @@ if __name__ == "__main__":
             np.save('std/' + 'special_weight.npy', weight_save)
         weight = ht.Variable(value=weight_save, name='special_mlp_fc1_weight')
         activation = ht.matmul_op(activation, weight)
+        activation = ht.relu_op(activation)
         if args.more:
             weight_save = np.random.normal(0, 0.04, size=(2048, 2048))
             if args.save:
@@ -73,8 +74,8 @@ if __name__ == "__main__":
             weight = ht.Variable(
                 value=weight_save, name='special_mlp_fc2_weight')
             activation = ht.matmul_op(activation, weight)
+            activation = ht.relu_op(activation)
 
-        activation = ht.relu_op(activation)
         y_pred = fc(activation, (2048, 10), 'mlp_fc2', with_relu=False)
         y_ = ht.Variable(name="dataloader_y", trainable=False)
         loss = ht.softmaxcrossentropy_op(y_pred, y_)

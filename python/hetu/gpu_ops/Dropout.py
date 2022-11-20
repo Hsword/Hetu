@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from .Node import Op
 import ctypes
 import numpy as np
+from time import time
 from .._base import DNNL_LIB
 from ..cpu_links import dropout as cpu_dropout
 from ..cpu_links import dropout_gradient as cpu_dropout_gradient
@@ -22,6 +23,7 @@ class DropoutOp(Op):
 
     def compute(self, input_vals, output_val, stream_handle=None, inference=False):
         if inference == False:
+            self.seed.value = int(time())
             if self.on_cpu:
                 if DNNL_LIB['cpu_Dropout']:
                     cpu_dropout(input_vals[0], self.keep_prob, output_val)
@@ -60,6 +62,7 @@ class Dropout_Gradient_recomputeOp(Op):
         self.keep_prob = keep_prob
 
     def compute(self, input_vals, output_val, stream_handle=None):
+        self.seed = self.forward_node.seed
         if self.on_cpu:
             if DNNL_LIB['cpu_Dropout_Gradient']:
                 cpu_dropout_gradient(input_vals[0], self.keep_prob, output_val)

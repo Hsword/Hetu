@@ -79,7 +79,6 @@ int CuDNN_DLGpuConv2d(const DLArrayHandle input_x, const DLArrayHandle input_f,
         cudnn_map[dev_id], &alpha, input_desc, input_data, filter_desc,
         filter_data, conv_desc, algo, work_data, workspace_size, &beta,
         out_desc, output_data));
-
     del_chunk(work_data, dev_id);
     CUDNN_CALL(cudnnDestroyTensorDescriptor(out_desc));
     CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
@@ -215,7 +214,6 @@ int CuDNN_DLGpuConv2d_Gradient_of_Data(const DLArrayHandle input_f,
     CUDNN_CALL(cudnnSetConvolution2dDescriptor(
         conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
         CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT));
-
     // dx
     size_t dx_N = gradient_x->shape[0];
     size_t dx_C = gradient_x->shape[1];

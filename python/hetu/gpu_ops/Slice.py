@@ -12,6 +12,7 @@ class SliceOp(Op):
         self.begin_pos = tuple(begin_pos)
         self.output_shape = list(output_shape)
         self.ori_output_shape = list(output_shape)
+        self.grad_node = None
         assert len(self.begin_pos) == len(self.output_shape)
         for i in range(len(self.begin_pos)):
             assert self.begin_pos[i] >= 0
@@ -41,7 +42,7 @@ class SliceOp(Op):
             assert self.output_shape[i] > 0
             assert self.begin_pos[i] + self.output_shape[i] <= ori_shape[i]
         self.ori_shape = tuple(ori_shape)
-        if hasattr(self, 'grad_node'):
+        if self.grad_node is not None:
             self.grad_node.output_shape = self.ori_shape
             assert len(self.ori_shape) == len(self.grad_node.begin_pos)
 
@@ -55,7 +56,7 @@ class SliceOp(Op):
                 gpu_buf[2 * ndim + i] = self.output_shape[i]
             self.gpu_buffer = ndarray.array(
                 gpu_buf, self.ctx, data_type=np.uintc)
-        return self.output_shape
+        return tuple(self.output_shape)
 
     def naive_infer_shape(self, input_shapes):
         assert len(input_shapes) == 1
@@ -67,10 +68,10 @@ class SliceOp(Op):
             assert self.output_shape[i] > 0
             assert self.begin_pos[i] + self.output_shape[i] <= ori_shape[i]
         self.ori_shape = tuple(ori_shape)
-        if hasattr(self, 'grad_node'):
+        if self.grad_node is not None:
             self.grad_node.output_shape = self.ori_shape
             assert len(self.ori_shape) == len(self.grad_node.begin_pos)
-        return self.output_shape
+        return tuple(self.output_shape)
 
 
 class SliceGradientOp(Op):
@@ -117,7 +118,18 @@ class SliceGradientOp(Op):
                 gpu_buf[2 * ndim + i] = self.output_shape[i]
             self.gpu_buffer = ndarray.array(
                 gpu_buf, self.ctx, data_type=np.uintc)
-        return self.output_shape
+        return tuple(self.output_shape)
+
+    def naive_infer_shape(self, input_shapes):
+        assert self.output_shape != None
+        assert len(input_shapes) == 1
+        ori_shape = list(input_shapes[0])
+        assert len(ori_shape) == len(self.begin_pos)
+        for i in range(len(ori_shape)):
+            assert self.begin_pos[i] + ori_shape[i] <= self.output_shape[i]
+        self.ori_shape = tuple(ori_shape)
+
+        return tuple(self.output_shape)
 
 
 def slice_op(node, begin, size, ctx=None):

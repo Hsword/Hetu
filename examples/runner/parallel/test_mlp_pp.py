@@ -58,14 +58,16 @@ if __name__ == "__main__":
         weight_save = np.load('std/' + 'special_weight.npy')
         weight = ht.Variable(value=weight_save, name='special_mlp_fc1_weight')
         activation = ht.matmul_op(activation, weight)
+        activation = ht.relu_op(activation)
         if args.more:
             weight_save = np.load('std/' + 'special_weight2.npy')
             weight = ht.Variable(
                 value=weight_save, name='special_mlp_fc2_weight')
             activation = ht.matmul_op(activation, weight)
+            activation = ht.relu_op(activation)
 
     with ht.context(ht.gpu(2)):
-        activation = ht.relu_op(activation)
+        # activation = ht.relu_op(activation)
         y_pred = fc(activation, (2048, 10), 'mlp_fc2', with_relu=False)
         y_ = ht.Variable(name="dataloader_y", trainable=False)
         loss = ht.softmaxcrossentropy_op(y_pred, y_)

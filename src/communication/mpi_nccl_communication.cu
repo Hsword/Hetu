@@ -17,13 +17,14 @@ ncclDataType_t _get_proper_datatype(int datatype) {
 }
 
 #if NCCL_MINOR >= 10
-static const ncclRedOp_t TYPE2TYPE_V2[] = {ncclSum, ncclProd, ncclMax, ncclMin, ncclAvg};
+static const ncclRedOp_t TYPE2TYPE_V2[] = {ncclSum, ncclProd, ncclMax, ncclMin,
+                                           ncclAvg};
 #else
 static const ncclRedOp_t TYPE2TYPE_V2[] = {ncclSum, ncclProd, ncclMax, ncclMin};
 #endif
 
 ncclRedOp_t _get_proper_redop(int redop) {
-    assert (redop < sizeof(TYPE2TYPE_V2) / sizeof(ncclRedOp_t));
+    assert(redop < sizeof(TYPE2TYPE_V2) / sizeof(ncclRedOp_t));
     return TYPE2TYPE_V2[redop];
 }
 
@@ -55,7 +56,7 @@ uint64_t getHostHash(const char *string) {
     // Based on DJB2, result = result * 33 + char
     uint64_t result = 5381;
     for (int c = 0; string[c] != '\0'; c++) {
-        result = ((result << 5) + result) + string[c];
+        result = (((result << 5) + result) + string[c]) % 1000003;
     }
     return result;
 }
@@ -289,6 +290,14 @@ void _ncclAllGather(const void *sendbuff, void *recvbuff, int size,
                             _get_proper_datatype(datatype), comm, stream));
 }
 
+void _ncclReduceScatter(const void *sendbuff, void *recvbuff, int size,
+                        int datatype, int op, ncclComm_t comm,
+                        cudaStream_t stream) {
+    NCCLCHECK(ncclReduceScatter((const void *)sendbuff, (void *)recvbuff, size,
+                                _get_proper_datatype(datatype),
+                                _get_proper_redop(op), comm, stream));
+}
+
 void _ncclSend(const void *sendbuff, int size, int datatype, int target,
                ncclComm_t comm, cudaStream_t stream) {
     NCCLCHECK(ncclSend(sendbuff, size, _get_proper_datatype(datatype), target,
@@ -355,6 +364,20 @@ void dlarrayAllGather(DLArray *array, DLArray *output_array, int datatype,
     float *output_buffer = (float *)(output_array->data);
     cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
     _ncclAllGather(input_buffer, output_buffer, size, datatype, comm, stream);
+}
+
+void dlarrayReduceScatter(DLArray *array, DLArray *output_array, int datatype,
+                          int op, ncclComm_t comm,
+                          DLStreamHandle stream_handle) {
+    int size = 1;
+    for (int i = 0; i < output_array->ndim; i++) {
+        size = size * output_array->shape[i];
+    }
+    float *input_buffer = (float *)(array->data);
+    float *output_buffer = (float *)(output_array->data);
+    cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
+    _ncclReduceScatter(input_buffer, output_buffer, size, datatype, op, comm,
+                       stream);
 }
 
 void dlarrayAllToAll(DLArray *sendarray, DLArray *recvarray, int datatype, ncclComm_t comm,

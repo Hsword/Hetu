@@ -7,7 +7,9 @@ from ..gpu_links import reduce_sum
 class ReduceSumOp(Op):
     def __init__(self, node_A, axes, keepdims=False, ctx=None):
         super().__init__(ReduceSumOp, [node_A], ctx)
-        self.temp_name = node_A.name
+        self.ori_status = None
+        self.tar_status = None
+        self.grad_node = None
         if axes is not None:
             if isinstance(axes, int):
                 axes = [axes]
@@ -23,18 +25,21 @@ class ReduceSumOp(Op):
                 self.keepdims = keepdims
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        if self.on_cpu:
-            if all(self.keepdims) or not any(self.keepdims):
-                output_val[:] = np.sum(input_vals[0].asnumpy(), axis=tuple(
-                    self.axes), keepdims=self.keepdims[0])
-            else:
-                temp = input_vals[0].asnumpy()
-                for i in range(len(self.keepdims))[::-1]:
-                    temp = np.sum(
-                        temp, self.axes[i], keepdims=self.keepdims[i])
-                output_val[:] = temp
+        if self.naive_copy:
+            input_vals[0].copyto(output_val)
         else:
-            reduce_sum(input_vals[0], output_val, self.axes, stream_handle)
+            if self.on_cpu:
+                if all(self.keepdims) or not any(self.keepdims):
+                    output_val[:] = np.sum(input_vals[0].asnumpy(), axis=tuple(
+                        self.axes), keepdims=self.keepdims[0])
+                else:
+                    temp = input_vals[0].asnumpy()
+                    for i in range(len(self.keepdims))[::-1]:
+                        temp = np.sum(
+                            temp, self.axes[i], keepdims=self.keepdims[i])
+                    output_val[:] = temp
+            else:
+                reduce_sum(input_vals[0], output_val, self.axes, stream_handle)
 
     def gradient(self, output_grad):
         self.grad_set = False
@@ -47,8 +52,7 @@ class ReduceSumOp(Op):
         assert self.axes is not None and self.keepdims is not None
         assert len(input_shapes) == 1
         input_shape = list(input_shapes[0])
-        
-        if hasattr(self, 'grad_node'):
+        if self.grad_node is not None:
             self.grad_node.target_shape = tuple(input_shape)
             add_axes = []
             for i in range(len(self.axes)):
@@ -62,64 +66,18 @@ class ReduceSumOp(Op):
             input_shape[self.axes[i]] = 1 if self.keepdims[i] else 0
         input_shape = [x for x in input_shape if x > 0]
         if input_shape == []:
-            return (1,)
+            result = (1,)
         else:
-            return tuple(input_shape)
+            result = tuple(input_shape)
+        from_size = np.prod(input_shapes[0], dtype=int)
+        to_size = np.prod(result, dtype=int)
+        self.naive_copy = (from_size == to_size)
+        return result
 
-    def forward_deduce_states(self, input_statuses, status, deduce_order):
-        assert len(input_statuses) == len(self.inputs)
-        if deduce_order:
-            if hasattr(self, 'ori_status'):
-                status.copy_order_from(self.ori_status)
-            elif input_statuses[0].order is not None:
-                order = list(input_statuses[0].order)
-                dup_occur = 0
-                prev_dup = False
-                duplicate_candidate = self.axes + [-1]
-                for i, o in enumerate(order[::-1]):
-                    if o in duplicate_candidate:
-                        if not prev_dup:
-                            dup_occur += 1
-                        prev_dup = True
-                        if o != -1:
-                            order.pop(i)
-                    else:
-                        prev_dup = False
-                assert dup_occur <= 1, 'Duplicate dimension and reduce dimensions must be consecutive!'
-                for i in range(len(order)):
-                    order[i] -= sum([x < order[i]
-                                     for j, x in enumerate(self.axes) if not self.keepdims[j]])
-                status.set_order(tuple(order))
-        else:
-            if hasattr(self, 'ori_status'):
-                status.copy_state_from(self.ori_status)
-            else:
-                state, duplicate = input_statuses[0].get()
-                if state is not None:
-                    state = dict(state)
-                    for k in self.axes:
-                        if k in state:
-                            duplicate *= state.pop(k)
-                    for k in sorted(state.keys()):
-                        new_k = k - \
-                            sum([x < k for j, x in enumerate(
-                                self.axes) if not self.keepdims[j]])
-                        if new_k != k:
-                            state[new_k] = state.pop(k)
-                    status.set_state(state, duplicate)
-
-    def backward_deduce_states(self, status, input_statuses, deduce_order):
-        assert len(input_statuses) == len(self.inputs)
-        if hasattr(self, 'grad_node') and not self.grad_set:
-            self.grad_node.ori_status = input_statuses[0]
-            self.grad_node.tar_status = status
-            self.grad_set = True
-        if deduce_order:
-            if hasattr(self, 'tar_status'):
-                input_statuses[0].copy_order_from(self.tar_status)
-        else:
-            if hasattr(self, 'tar_status'):
-                input_statuses[0].copy_state_from(self.tar_status)
+    def reset_status(self):
+        self.ori_status = None
+        self.tar_status = None
+        self.grad_set = False
 
 
 def reduce_sum_op(node, axes, keepdims=False, ctx=None):

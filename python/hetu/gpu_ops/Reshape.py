@@ -1,7 +1,5 @@
 from __future__ import absolute_import
-import ctypes
 from .Node import Op
-from .. import ndarray
 from .._base import DNNL_LIB
 from ..cpu_links import reshape as cpu_reshape
 from ..gpu_links import array_reshape
@@ -11,6 +9,7 @@ class Array_ReshapeOp(Op):
     def __init__(self, node_A, output_shape, ctx=None):
         super().__init__(Array_ReshapeOp, [node_A], ctx)
         self.output_shape = output_shape
+        self.splits = None
 
     def compute(self, input_vals, output_val, stream_handle=None):
 
@@ -85,30 +84,17 @@ class Array_ReshapeOp(Op):
 
     def get_output_shape(self):
         output_shape = list(self.output_shape)
-        if hasattr(self, 'splits'):
-            if self.raw_ctx is None or not self.raw_ctx.is_mp():
-                del self.splits
+        if self.splits is not None:
+            if self.raw_ctx is None or not self.raw_ctx.is_mp:
+                self.splits = None
             else:
                 for k, v in self.splits.items():
                     if output_shape[k] > 0:
                         output_shape[k] //= v
         return output_shape
 
-    def forward_deduce_states(self, input_statuses, status, deduce_order):
-        # !!! NO CHECKING !!!
-        assert len(input_statuses) == len(self.inputs)
-        # if input_statuses[0].valid(deduce_order):
-        #     input_statuses[0].check_state(1, deduce_order)
-        status.copy_from(input_statuses[0], deduce_order)
-        if status.valid_state():
-            self.splits = status.state
-
-    def backward_deduce_states(self, status, input_statuses, deduce_order):
-        # !!! NO CHECKING !!!
-        assert len(input_statuses) == len(self.inputs)
-        # if status.valid(deduce_order):
-        #     status.check_state(1, deduce_order)
-        input_statuses[0].copy_from(status, deduce_order)
+    def reset_status(self):
+        self.splits = None
 
 
 class Array_Reshape_GradientOp(Op):
@@ -138,22 +124,6 @@ class Array_Reshape_GradientOp(Op):
 
     def backward_hook(self, config):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
-
-    def forward_deduce_states(self, input_statuses, status, deduce_order):
-        # !!! NO CHECKING !!!
-        assert len(input_statuses) == len(self.inputs)
-        for nst in input_statuses:
-            # if nst.valid(deduce_order):
-            #     nst.check_state(1, deduce_order)
-            status.copy_from(nst, deduce_order)
-
-    def backward_deduce_states(self, status, input_statuses, deduce_order):
-        # !!! NO CHECKING !!!
-        assert len(input_statuses) == len(self.inputs)
-        # if status.valid(deduce_order):
-        #     status.check_state(1, deduce_order)
-        for nst in input_statuses:
-            nst.copy_from(status, deduce_order)
 
 
 def array_reshape_op(node, output_shape, ctx=None):

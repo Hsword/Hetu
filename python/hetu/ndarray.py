@@ -21,8 +21,9 @@ class DLContext(ctypes.Structure):
         super(DLContext, self).__init__()
         self.device_id = device_id
         self.device_type = device_type
-        if hostname in ('localhost', socket.gethostname()):
-            self.hostname = 'localhost'
+        self_hostname = socket.gethostname()
+        if hostname in ('localhost', self_hostname):
+            self.hostname = self_hostname
             self.local = True
         else:
             self.hostname = hostname
@@ -35,6 +36,13 @@ class DLContext(ctypes.Structure):
         else:
             return "%s:%s(%d)" % (
                 self.hostname, DLContext.MASK2STR[self.device_type], self.device_id)
+
+    def full_repr(self):
+        return "%s:%s:%d" % (
+            self.hostname, DLContext.MASK2STR[self.device_type], self.device_id)
+
+    def relocalize(self):
+        self.local = (self.hostname in ('localhost', socket.gethostname()))
 
     def __hash__(self):
         if not hasattr(self, 'local') or self.local:
@@ -498,7 +506,7 @@ def sparse_array(values, indices, shape, ctx=cpu(0)):
 
 class IndexedSlices(object):
     __slots__ = ["indices", "values", "dense_shape",
-                 "deduplicated", "lazy", "to_dense_flag"]
+                 "deduplicated", "lazy", "to_dense_flag", "original_indices", "original_values"]
 
     def __init__(self, indices=None, values=None, dense_shape=None):
         self.indices = indices
@@ -526,6 +534,8 @@ class IndexedSlices(object):
 
     def deduplicate(self, stream):
         assert is_gpu_ctx(self.indices.ctx)
+        self.original_indices = self.indices
+        self.original_values = self.values
         np_indices = self.indices.asnumpy()
         unique_indices, inverse = np.unique(np_indices, return_inverse=True)
         indices_on_ctx = array(unique_indices, ctx=self.indices.ctx)
@@ -543,6 +553,8 @@ class IndexedSlices(object):
 
     def cpu_deduplicate(self):
         assert not is_gpu_ctx(self.indices.ctx)
+        self.original_indices = self.indices
+        self.original_values = self.values
         np_indices = self.indices.asnumpy()
         unique_indices, inverse = np.unique(np_indices, return_inverse=True)
         new_value_shape = list(unique_indices.shape)
@@ -561,12 +573,13 @@ class IndexedSlices(object):
         if self.deduplicated:
             del self.indices
             del self.values
-            self.indices = None
-            self.values = None
+            self.indices = self.original_indices
+            self.values = self.original_values
             self.deduplicated = False
 
     def to_dense(self, stream):
         assert is_gpu_ctx(self.indices.ctx)
+        self.deduplicate(stream)
         np_indices = self.indices.asnumpy()
         indicies_all = np.arange(self.get_dense_shape()[0])
         indices_all_on_ctx = array(indicies_all, ctx=self.indices.ctx)
@@ -577,6 +590,9 @@ class IndexedSlices(object):
         _LIB.IndexedSlices2Dense(self.values.handle, self.indices.handle,
                                  new_values.handle, stream.handle if stream else None)
         self.free_deduplicate()
+        # to_dense is used after deduplicate, so we shouldn't save original
+        self.original_indices = self.indices
+        self.original_values = self.values
         self.values = new_values
         self.indices = indices_all_on_ctx
         self.to_dense_flag = True
@@ -585,8 +601,8 @@ class IndexedSlices(object):
         if self.to_dense_flag:
             del self.indices
             del self.values
-            self.indices = None
-            self.values = None
+            self.indices = self.original_indices
+            self.values = self.original_values
             self.to_dense_flag = False
 
     def merge(self, node):

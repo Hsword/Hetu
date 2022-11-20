@@ -6,9 +6,9 @@ def conv_bn_relu_pool(x, in_channel, out_channel, name, with_relu=True, with_poo
     weight = init.random_normal(
         shape=(out_channel, in_channel, 3, 3), stddev=0.1, name=name+'_weight')
     bn_scale = init.random_normal(
-        shape=(1, out_channel, 1, 1), stddev=0.1, name=name+'_bn_scale')
+        shape=(out_channel,), stddev=0.1, name=name+'_bn_scale')
     bn_bias = init.random_normal(
-        shape=(1, out_channel, 1, 1), stddev=0.1, name=name+'_bn_bias')
+        shape=(out_channel,), stddev=0.1, name=name+'_bn_bias')
     x = ht.conv2d_op(x, weight, stride=1, padding=1)
     x = ht.batch_normalization_op(x, bn_scale, bn_bias)
     if with_relu:

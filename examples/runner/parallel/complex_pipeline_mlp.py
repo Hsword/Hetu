@@ -96,11 +96,11 @@ if __name__ == "__main__":
         activation = fc(activation, (2048, 1024), 'mlp_fc3',
                         with_relu=True, ctx=ht.gpu(comm.localRank.value))
         activation_send_op = ht.pipeline_send_op(
-            activation, 1, comm, stream=communicate_stream)
+            activation, 1, comm)
 
         # backward
         gradient_receive_op = ht.pipeline_receive_op(
-            1, comm, ctx=executor_ctx, stream=communicate_stream)
+            1, comm, ctx=executor_ctx)
         required_vars = opt.get_var_list(activation)
         opt.params = required_vars
         grads = ht.gradients(activation, required_vars,
@@ -117,7 +117,7 @@ if __name__ == "__main__":
 
         # 1. receive activation from previous rank
         activation_receive_op = ht.pipeline_receive_op(
-            previous_rank, comm, ctx=executor_ctx, stream=communicate_stream)
+            previous_rank, comm, ctx=executor_ctx)
         # forward
         activation = fc(activation_receive_op, (1024, 2048), 'mlp_fc1',
                         with_relu=True, ctx=ht.gpu(comm.localRank.value))
@@ -128,11 +128,11 @@ if __name__ == "__main__":
 
         # 2. send activation to next rank
         activation_send_op = ht.pipeline_send_op(
-            activation, next_rank, comm, ctx=executor_ctx, stream=communicate_stream)
+            activation, next_rank, comm, ctx=executor_ctx)
 
         # 3. receive gradients from next rank
         gradient_receive_op = ht.pipeline_receive_op(
-            next_rank, comm, ctx=executor_ctx, stream=communicate_stream)
+            next_rank, comm, ctx=executor_ctx)
         # backward
         required_vars = opt.get_var_list(activation)
         opt.params = required_vars
@@ -143,7 +143,7 @@ if __name__ == "__main__":
 
         # 4. send gradients to previous rank
         sendback_grad_op = ht.pipeline_send_op(
-            grads[0], previous_rank, comm, stream=communicate_stream)
+            grads[0], previous_rank, comm)
 
         executor = ht.Executor(
             [activation_send_op, sendback_grad_op, train_op], ctx=executor_ctx)
@@ -151,7 +151,7 @@ if __name__ == "__main__":
     else:
         # rank7
         activation_receive_op = ht.pipeline_receive_op(
-            6, comm, ctx=executor_ctx, stream=communicate_stream)
+            6, comm, ctx=executor_ctx)
 
         # forward
         activation = fc(activation_receive_op, (1024, 2048), 'mlp_fc1',
@@ -170,7 +170,7 @@ if __name__ == "__main__":
         train_op = ht.optim.OptimizerOp(grads[1:], opt)
 
         sendback_grad_op = ht.pipeline_send_op(
-            grads[0], 6, comm, stream=communicate_stream)
+            grads[0], 6, comm)
         executor = ht.Executor(
             [loss, sendback_grad_op, train_op], ctx=executor_ctx)
 
