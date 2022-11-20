@@ -37,6 +37,7 @@ class PlaceholderOp(Op):
         self.trainable = trainable
         self.dtype = dtype
         self.reshaped = False
+        self.embedding_offsets = None
 
     def compute(self, input_vals, output_val, stream_handle=None):
         assert self.shape, "placeholder %s values provided by feed_dict" % self.name
@@ -86,7 +87,6 @@ class PlaceholderOp(Op):
             return
         self.reshaped = True
         if self.shape is None:
-            # TODO: support reshape in input nodes
             return
         # this function only used in context launch to enable variable initialized in model parallel
         ori_shape = list(self.shape)
@@ -101,6 +101,11 @@ class PlaceholderOp(Op):
             assert self.shape == self.tensor_value.shape
 
     def reshape_tensor(self, tensor):
+        if self.embedding_offsets is not None:
+            offset, length = self.embedding_offsets
+            tensor -= offset
+            tensor[tensor < 0] = -1
+            tensor[tensor >= length] = -1
         if self.parts == {}:
             return tensor
         if not isinstance(tensor, np.ndarray):

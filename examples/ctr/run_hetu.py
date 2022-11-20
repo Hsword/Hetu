@@ -117,14 +117,18 @@ def worker(args):
         print('Validation enabled...')
         eval_nodes['validate'] = [loss, prediction, y_]
     executor_log_path = osp.join(osp.dirname(osp.abspath(__file__)), 'logs')
-    strategy = ht.dist.DataParallel(aggregate=args.comm)
-    executor = ht.Executor(eval_nodes, dist_strategy=strategy, cstable_policy=args.cache,
-                           bsp=args.bsp, cache_bound=args.bound, seed=123, log_path=executor_log_path)
+    if args.comm is None:
+        executor = ht.Executor(eval_nodes, ctx=ht.gpu(0), cstable_policy=args.cache,
+                               bsp=args.bsp, cache_bound=args.bound, seed=123, log_path=executor_log_path)
+    else:
+        strategy = ht.dist.DataParallel(aggregate=args.comm)
+        executor = ht.Executor(eval_nodes, dist_strategy=strategy, cstable_policy=args.cache,
+                               bsp=args.bsp, cache_bound=args.bound, seed=123, log_path=executor_log_path)
 
     if args.all and dataset == 'criteo':
         print('Processing all data...')
-        file_path = '%s_%s' % ({None: 'local', 'PS': 'ps', 'Hybrid': 'hybrid', 'AllReduce': 'allreduce'}[
-                               args.comm], args.raw_model)
+        comm = 'local' if args.comm is None else args.comm
+        file_path = '%s_%s' % (comm, args.raw_model)
         file_path += '%d.log' % executor.rank if args.comm else '.log'
         file_path = osp.join(osp.dirname(
             osp.abspath(__file__)), 'logs', file_path)
@@ -185,6 +189,8 @@ if __name__ == '__main__':
     parser.add_argument("--nepoch", type=int, default=-1,
                         help="num of epochs, each train 1/10 data")
     args = parser.parse_args()
+    if args.comm is not None:
+        args.comm = args.comm.lower()
     import models
     print('Model:', args.model)
     model = eval('models.' + args.model)

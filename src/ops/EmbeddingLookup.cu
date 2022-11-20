@@ -2,15 +2,20 @@
 
 __global__ void embedding_lookup_kernel(const float *input, const float *ids,
                                         float *output, size_t size,
-                                        size_t length) {
+                                        size_t length, size_t input_row) {
     size_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= size)
         return;
     int id = ids[index];
     float *output_ptr = output + length * index;
-    const float *input_ptr = input + length * id;
-    for (int i = 0; i < length; i++)
-        output_ptr[i] = input_ptr[i];
+    if (id < 0 || id >= input_row) {
+        for (int i = 0; i < length; i++)
+            output_ptr[i] = 0;
+    } else {
+        const float *input_ptr = input + length * id;
+        for (int i = 0; i < length; i++)
+            output_ptr[i] = input_ptr[i];
+    }
 }
 
 int DLGpuEmbeddingLookUp(const DLArrayHandle input, const DLArrayHandle ids,
@@ -28,6 +33,7 @@ int DLGpuEmbeddingLookUp(const DLArrayHandle input, const DLArrayHandle ids,
     for (int i = 0; i < ids->ndim; i++) {
         size = size * ids->shape[i];
     }
+    size_t input_row = input->shape[0];
     size_t length = input->shape[1];
     dim3 blocks;
     dim3 threads;
@@ -44,10 +50,10 @@ int DLGpuEmbeddingLookUp(const DLArrayHandle input, const DLArrayHandle ids,
     if (stream_handle)
         embedding_lookup_kernel<<<blocks, threads, 0,
                                   *(cudaStream_t *)stream_handle->handle>>>(
-            input_data, id_list, output_data, size, length);
+            input_data, id_list, output_data, size, length, input_row);
     else
         embedding_lookup_kernel<<<blocks, threads>>>(input_data, id_list,
-                                                     output_data, size, length);
+                                                     output_data, size, length, input_row);
     return 0;
 }
 

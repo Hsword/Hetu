@@ -9,6 +9,8 @@ from .. import ndarray
 class BroadcastToOp(Op):
     def __init__(self, node_A, node_B, ctx=None):
         super().__init__(BroadcastToOp, [node_A, node_B], ctx)
+        self.grad_node = None
+        self.grad_set = False
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
@@ -24,7 +26,6 @@ class BroadcastToOp(Op):
                     input_vals[0], output_val, self.out_strides, self.in_dims, stream_handle)
 
     def gradient(self, output_grad):
-        self.grad_set = False
         self.grad_node = reduce_sum_op(
             output_grad, None, None, ctx=self.raw_ctx)
         return [self.grad_node, None]
@@ -45,7 +46,7 @@ class BroadcastToOp(Op):
             if i >= diff and input_shape[i] == 1 and output_shape[i] > 1:
                 axes.append(i)
                 keepdims.append(True)
-        if hasattr(self, 'grad_node'):
+        if self.grad_node is not None:
             self.grad_node.axes = axes
             self.grad_node.keepdims = keepdims
 
@@ -80,7 +81,7 @@ class BroadcastToOp(Op):
             if i >= diff and input_shape[i] == 1 and output_shape[i] > 1:
                 axes.append(i)
                 keepdims.append(True)
-        if hasattr(self, 'grad_node'):
+        if self.grad_node is not None:
             self.grad_node.axes = axes
             self.grad_node.keepdims = keepdims
 
@@ -89,18 +90,8 @@ class BroadcastToOp(Op):
     def backward_hook(self, config):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
 
-    def forward_deduce_states(self, input_statuses, status, deduce_order):
-        assert len(input_statuses) == len(self.inputs)
-        status.copy_from(input_statuses[1], deduce_order)
-
-    def backward_deduce_states(self, status, input_statuses, deduce_order):
-        assert len(input_statuses) == len(self.inputs)
-        if hasattr(self, 'grad_node') and not self.grad_set:
-            self.grad_node.ori_status = input_statuses[0]
-            self.grad_node.tar_status = status
-            self.grad_set = True
-        # there is no information for input[0] here, so we don't deduce
-        input_statuses[1].copy_from(status, deduce_order)
+    def reset_status(self):
+        self.grad_set = False
 
 
 def broadcastto_op(node_A, node_B, ctx=None):

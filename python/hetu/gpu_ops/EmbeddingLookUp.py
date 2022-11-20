@@ -11,6 +11,7 @@ class EmbeddingLookUp(Op):
     def __init__(self, embedding, index, ctx=None):
         super().__init__(EmbeddingLookUp, [embedding, index], ctx)
         embedding.is_embed = True
+        self.grad_node = None
 
     def _compute_cpu_dnnl(self, input_vals, output_val, stream_handle=None):
         cpu_embedding_lookup(input_vals[0], input_vals[1], output_val)
@@ -46,7 +47,7 @@ class EmbeddingLookUp(Op):
 
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 2
-        if hasattr(self, 'grad_node'):
+        if self.grad_node is not None:
             self.grad_node.embed_shape = input_shapes[0]
         output_shape = list(input_shapes[1])
         output_shape.append(input_shapes[0][1])
@@ -76,7 +77,9 @@ class EmbeddingLookUp(Op):
     def backward_hook(self, config):
         # insert data transfer op if needed
         local_comm_mode = config.node_strategy.get(self, config.comm_mode)
-        assert local_comm_mode == config.node_strategy.get(self.inputs[0], config.comm_mode), \
+        embedding_comm_mode = config.node_strategy.get(
+            self.inputs[0], config.comm_mode)
+        assert local_comm_mode in (embedding_comm_mode, None), \
             'Embedding lookup communication mode invalid. Should conform with embedding parameter.'
         if local_comm_mode in ('PS', 'Hybrid'):
             cpu_ctx = ndarray.cpu(0)
@@ -87,8 +90,10 @@ class EmbeddingLookUp(Op):
 
 class EmbeddingLookUp_Gradient(Op):
     def __init__(self, vectors, index, embed_shape, ctx=None):
-        super().__init__(EmbeddingLookUp_Gradient, [vectors, index], ctx)
+        super().__init__(EmbeddingLookUp_Gradient,
+                         [vectors, index], ctx)
         self.embed_shape = embed_shape
+        self.use_indexed_slices = True
 
     def compute(self, input_vals, output_val, stream_handle=None):
         assert self.embed_shape

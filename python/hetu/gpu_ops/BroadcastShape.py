@@ -11,6 +11,10 @@ class BroadcastShapeOp(Op):
         super().__init__(BroadcastShapeOp, [node_A], ctx)
         self.target_shape = shape
         self.add_axes = add_axes
+        self.ori_status = None
+        self.tar_status = None
+        self.grad_node = None
+        self.grad_set = False
 
     def compute(self, input_vals, output_val, stream_handle=None):
         assert self.target_shape is not None and self.add_axes is not None
@@ -31,7 +35,6 @@ class BroadcastShapeOp(Op):
                     input_vals[0], output_val, self.out_strides, self.in_dims, stream_handle)
 
     def gradient(self, output_grad):
-        self.grad_set = False
         self.grad_node = reduce_sum_op(
             output_grad, None, None, ctx=self.raw_ctx)
         return [self.grad_node]
@@ -52,9 +55,9 @@ class BroadcastShapeOp(Op):
                 if i not in self.add_axes:
                     assert input_shape[in_ind] == output_shape[i]
                     in_ind += 1
-            if hasattr(self, 'grad_node'):
+            if self.grad_node is not None:
                 self.grad_node.axes = tuple(self.add_axes)
-                self.grad_node.axes.keepdims = [False] * len(self.add_axes)
+                self.grad_node.keepdims = [False] * len(self.add_axes)
         else:
             axes = list(range(diff))
             keepdims = [False] * diff
@@ -67,7 +70,7 @@ class BroadcastShapeOp(Op):
                 if i >= diff and input_shape[i] == 1 and output_shape[i] > 1:
                     axes.append(i)
                     keepdims.append(True)
-            if hasattr(self, 'grad_node'):
+            if self.grad_node is not None:
                 self.grad_node.axes = axes
                 self.grad_node.keepdims = keepdims
 
@@ -113,7 +116,7 @@ class BroadcastShapeOp(Op):
                 if i not in self.add_axes:
                     assert input_shape[in_ind] == output_shape[i]
                     in_ind += 1
-            if hasattr(self, 'grad_node'):
+            if self.grad_node is not None:
                 self.grad_node.axes = tuple(self.add_axes)
                 self.grad_node.axes.keepdims = [False] * len(self.add_axes)
         else:
@@ -128,7 +131,7 @@ class BroadcastShapeOp(Op):
                 if i >= diff and input_shape[i] == 1 and output_shape[i] > 1:
                     axes.append(i)
                     keepdims.append(True)
-            if hasattr(self, 'grad_node'):
+            if self.grad_node is not None:
                 self.grad_node.axes = axes
                 self.grad_node.keepdims = keepdims
 
@@ -137,51 +140,10 @@ class BroadcastShapeOp(Op):
     def backward_hook(self, config):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
 
-    def forward_deduce_states(self, input_statuses, status, deduce_order):
-        assert len(input_statuses) == len(self.inputs)
-        if deduce_order:
-            if hasattr(self, 'ori_status') and self.ori_status.valid_all():
-                status.copy_order_from(self.ori_status)
-            else:
-                # only support data parallel
-                order = input_statuses[0].order
-                if order is not None:
-                    input_statuses[0].check_state(1, deduce_order)
-                    status.set_order(order)
-        else:
-            if hasattr(self, 'ori_status') and self.ori_status.valid_state():
-                status.copy_state_from(self.ori_status)
-            else:
-                # only support data parallel
-                state, duplicate = input_statuses[0].get()
-                if state is not None:
-                    input_statuses[0].check_state(1, deduce_order)
-                status.set_state(state, duplicate)
-
-    def backward_deduce_states(self, status, input_statuses, deduce_order):
-        assert len(input_statuses) == len(self.inputs)
-        if hasattr(self, 'grad_node') and not self.grad_set:
-            self.grad_node.ori_status = input_statuses[0]
-            self.grad_node.tar_status = status
-            self.grad_set = True
-        if deduce_order:
-            if hasattr(self, 'tar_status'):
-                input_statuses[0].copy_order_from(self.tar_status)
-            else:
-                # only support data parallel
-                order = input_statuses[0].order
-                if order is not None:
-                    status.check_state(1, deduce_order)
-                    input_statuses[0].set_order(order)
-        else:
-            if hasattr(self, 'tar_status'):
-                input_statuses[0].copy_state_from(self.tar_status)
-            else:
-                # only support data parallel
-                state, duplicate = input_statuses[0].get()
-                if state is not None:
-                    status.check_state(1, deduce_order)
-                input_statuses[0].set_state(state, duplicate)
+    def reset_status(self):
+        self.grad_set = False
+        self.ori_status = None
+        self.tar_status = None
 
 
 def broadcast_shape_op(node_A, shape, add_axes=(), ctx=None):

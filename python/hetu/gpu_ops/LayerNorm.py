@@ -95,6 +95,11 @@ class Layer_Normalization_GradientOp(Op):
         self.forward_node = forward_node
         self.eps = eps
 
+    def check_valid_arrs(self):
+        assert self.tmp_gradient_in_arr is not None
+        assert self.tmp_gradient_ln_bias is not None
+        assert self.tmp_gradient_ln_scale is not None
+
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
             if self.tmp_gradient_ln_bias is None:
@@ -132,21 +137,7 @@ class Layer_Normalization_GradientOp(Op):
             dx_2 = -1 * dx_1.sum(axis=-1, keepdims=True) / last_dim  # (N, 1)
             self.tmp_gradient_in_arr[:] = dx_1 + dx_2  # (N, X)
         else:
-            if self.tmp_gradient_ln_bias is None:
-                shapeln = input_vals[2].shape
-                self.data_shape = tuple(input_vals[0].shape)
-                self.tmp_gradient_ln_bias = ndarray.empty(
-                    shape=shapeln, ctx=input_vals[0].ctx)
-                self.tmp_gradient_ln_scale = ndarray.empty(
-                    shape=shapeln, ctx=input_vals[0].ctx)
-                self.tmp_gradient_in_arr = ndarray.empty(
-                    shape=self.data_shape, ctx=input_vals[0].ctx)
-            elif self.data_shape != tuple(input_vals[0].shape):
-                self.data_shape = tuple(input_vals[0].shape)
-                del self.tmp_gradient_in_arr
-                self.tmp_gradient_in_arr = ndarray.empty(
-                    shape=self.data_shape, ctx=input_vals[0].ctx)
-
+            self.check_valid_arrs()
             layer_normalization_gradient(input_vals[0], input_vals[1], input_vals[2],
                                          self.tmp_gradient_in_arr, self.tmp_gradient_ln_scale,
                                          self.tmp_gradient_ln_bias, self.forward_node.save_mean,
@@ -156,7 +147,7 @@ class Layer_Normalization_GradientOp(Op):
         raise NotImplementedError
 
     def infer_shape(self, input_shapes):
-        return (1,)
+        return None
 
 
 class Layer_Normalization_Gradient_of_DataOp(Op):
@@ -165,16 +156,16 @@ class Layer_Normalization_Gradient_of_DataOp(Op):
                          [ln_gradient, in_arr], ctx)
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        if self.on_cpu:
-            output_val[:] = self.inputs[0].tmp_gradient_in_arr
-        else:
-            self.inputs[0].tmp_gradient_in_arr.inplace_copy(output_val)
+        assert False, 'In memory plan we already set the result array; should not call the compute.'
 
     def gradient(self, output_grad):
         raise NotImplementedError
 
     def infer_shape(self, input_shapes):
         return input_shapes[1]
+
+    def pass_grad_array(self, array):
+        self.inputs[0].tmp_gradient_in_arr = array
 
 
 class Layer_Normalization_Gradient_of_ScaleOp(Op):
@@ -183,16 +174,16 @@ class Layer_Normalization_Gradient_of_ScaleOp(Op):
                          [ln_gradient, in_scale], ctx)
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        if self.on_cpu:
-            output_val[:] = self.inputs[0].tmp_gradient_ln_scale
-        else:
-            self.inputs[0].tmp_gradient_ln_scale.inplace_copy(output_val)
+        assert False, 'In memory plan we already set the result array; should not call the compute.'
 
     def gradient(self, output_grad):
         raise NotImplementedError
 
     def infer_shape(self, input_shapes):
         return input_shapes[1]
+
+    def pass_grad_array(self, array):
+        self.inputs[0].tmp_gradient_ln_scale = array
 
 
 class Layer_Normalization_Gradient_of_BiasOp(Op):
@@ -201,16 +192,16 @@ class Layer_Normalization_Gradient_of_BiasOp(Op):
                          [ln_gradient, in_bias], ctx)
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        if self.on_cpu:
-            output_val[:] = self.inputs[0].tmp_gradient_ln_bias
-        else:
-            self.inputs[0].tmp_gradient_ln_bias.inplace_copy(output_val)
+        assert False, 'In memory plan we already set the result array; should not call the compute.'
 
     def gradient(self, output_grad):
         raise NotImplementedError
 
     def infer_shape(self, input_shapes):
         return input_shapes[1]
+
+    def pass_grad_array(self, array):
+        self.inputs[0].tmp_gradient_ln_bias = array
 
 
 def layer_normalization_op(node_in, ln_scale, ln_bias, eps=0.01, ctx=None):

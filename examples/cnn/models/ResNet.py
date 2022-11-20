@@ -13,15 +13,15 @@ def conv2d(x, in_channel, out_channel, stride=1, padding=1, kernel_size=3, name=
 
 
 def batch_norm_with_relu(x, hidden, name):
-    scale = init.ones(shape=(1, hidden, 1, 1), name=name+'_scale')
-    bias = init.zeros(shape=(1, hidden, 1, 1), name=name+'_bias')
+    scale = init.ones(shape=(hidden,), name=name+'_scale')
+    bias = init.zeros(shape=(hidden,), name=name+'_bias')
     x = ht.batch_normalization_op(x, scale, bias, momentum=0.9, eps=1e-5)
     x = ht.relu_op(x)
     return x
 
 def batch_norm(x, hidden, name):
-    scale = init.ones(shape=(1, hidden, 1, 1), name=name+'_scale')
-    bias = init.zeros(shape=(1, hidden, 1, 1), name=name+'_bias')
+    scale = init.ones(shape=(hidden,), name=name+'_scale')
+    bias = init.zeros(shape=(hidden,), name=name+'_bias')
     x = ht.batch_normalization_op(x, scale, bias, momentum=0.9, eps=1e-5)
     return x
 

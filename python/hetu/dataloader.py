@@ -15,11 +15,15 @@ class Dataloader(object):
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.name = str(name)
+        self.dp_nrank = None
+        self.parts = None
+        self.slices = None
 
-    def init_states(self, rank=None, nrank=None):
-        if rank is not None:
-            cur_size = self.raw_data.shape[0] // nrank
-            start = cur_size * rank
+    def init_states(self):
+        if self.dp_nrank is not None:
+            # this part is only for data parallel
+            cur_size = self.raw_data.shape[0] // self.dp_nrank
+            start = cur_size * self.dp_rank
             ending = start + cur_size
             self.raw_data = self.raw_data[start:ending]
         self.samples_num = len(self.raw_data)
@@ -30,6 +34,7 @@ class Dataloader(object):
         self.batch_num = int(np.ceil(self.samples_num / self.batch_size)) if not self.drop_last else \
             self.samples_num // self.batch_size
         self.shape = tuple([self.batch_size] + list(self.raw_data.shape[1:]))
+        self.set_slices()
         self.seq = np.arange(self.samples_num)
 
         self.index = 0
@@ -39,13 +44,14 @@ class Dataloader(object):
         for i in range(self.queue_size):
             next_index = self.index + self.batch_size
             self.arrs.append(ndarray.array(
-                self.raw_data[self.seq[self.index:next_index]], ctx=ndarray.cpu(0)))
+                self.reshape_tensor(self.raw_data[self.seq[self.index:next_index]]), ctx=ndarray.cpu(0)))
             self.index = next_index
             self.arr_map[i] = i
         self.max_key = self.queue_size - 1
 
         # in case the last batch's shape is different, pre-allocate an array
         if not self.drop_last:
+            assert self.parts is None, 'Model parallel cannot use dataloader without drop_last.'
             res_num = self.samples_num % self.batch_size
             if res_num > 0:
                 self.arrs.append(ndarray.empty(
@@ -71,10 +77,12 @@ class Dataloader(object):
                     temp_ind = self.rest
                     self.rest = self.queue_size
                 self.arr_map[self.max_key] = temp_ind
-                self.arrs[temp_ind][:] = self.raw_data[self.seq[self.index:next_index]]
+                self.arrs[temp_ind][:] = self.reshape_tensor(
+                    self.raw_data[self.seq[self.index:next_index]])
             else:
                 assert not self.drop_last
-                self.arrs[-1][:] = self.raw_data[self.seq[self.index:next_index]]
+                self.arrs[-1][:] = self.reshape_tensor(
+                    self.raw_data[self.seq[self.index:next_index]])
                 self.rest = self.arr_map.pop(min_key)
                 self.arr_map[self.max_key] = self.queue_size
             self.index = next_index
@@ -91,6 +99,47 @@ class Dataloader(object):
         res = self._get_arr(self.batch_index)
         return res
 
+    def set_dp_rank(self, dp_rank, dp_nrank):
+        # in data parallel
+        if self.dp_nrank is not None:
+            assert self.dp_rank == dp_rank
+            assert self.dp_nrank == dp_nrank
+        self.dp_rank = dp_rank
+        self.dp_nrank = dp_nrank
+
+    def set_mp_parts(self, cur_part, parts):
+        # in model parallel
+        if self.parts is not None:
+            assert self.parts == parts
+            assert self.cur_part == cur_part
+        self.cur_part = cur_part
+        self.parts = parts
+
+    def set_slices(self):
+        if self.parts is None:
+            return
+        # in model parallel
+        ori_shape = self.shape
+        new_shape = []
+        slcs = []
+        for i in range(len(ori_shape)):
+            if i in self.parts:
+                part = ori_shape[i] // self.parts[i]
+                st = part * self.cur_part[i]
+                en = st + part
+            else:
+                st = 0
+                en = ori_shape[i]
+            slcs.append(slice(st, en))
+            new_shape.append(en - st)
+        self.slices = tuple(slcs)
+        self.shape = tuple(new_shape)
+
+    def reshape_tensor(self, tensor):
+        if self.slices is None:
+            return tensor
+        return tensor[self.slices]
+
     def get_cur_shape(self):
         return tuple(self.arrs[self.arr_map[self.batch_index]].shape)
 
@@ -105,7 +154,10 @@ class GNNDataLoaderOp(Op):
         self.on_cpu = False
         self.handler = handler
         self.name = "GNNDataloaderOp"
-        self.desc = self.name
+
+    @ property
+    def desc(self):
+        return self.name
 
     def get_batch_num(self, name):
         return None
@@ -125,7 +177,7 @@ class GNNDataLoaderOp(Op):
     def infer_shape(self, input_shapes):
         raise NotImplementedError
 
-    @classmethod
+    @ classmethod
     def step(cls, graph):
         cls.graph = cls.nxt_graph
         cls.nxt_graph = graph
@@ -141,7 +193,18 @@ class DataloaderOp(Op):
         }
         self.name = "DataloaderOp%d(%s)" % (
             self.id, '_'.join(self.dataloaders.keys()))
-        self.desc = self.name
+
+    @ property
+    def desc(self):
+        return self.name
+
+    def set_dp_rank(self, dp_rank, dp_nrank):
+        for dataloader in self.dataloaders.values():
+            dataloader.set_dp_rank(dp_rank, dp_nrank)
+
+    def set_mp_parts(self, cur_part, parts):
+        for dataloader in self.dataloaders.values():
+            dataloader.set_mp_parts(cur_part, parts)
 
     def get_batch_num(self, name):
         return self.dataloaders[name].batch_num
@@ -166,13 +229,15 @@ class DataloaderOp(Op):
         pass
 
     def backward_hook(self, config):
+        if hasattr(config, 'min_dp_nrank'):
+            min_dp_nrank = config.min_dp_nrank
+        else:
+            min_dp_nrank = None
         for d in self.dataloaders.values():
-            if config.pipeline:
-                d.init_states(config.pipeline_dp_rank, config.nrank // config.pipeline_nrank)
-            elif config.context_launch:
-                d.init_states(config.rank, config.nrank)
-            else:
-                d.init_states()
+            if min_dp_nrank is not None:
+                # now we enforce stages with dataloaders to have the minimum data parallel degree
+                assert d.dp_nrank == min_dp_nrank
+            d.init_states()
 
 
 def dataloader_op(dataloaders):

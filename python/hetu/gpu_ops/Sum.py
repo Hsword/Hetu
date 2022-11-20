@@ -2,17 +2,11 @@ from __future__ import absolute_import
 from .Node import Op
 from .. import ndarray
 from .._base import DNNL_LIB
-# from ..cpu_links import matrix_elementwise_add as\
-#     cpu_matrix_elementwise_add
-# from ..cpu_links import matrix_elementwise_add_by_const as\
-#     cpu_matrix_elementwise_add_by_const
 from ..gpu_links import matrix_elementwise_add_by_const,\
     indexedslice_oneside_add,\
     array_set,\
     matrix_elementwise_add_simple,\
     matrix_elementwise_add_lazy
-from .DataTransfer import DataD2HSparseOp, DataH2DSparseOp
-from .EmbeddingLookUp import EmbeddingLookUp_Gradient
 import numpy as np
 
 
@@ -81,7 +75,6 @@ class SumOp(Op):
         return [output_grad for _ in self.inputs]
 
     def infer_shape(self, input_shapes):
-        """Need to handle input_vals[0].shape != input_vals[1].shape"""
         assert len(input_shapes) == len(self.inputs)
         result_shape = tuple(input_shapes[0])
         for shape in input_shapes[1:]:
@@ -133,7 +126,7 @@ class SumOp(Op):
         self.middle_results = [None for _ in self.inputs]
         self.need_deduce = [False for _ in self.inputs]
         for ind, node in enumerate(self.inputs):
-            if isinstance(node, (EmbeddingLookUp_Gradient, DataD2HSparseOp, DataH2DSparseOp)):
+            if node.use_indexed_slices:
                 self.callbacks[ind] = self._indexed_cpu_callback if self.on_cpu else self._indexed_gpu_callback
             elif self.on_cpu:
                 self.callbacks[ind] = self._simple_cpu_callback

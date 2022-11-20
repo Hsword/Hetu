@@ -9,7 +9,10 @@ class AddByConstOp(Op):
     def __init__(self, node_A, const_val, ctx=None):
         super().__init__(AddByConstOp, [node_A], ctx)
         self.const_attr = const_val
-        self.desc = self.name + '(%s, %s)' % (node_A.name, str(const_val))
+
+    @property
+    def desc(self):
+        return self.name + '(%s, %s)' % (self.inputs[0].name, str(self.const_attr))
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
