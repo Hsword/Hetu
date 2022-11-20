@@ -8,6 +8,8 @@ from ..gpu_links import matrix_elementwise_add_by_const,\
     matrix_elementwise_add_simple,\
     matrix_elementwise_add_lazy
 import numpy as np
+from .DataTransfer import DataD2HSparseOp, DataH2DSparseOp
+from .EmbeddingLookUp import EmbeddingLookUp_Gradient
 
 
 class SumOp(Op):
@@ -139,6 +141,7 @@ class SparseSumOp(Op):
         super().__init__(SparseSumOp, list(node_list), ctx)
         self.lazy_execution = True
         self.compute_to_be_config = False
+        self.use_indexed_slices = True
 
     def compute(self, input_vals, output_val, stream_handle=None):
         assert isinstance(output_val, ndarray.IndexedSlices)

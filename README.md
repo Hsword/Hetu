@@ -91,7 +91,7 @@ bash examples/ctr/tests/local_wdl_adult.sh
 Train Hetu Wide & Deep model with allreduce on 8 gpus:
 
 ```bash
-bash examples/ctr/tests/dp_wdl_adult.sh
+bash examples/ctr/tests/local_wdl_adult_dp.sh
 ```
 
 

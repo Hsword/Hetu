@@ -120,6 +120,7 @@ class DataH2DSparseOp(Op):
         self.event = None
         self.on_cpu = False
         self.on_gpu = True
+        self.use_indexed_slices = True
 
     def compute(self, input_vals, output_val, stream_handle=None):
         assert isinstance(input_vals[0], ndarray.IndexedSlices)

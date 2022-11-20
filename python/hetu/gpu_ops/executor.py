@@ -340,7 +340,7 @@ class HetuConfig(object):
             self.cstable_policy = self.cstable_policy.upper()
             self.use_sparse_pull = False
 
-        self.h2d_ops: Dict[Op, DataH2DOp] = {}
+        self.h2d_ops: Dict[Op, Union[DataH2DOp, DataH2DSparseOp]] = {}
         self.d2h_ops: Dict[Op, Union[DataD2HOp, DataD2HSparseOp]] = {}
         self.ps_map: Dict[Op, NDArray] = {}
         self.infer_ps_map: Dict[Op, NDArray] = {}
@@ -656,6 +656,7 @@ class SubExecutor(object):
             ParameterServerSparsePullOp: self.d2h_stream,
             DataD2HOp: self.d2h_stream,
             DataD2HSparseOp: self.d2h_stream,
+            DataH2DSparseOp: self.h2d_stream,
             DataH2DOp: self.h2d_stream,
             AllGatherCommunicateOp: self.p2p_stream,
             ReduceScatterCommunicateOp: self.p2p_stream,
@@ -840,7 +841,7 @@ class SubExecutor(object):
             if isinstance(node, EmbeddingLookUp_Gradient):
                 self.indexed_slices_shape[node] = (
                     self.node_to_shape_map[node.inputs[1]], self.node_to_shape_map[node.inputs[0]])
-            elif isinstance(node, (DataD2HSparseOp, PipelineSendOp)) and node.use_indexed_slices:
+            elif isinstance(node, (SparseSumOp, DataH2DSparseOp, DataD2HSparseOp, PipelineSendOp)) and node.use_indexed_slices:
                 self.indexed_slices_shape[node] = self.indexed_slices_shape[node.inputs[0]]
             elif isinstance(node, AllReduceCommunicateOp) and node.use_indexed_slices:
                 ind_shape, val_shape = self.indexed_slices_shape[node.inputs[0]]
@@ -1113,10 +1114,13 @@ def gradients(
         # TODO: when implement PS strategy for context semantics, modify here
         if isinstance(node, EmbeddingLookUp):
             output_grad, is_new = sum_node_list(
-                node_to_output_grads_list[node], node_to_output_grads_list[node][0].raw_ctx)
+                node_to_output_grads_list[node], node_to_output_grads_list[node][0].raw_ctx, sparse=False)
+        elif isinstance(node, PlaceholderOp) and node.is_embed:
+            output_grad, is_new = sum_node_list(
+                node_to_output_grads_list[node], node.raw_ctx, sparse=True)
         else:
             output_grad, is_new = sum_node_list(
-                node_to_output_grads_list[node], node.raw_ctx)
+                node_to_output_grads_list[node], node.raw_ctx, sparse=False)
         if output_grad is None:
             for n in node.inputs:
                 if n not in node_to_output_grads_list:
@@ -1382,7 +1386,7 @@ def fetch_dense_parameter_value(node_list: OP_LIST, config: HetuConfig) -> None:
         node.event.update()
 
 
-def sum_node_list(node_list: OP_LIST, ctx: Optional[DeviceGroup]) -> Tuple[Optional[Op], bool, bool]:
+def sum_node_list(node_list: OP_LIST, ctx: Optional[DeviceGroup], sparse: bool) -> Tuple[Optional[Op], bool, bool]:
     """Custom sum func to avoid creating redundant nodes in Python sum func."""
     node_list = [n for n in node_list if n is not None]
     if node_list == []:
@@ -1390,5 +1394,5 @@ def sum_node_list(node_list: OP_LIST, ctx: Optional[DeviceGroup]) -> Tuple[Optio
     elif len(node_list) == 1:
         return node_list[0], False
     else:
-        return sum_op(node_list, ctx=ctx), True
+        return sum_op(node_list, ctx=ctx, sparse=sparse), True
 
