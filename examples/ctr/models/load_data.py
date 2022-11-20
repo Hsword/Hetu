@@ -1,4 +1,5 @@
 import os
+import sys
 import numpy as np
 
 
@@ -15,11 +16,17 @@ def download_criteo(path):
     assert os.path.isdir(path), 'Please provide a directory path.'
     # this source may be invalid, please use other valid sources.
     origin = (
-        'https://s3-eu-west-1.amazonaws.com/kaggle-display-advertising-challenge-dataset/dac.tar.gz'
+        'https://go.criteo.net/criteo-research-kaggle-display-advertising-challenge-dataset.tar.gz'
     )
+
+    def _progress(block_num, block_size, total_size):
+        sys.stdout.write('\r>> Downloading %.1f%%' % (
+                        float(block_num * block_size) / float(total_size) * 100.0))
+        sys.stdout.flush()
+
     print('Downloading data from %s' % origin)
     dataset = os.path.join(path, 'criteo.tar.gz')
-    urllib.request.urlretrieve(origin, dataset)
+    urllib.request.urlretrieve(origin, dataset, _progress)
     print("Extracting criteo zip...")
     with tarfile.open(dataset) as f:
         f.extractall(path=path)
@@ -46,12 +53,12 @@ def download_criteo(path):
     # split data in 2 parts
     test_num = num_data // 10
     processed_data = [
-        dense_feats[perm[:-test_num]],  # train dense
-        sparse_feats[perm[:-test_num]],  # train sparse
-        labels[perm[:-test_num]],       # train labels
-        dense_feats[perm[-test_num:]],  # validate dense
-        sparse_feats[perm[-test_num:]],  # validate sparse
-        labels[perm[-test_num:]],       # validate labels
+        dense_feats.loc[perm[:-test_num]],  # train dense
+        sparse_feats.loc[perm[:-test_num]],  # train sparse
+        labels.loc[perm[:-test_num]],       # train labels
+        dense_feats.loc[perm[-test_num:]],  # validate dense
+        sparse_feats.loc[perm[-test_num:]],  # validate sparse
+        labels.loc[perm[-test_num:]],       # validate labels
     ]
     print('Array shapes:')
     for i in range(len(processed_data)):
@@ -317,4 +324,4 @@ def process_avazu(path=os.path.join(os.path.split(os.path.abspath(__file__))[0],
 
 if __name__ == '__main__':
     download_criteo(os.path.join(os.path.split(
-        os.path.abspath(__file__)), '../datasets/criteo'))
+        os.path.abspath(__file__))[0], '../datasets/criteo'))
