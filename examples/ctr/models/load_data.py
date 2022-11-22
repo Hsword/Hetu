@@ -45,20 +45,21 @@ def download_criteo(path):
         'test_dense_feats.npy', 'test_sparse_feats.npy', 'test_labels.npy']]
     dense_feats = [col for col in df.columns if col.startswith('I')]
     sparse_feats = [col for col in df.columns if col.startswith('C')]
-    labels = df['label']
-    dense_feats = process_dense_feats(df, dense_feats)
-    sparse_feats = process_sparse_feats(df, sparse_feats)
+    labels = np.array(df['label']).reshape(-1, 1)
+    dense_feats = np.array(process_dense_feats(df, dense_feats))
+    sparse_feats = np.array(process_sparse_feats(
+        df, sparse_feats)).astype(np.int32)
     num_data = dense_feats.shape[0]
     perm = np.random.permutation(num_data)
     # split data in 2 parts
     test_num = num_data // 10
     processed_data = [
-        dense_feats.loc[perm[:-test_num]],  # train dense
-        sparse_feats.loc[perm[:-test_num]],  # train sparse
-        labels.loc[perm[:-test_num]],       # train labels
-        dense_feats.loc[perm[-test_num:]],  # validate dense
-        sparse_feats.loc[perm[-test_num:]],  # validate sparse
-        labels.loc[perm[-test_num:]],       # validate labels
+        dense_feats[perm[:-test_num]],  # train dense
+        sparse_feats[perm[:-test_num]],  # train sparse
+        labels[perm[:-test_num]],       # train labels
+        dense_feats[perm[-test_num:]],  # validate dense
+        sparse_feats[perm[-test_num:]],  # validate sparse
+        labels[perm[-test_num:]],       # validate labels
     ]
     print('Array shapes:')
     for i in range(len(processed_data)):
