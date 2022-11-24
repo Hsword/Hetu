@@ -1,5 +1,6 @@
 from __future__ import absolute_import
 import numpy as np
+from torch import embedding
 from .Node import Op
 from ..gpu_links import masked_fill
 
@@ -20,7 +21,7 @@ class MaskedFillOp(Op):
                         output_val, self.val, stream_handle)
 
     def gradient(self, output_grad):
-        return [None, None]
+        return [masked_fill_op(output_grad, self.inputs[1], 0.0), None]
 
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 2

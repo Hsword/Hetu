@@ -31,7 +31,7 @@ class RepeatOp(Op):
         if ndim < nrep:
             input_shape = [1 for i in range(nrep)]
             for i in range(ndim):
-                input_shape[nrep-dim+i] = input_shapes[0][i]
+                input_shape[nrep-ndim+i] = input_shapes[0][i]
 
         elif ndim > nrep:
             reps = [1 for i in range(ndim)]

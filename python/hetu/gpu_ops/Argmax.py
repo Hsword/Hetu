@@ -24,6 +24,8 @@ class ArgmaxOp(Op):
         if len(input_shapes[0]) == 1:
             return (1,)
         output_shapes = []
+        if self.dim < 0:
+            self.dim += len(input_shapes[0])
         for dim, value in enumerate(input_shapes[0]):
             if dim == self.dim:
                 continue

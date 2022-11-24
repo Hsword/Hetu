@@ -93,7 +93,10 @@ HETUSYS_EXTERN_C {
      */
     int DLGpuArraySet(DLArrayHandle arr, float value,
                       DLStreamHandle stream_handle);
-
+    int DLGpuAsStrided(const DLArrayHandle input, DLArrayHandle output,
+                       int *stride, DLStreamHandle stream_handle);
+    int DLGpuAsStridedGradient(const DLArrayHandle grad, DLArrayHandle output,
+                               int *stride, DLStreamHandle stream_handle);
     int DLGpuBaddbmm(const DLArrayHandle input, const DLArrayHandle matA,
                      const DLArrayHandle matB, float alpha, float beta,
                      DLArrayHandle matC, DLStreamHandle stream_handle);
@@ -143,8 +146,13 @@ HETUSYS_EXTERN_C {
                                 DLStreamHandle stream_handle);
     int DLGpuExp(const DLArrayHandle input, DLArrayHandle output,
                  DLStreamHandle stream_handle);
+    int DLGpuEye(DLArrayHandle output, DLStreamHandle stream_handle);
+    int DLGpuFlip(const DLArrayHandle input, DLArrayHandle output, int *dims,
+                  int nflip, DLStreamHandle stream_handle);
     int DLGpuFloor(const DLArrayHandle input, DLArrayHandle output,
                    DLStreamHandle stream_handle);
+    int DLGpuFmod(const DLArrayHandle input, DLArrayHandle output, float val,
+                  DLStreamHandle stream_handle);
     int DLGpuGather(const DLArrayHandle input, const DLArrayHandle index,
                     DLArrayHandle output, int dim,
                     DLStreamHandle stream_handle);
@@ -616,6 +624,9 @@ HETUSYS_EXTERN_C {
                              const DLArrayHandle gpu_buffer,
                              DLStreamHandle stream_handle);
 
+    int DLGpuTriuTril(const DLArrayHandle input, DLArrayHandle output,
+                      bool lower, int diagonal, DLStreamHandle stream_handle);
+
     int CuSparse_DLGpuCsrmv(
         const DLArrayHandle data_handle, const DLArrayHandle row_handle,
         const DLArrayHandle col_handle, int nrow, int ncol, bool transpose,
@@ -993,7 +1004,7 @@ HETUSYS_EXTERN_C {
 
     int DLGpuCumsumWithBias(DLArrayHandle input, DLArrayHandle output,
                             float bias, int dim,
-                            DLStreamHandle stream_handle = NULL);
+                            DLStreamHandle stream_handle);
 
     int DLGpuTopKIdx(const DLArrayHandle input, DLArrayHandle output_idx, int k,
                      DLStreamHandle stream_handle = NULL);
@@ -1078,6 +1089,14 @@ HETUSYS_EXTERN_C {
     int DLGpuIndexingGrad(const DLArrayHandle output_grad, DLArrayHandle index,
                           DLArrayHandle input_grad,
                           DLStreamHandle stream_handle = NULL);
+
+    int DLGpuIndexSelect(const DLArrayHandle input, DLArrayHandle index,
+                         DLArrayHandle output, int dim,
+                         DLStreamHandle stream_handle);
+
+    int DLGpuIndexSelectGrad(const DLArrayHandle grad,
+                             const DLArrayHandle index, DLArrayHandle output,
+                             int dim, DLStreamHandle stream_handle);
 
     int DLGpuScatter1D(const DLArrayHandle input, DLArrayHandle index,
                        DLArrayHandle output,

@@ -45,5 +45,5 @@ def cumsum_with_bias_op(node, bias = -1, dim = 0, ctx=None):
     A new Node instance created by Op.
 
     """
-    return CumsumOp(node, bias = -1, dim = 0, ctx=ctx)
+    return CumsumOp(node, bias, dim, ctx=ctx)
 

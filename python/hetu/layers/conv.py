@@ -22,10 +22,10 @@ class Conv2d(BaseLayer):
         self.activation = activation
         self.name = name
         self.weight_var = initializer(shape=(
-            self.out_channels, self.in_channels, self.height, self.width), name=self.name+'_weight')
+            self.out_channels, self.in_channels, self.height, self.width), name=self.name+'.weight')
         if self.bias:
             self.bias_var = ht.init.zeros(
-                shape=(self.out_channels,), name=self.name+'_bias')
+                shape=(self.out_channels,), name=self.name+'.bias')
 
     def __call__(self, x):
         if self.bias:

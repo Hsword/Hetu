@@ -4,10 +4,9 @@ __global__ void bool_kernel(float *input, float *output, size_t size) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (ind >= size)
         return;
-    if(input[ind] > 0){
+    if (input[ind] > 0) {
         output[ind] = 1;
-    }
-    else{
+    } else {
         output[ind] = 0;
     }
 }
@@ -65,6 +64,11 @@ __global__ void bool_val_kernel(const float *input_A, float *output, float val,
             output[ind] = 0;
     } else if (cond == 4) {
         if (input_A[ind] - val > -1e-6)
+            output[ind] = 1;
+        else
+            output[ind] = 0;
+    } else if (cond == 5) {
+        if (abs(input_A[ind] - val) > 1e-6)
             output[ind] = 1;
         else
             output[ind] = 0;
@@ -128,6 +132,11 @@ __global__ void bool_matrix_kernel(const float *input_A, const float *input_B,
             output[ind] = 1;
         else
             output[ind] = 0;
+    } else if (cond == 5) {
+        if (abs(input_A[ind] - input_B[ind]) > 1e-6)
+            output[ind] = 1;
+        else
+            output[ind] = 0;
     }
 }
 
@@ -150,8 +159,23 @@ __global__ void bool_matrix_broadcast_kernel(const float *input_A,
             output[ind] = 1;
         else
             output[ind] = 0;
-    } else {
-        if (input_A[col] - input_B[row] > 1e-6)
+    } else if (cond == 2) {
+        if (input_A[ind] - input_B[row] > 1e-6)
+            output[ind] = 1;
+        else
+            output[ind] = 0;
+    } else if (cond == 3) {
+        if (input_A[ind] - input_B[row] < 1e-6)
+            output[ind] = 1;
+        else
+            output[ind] = 0;
+    } else if (cond == 4) {
+        if (input_A[ind] - input_B[row] > -1e-6)
+            output[ind] = 1;
+        else
+            output[ind] = 0;
+    } else if (cond == 5) {
+        if (abs(input_A[ind] - input_B[row]) > 1e-6)
             output[ind] = 1;
         else
             output[ind] = 0;

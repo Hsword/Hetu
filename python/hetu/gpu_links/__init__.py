@@ -5,6 +5,7 @@ from .AddElewiseLink import *
 from .AddmmLink import *
 from .ArangeLink import *
 from .ArraySetLink import *
+from .AsStridedLink import *
 from .ArgmaxLink import *
 from .ArgsortLink import *
 from .AvgPoolLink import *
@@ -25,9 +26,13 @@ from .CudnnConv2d import *
 from .CudnnDropoutLink import *
 from .CudnnMaxPoolLink import *
 from .ExpLink import *
+from .EyeLink import *
+from .FlipLink import *
 from .FloorLink import *
+from .FmodLink import *
 from .GatherLink import *
 from .InterpolateLink import *
+from .IndexSelectLink import *
 from .MaskedFillLink import *
 from .MatrixMultLink import *
 from .MaxLink import *
@@ -37,6 +42,7 @@ from .MinusByConstLink import *
 from .MultiplyConstLink import *
 from .MultiplyElewiseLink import *
 from .NormLink import *
+from .OuterLink import *
 from .PadLink import *
 from .PowLink import *
 from .ReduceSumAxisZeroLink import *
@@ -51,6 +57,7 @@ from .SliceByMatrixLink import *
 from .SoftmaxCrossEntropyLink import *
 from .SoftmaxCrossEntropySparseLink import *
 from .SoftmaxLink import *
+from .TriuLink import *
 from .MatrixDivideConstLink import *
 from .MatrixDivideLink import *
 from .CuSparseLink import *
