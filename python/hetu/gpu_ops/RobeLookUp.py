@@ -31,7 +31,6 @@ class RobeLookUp(Op):
 
 
     def gradient(self, output_grad):
-        assert(0)
         self.grad_node = robe_lookup_gradient_op(
             output_grad, self.inputs[1], None, ctx=self.raw_ctx)
         return [self.grad_node, None]
@@ -39,7 +38,7 @@ class RobeLookUp(Op):
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 2
         if self.grad_node is not None:
-           self.grad_node.embed_shape = input_shapes[0]
+           self.grad_node.robe_shape = input_shapes[0]
         output_shape = list(input_shapes[1])
         output_shape.append(self.len)
         return tuple(output_shape)
@@ -47,7 +46,7 @@ class RobeLookUp(Op):
 
 
 class RobeLookUp_Gradient(Op):
-    def __init__(self, vectors, index, embed_shape, ctx=None):
+    def __init__(self, vectors, index, robe_shape, ctx=None):
         inputs = [vectors]
         if isinstance(index, Op):
             inputs.append(index)
@@ -56,24 +55,24 @@ class RobeLookUp_Gradient(Op):
             self.index = index
         super().__init__(RobeLookUp_Gradient,
                          inputs, ctx)
-        self.embed_shape = embed_shape
-        self.use_indexed_slices = True
+        self.robe_shape = robe_shape
+        self.use_robe_slices = True
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        assert self.embed_shape
+        assert self.robe_shape
         if self.index is None:
             output_val.update(
-                values=input_vals[0], indices=input_vals[1], dense_shape=self.embed_shape)
+                values=input_vals[0], indices=input_vals[1], dense_shape=self.robe_shape)
         else:
             output_val.update(
-                values=input_vals[0], indices=self.index, dense_shape=self.embed_shape)
+                values=input_vals[0], indices=self.index, dense_shape=self.robe_shape)
 
     def gradient(self, output_grad):
         raise NotImplementedError
 
     def infer_shape(self, input_shapes):
-        assert self.embed_shape
-        return self.embed_shape
+        assert self.robe_shape
+        return self.robe_shape
 
 
 def robe_lookup_op(roar, index, len, ctx=None):
@@ -94,7 +93,7 @@ def robe_lookup_op(roar, index, len, ctx=None):
     return RobeLookUp(roar, index, len, ctx=ctx)
 
 
-def robe_lookup_gradient_op(vectors, index, embed_shape, ctx=None):
+def robe_lookup_gradient_op(vectors, index, robe_shape, ctx=None):
     """Make a new instance of EmbeddingLookUp_Gradient and call the instance.
 
     Parameters:
@@ -109,4 +108,4 @@ def robe_lookup_gradient_op(vectors, index, embed_shape, ctx=None):
     A new Node instance created by Op.
 
     """
-    return RobeLookUp_Gradient(vectors, index, embed_shape, ctx=ctx)
+    return RobeLookUp_Gradient(vectors, index, robe_shape, ctx=ctx)

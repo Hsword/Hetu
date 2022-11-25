@@ -15,6 +15,7 @@ def robe_lookup(in_mat, ids, out_mat, len, stream=None):
 
 
 def robe_lookup_gradient(grad_out, ids, grad_in, stream=None):
+    assert(0)
     assert isinstance(grad_out, _nd.NDArray)
     assert isinstance(ids, _nd.NDArray)
     assert isinstance(grad_in, _nd.NDArray)

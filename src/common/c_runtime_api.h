@@ -734,7 +734,11 @@ HETUSYS_EXTERN_C {
         DLArrayHandle grad_values, float l2reg, DLStreamHandle stream_handle);
     int SGDOptimizerUpdate(DLArrayHandle param, const DLArrayHandle grad,
                            float lr, DLStreamHandle stream_handle);
-
+    int SGDOptimizerRobeUpdate(DLArrayHandle param,
+                                 const DLArrayHandle grad_indices,
+                                 const DLArrayHandle grad_values, float lr,
+                                 DLStreamHandle stream_handle);
+    
     int SGDOptimizerSparseUpdate(DLArrayHandle param,
                                  const DLArrayHandle grad_indices,
                                  const DLArrayHandle grad_values, float lr,

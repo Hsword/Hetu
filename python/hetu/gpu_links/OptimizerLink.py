@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 import ctypes
 from .._base import _LIB
-from ..ndarray import NDArray, IndexedSlices
+from ..ndarray import NDArray, IndexedSlices, RobeSlices
 
 
 def add_l2_regularization(param, grad, l2reg, stream=None):
@@ -16,9 +16,14 @@ def add_l2_regularization(param, grad, l2reg, stream=None):
 
 def sgd_update(param, grad, lr, l2reg, stream=None):
     assert isinstance(param, NDArray)
-    assert isinstance(grad, (NDArray, IndexedSlices))
+    assert isinstance(grad, (NDArray, IndexedSlices, RobeSlices))
     grad = add_l2_regularization(param, grad, l2reg, stream)
-    if isinstance(grad, IndexedSlices):
+    if isinstance(grad, RobeSlices):
+        assert isinstance(grad.indices, NDArray)
+        assert isinstance(grad.values, NDArray)
+        _LIB.SGDOptimizerRobeUpdate(param.handle, grad.indices.handle, grad.values.handle, ctypes.c_float(
+            lr), stream.handle if stream else None)
+    elif isinstance(grad, IndexedSlices):
         grad.deduplicate(stream)
         assert isinstance(grad.dedup_ind, NDArray)
         assert isinstance(grad.dedup_val, NDArray)
