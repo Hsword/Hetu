@@ -41,7 +41,7 @@ __global__ void ha2a_reverse_layout_transform_kernel(const float* input_data, fl
         gpu_id = tmp/data_size_per_gpu_per_gpu;
         offset = tmp%data_size_per_gpu_per_gpu;
         for (int j = threadIdx.x; j < hidden; j += 1024){
-            output_data[(gpu_id*data_size_per_gpu+target_node_id*data_size_per_gpu_per_node+target_gpu_id*data_size_per_gpu_per_gpu+offset) * (hidden) + j]=input_data[i * (hidden) + j];
+            output_data[(target_gpu_id*data_size_per_gpu+target_node_id*data_size_per_gpu_per_node+gpu_id*data_size_per_gpu_per_gpu+offset) * (hidden) + j]=input_data[i * (hidden) + j];
         }
     }
 }
