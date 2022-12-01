@@ -88,10 +88,10 @@ Train Hetu Wide & Deep model on gpu:
 bash examples/ctr/tests/local_wdl_adult.sh
 ```
 
-Train Hetu Wide & Deep model with allreduce on 8 gpus:
+Train Hetu Wide & Deep model parallelly on 4 gpus:
 
 ```bash
-bash examples/ctr/tests/local_wdl_adult_dp.sh
+bash examples/ctr/tests/hybrid_wdl_adult.sh
 ```
 
 

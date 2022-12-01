@@ -604,15 +604,3 @@ class IndexedSlices(object):
             self.indices = self.original_indices
             self.values = self.original_values
             self.to_dense_flag = False
-
-    def merge(self, node):
-        assert isinstance(node, IndexedSlices)
-        if self.indices and self.values:
-            vocab_size = self.values.shape[-1]
-            new_indices = array(np.concatenate([self.indices.asnumpy(
-            ).reshape(-1), node.indices.asnumpy().reshape(-1)]), ctx=self.indices.ctx)
-            new_values = array(np.concatenate([self.values.asnumpy(
-            ).reshape(-1, vocab_size), node.values.asnumpy().reshape(-1, vocab_size)], axis=0), ctx=self.values.ctx)
-            self.update(new_indices, new_values, node.dense_shape)
-        else:
-            self.update(node.indices, node.values, node.dense_shape)

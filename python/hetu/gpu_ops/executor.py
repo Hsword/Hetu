@@ -244,6 +244,8 @@ class HetuConfig(object):
             # with context usage
             launchMPI, launchPS, self.node_strategy, devices, min_worker_num = get_launch_config_by_traverse_nodes(
                 eval_node_list, ctx)
+            gpu_devices = sorted(
+                [dev.device_id for dev in devices if ndarray.is_gpu_ctx(dev)])
             local_gpu_devices = sorted(
                 [dev.device_id for dev in devices if dev.local and ndarray.is_gpu_ctx(dev)])
             if not launchMPI and not launchPS:
@@ -255,7 +257,7 @@ class HetuConfig(object):
             else:
                 self.comm_mode = 'Hybrid'
             # in pipeline or model parallel we have to initialize another p2p stream
-            init_p2p_stream = len(devices) != ctx.worker_num
+            init_p2p_stream = len(gpu_devices) != ctx.worker_num
 
         # variables initialization
         self.seed = seed if seed is not None else np.int64(time())
