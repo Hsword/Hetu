@@ -8,7 +8,7 @@
 
 [Documentation](https://hetu-doc.readthedocs.io) | [Examples](https://hetu-doc.readthedocs.io/en/latest/Overview/performance.html)
 
-Hetu is a high-performance distributed deep learning system targeting trillions of parameters DL model training, developed by <a href="http://net.pku.edu.cn/~cuibin/" target="_blank" rel="nofollow">DAIR Lab</a> at Peking University. It takes account of both high availability in industry and innovation in academia, which has a number of advanced characteristics:
+Hetu is a high-performance distributed deep learning system targeting trillions of parameters DL model training, developed by <a href="https://cuibinpku.github.io" target="_blank" rel="nofollow">DAIR Lab</a> at Peking University. It takes account of both high availability in industry and innovation in academia, which has a number of advanced characteristics:
 
 - Applicability. DL model definition with standard dataflow graph; many basic CPU and GPU operators; efficient implementation of more than plenty of DL models and at least popular 10 ML algorithms.
 
@@ -21,6 +21,12 @@ Hetu is a high-performance distributed deep learning system targeting trillions 
 - Agility. Automatically ML pipeline: feature engineering, model selection, hyperparameter search.
 
 We welcome everyone interested in machine learning or graph computing to contribute codes, create issues or pull requests. Please refer to [Contribution Guide](CONTRIBUTING.md) for more details.
+
+## Key Features
+
+<div align=center>
+<img src="./img/features.png" width="800" />
+</div>
 
 ## Installation
 1. Clone the repository.
@@ -54,7 +60,7 @@ make hetu_cache -j 8
 
 
 
-## Usage
+## Basic Usage
 
 Train logistic regression on gpu:
 
@@ -87,12 +93,12 @@ Train a 3-layer mlp with PS on 1 server and 2 workers:
 bash examples/cnn/scripts/hetu_2gpu_ps.sh mlp CIFAR10
 ```
 
-
 ## More Examples
-Please refer to examples directory, which contains CNN, NLP, CTR, GNN training scripts. For distributed training, please refer to CTR and GNN tasks.
+Please refer to examples directory, which contains CNN, NLP, CTR, MoE, GNN training scripts. If you want more, please join our community and contact with us!
 
 ## Community
 * Email: xupeng.miao@pku.edu.cn
+* Click [here](https://join.slack.com/t/hetu-ai/shared_invite/zt-1kpanxc83-9YndNPZYDH9orbR6MeIMbg) to join our Slack community.
 * Hetu homepage: https://hetu-doc.readthedocs.io
 * [Committers & Contributors](COMMITTERS.md)
 * [Contributing to Hetu](CONTRIBUTING.md)
@@ -103,8 +109,16 @@ Please refer to examples directory, which contains CNN, NLP, CTR, GNN training s
 
 If you are enterprise users and find Hetu is useful in your work, please let us know, and we are glad to add your company logo here.
 
+* Tencent Inc.
+
 <img src="./img/tencent.png" width = "200"/>
+
+* Alibaba Cloud.
+
 <img src="./img/alibabacloud.png" width = "200"/>
+
+* Kuaishou Tech.
+
 <img src="./img/kuaishou.png" width = "200"/>
 
 
@@ -113,16 +127,16 @@ If you are enterprise users and find Hetu is useful in your work, please let us 
 The entire codebase is under [license](LICENSE)
 
 ## Papers
-  1. Xupeng Miao, Lingxiao Ma, Zhi Yang, Yingxia Shao, Bin Cui, Lele Yu, Jiawei Jiang. [CuWide: Towards Efficient Flow-based Training for Sparse Wide Models on GPUs](https://ieeexplore.ieee.org/document/9261124). TKDE 2021, ICDE 2021
-  2. Xupeng Miao, Xiaonan Nie, Yingxia Shao, Zhi Yang, Jiawei Jiang, Lingxiao Ma, Bin Cui. [Heterogeneity-Aware Distributed Machine Learning Training via Partial Reduce](https://doi.org/10.1145/3448016.3452773). SIGMOD 2021
-  3. Xupeng Miao, Hailin Zhang, Yining Shi, Xiaonan Nie, Zhi Yang, Yangyu Tao, Bin Cui. [HET: Scaling out Huge Embedding Model Training via Cache-enabled Distributed Framework](https://arxiv.org/abs/2112.07221). VLDB 2022, ChinaSys 2021 Winter.
-  4. Xupeng Miao, Yining Shi, Hailin Zhang, Xin Zhang, Xiaonan Nie, Zhi Yang, Bin Cui. [HET-GMP: a Graph-based System Approach to Scaling Large Embedding Model Training](https://dl.acm.org/doi/10.1145/3514221.3517902). SIGMOD 2022.
-  5. Xiaonan Nie, Xupeng Miao, Zhi Yang, Bin Cui. TSplit: Fine-grained GPU Memory Management for Efficient DNN Training via Tensor Splitting. ICDE 2022.
-  6. Sicong Dong, Xupeng Miao, Pengkai Liu, Xin Wang, Bin Cui, Jianxin Li. HET-KG: Communication-Efficient Knowledge Graph Embedding Training via Hotness-Aware Cache. ICDE 2022.
-  5. Xupeng Miao, Yujie Wang, Jia Shen, Yingxia Shao, Bin Cui. Graph Neural Network Training Acceleration over Multi-GPUs. Journal of Software (Chinese).
-  6. Xiaonan Nie, Shijie Cao, Xupeng Miao, Lingxiao Ma, Jilong Xue, Youshan Miao, Zichao Yang, Zhi Yang, Bin Cui. [Dense-to-Sparse Gate for Mixture-of-Experts](https://arxiv.org/abs/2112.14397). arXiv 2021.
-  7. Renrui Zhang, Ziyu Guo, Wei Zhang, Kunchang Li, Xupeng Miao, Bin Cui, Yu Qiao, Peng Gao, Hongsheng Li. [PointCLIP: Point Cloud Understanding by CLIP](https://arxiv.org/abs/2112.02413). CVPR 2022.
-  8. coming soon
+  1. Xupeng Miao, Hailin Zhang, Yining Shi, Xiaonan Nie, Zhi Yang, Yangyu Tao, Bin Cui. [HET: Scaling out Huge Embedding Model Training via Cache-enabled Distributed Framework](https://arxiv.org/abs/2112.07221). VLDB 2022 (Best Scalable Data Science Paper), ChinaSys 2021 Winter
+  2. Xupeng Miao, Yining Shi, Hailin Zhang, Xin Zhang, Xiaonan Nie, Zhi Yang, Bin Cui. [HET-GMP: a Graph-based System Approach to Scaling Large Embedding Model Training](https://dl.acm.org/doi/10.1145/3514221.3517902). SIGMOD 2022, ChinaSys 2022
+  3. Xupeng Miao, Yujie Wang, Youhe Jiang,  Chunan Shi and Xiaonan Nie, Hailin Zhang, Bin Cui. [Galvatron: Efficient Transformer Training over Multiple GPUs Using Automatic Parallelism](https://arxiv.org/abs/2211.13878). VLDB 2023
+  4. Xupeng Miao, Xiaonan Nie, Yingxia Shao, Zhi Yang, Jiawei Jiang, Lingxiao Ma, Bin Cui. [Heterogeneity-Aware Distributed Machine Learning Training via Partial Reduce](https://doi.org/10.1145/3448016.3452773). SIGMOD 2021
+  5. Xupeng Miao, Lingxiao Ma, Zhi Yang, Yingxia Shao, Bin Cui, Lele Yu, Jiawei Jiang. [CuWide: Towards Efficient Flow-based Training for Sparse Wide Models on GPUs](https://ieeexplore.ieee.org/document/9261124). TKDE 2021, ICDE 2021.
+  6. Xiaonan Nie, Xupeng Miao, Zhi Yang, Bin Cui. [TSplit: Fine-grained GPU Memory Management for Efficient DNN Training via Tensor Splitting](https://ieeexplore.ieee.org/document/9835178). ICDE 2022.
+  7. Sicong Dong, Xupeng Miao, Pengkai Liu, Xin Wang, Bin Cui, Jianxin Li. [HET-KG: Communication-Efficient Knowledge Graph Embedding Training via Hotness-Aware Cache](https://ieeexplore.ieee.org/document/9835364). ICDE 2022.
+  8. Xupeng Miao, Yujie Wang, Jia Shen, Yingxia Shao, Bin Cui. Graph Neural Network Training Acceleration over Multi-GPUs. Journal of Software (Chinese).
+  9. Xiaonan Nie, Shijie Cao, Xupeng Miao, Lingxiao Ma, Jilong Xue, Youshan Miao, Zichao Yang, Zhi Yang, Bin Cui. [EvoMoE: An Evolutional Mixture-of-Experts Training Framework via Dense-To-Sparse Gate](https://arxiv.org/abs/2112.14397). arXiv 2021.
+  10. coming soon
 
 ## Cite
 
@@ -131,14 +145,18 @@ If you use Hetu in a scientific publication, we would appreciate citations to th
  @article{miao2021het,
    title={HET: Scaling out Huge Embedding Model Training via Cache-enabled Distributed Framework},
    author={Miao, Xupeng and Zhang, Hailin and Shi, Yining and Nie, Xiaonan and Yang, Zhi and Tao, Yangyu and Cui, Bin},
-   journal={arXiv preprint arXiv:2112.07221},
-   year={2021}
+   journal = {Proc. {VLDB} Endow.},
+   volume = {15},
+   number = {2},
+   pages = {312--320},
+   year = {2022},
+   publisher = {VLDB Endowment}
  }
 ```
 
 ## Acknowledgements
 
-We learned and borrowed insights from a few open source projects including [TinyFlow](https://github.com/tqchen/tinyflow), [autodist](https://github.com/petuum/autodist), [tf.distribute](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/python/distribute) and [Angel](https://github.com/Angel-ML/angel).
+We learned and borrowed insights from a few open source projects including [TinyFlow](https://github.com/tqchen/tinyflow), [autodist](https://github.com/petuum/autodist), [tf.distribute](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/python/distribute), [FlexFlow](https://github.com/flexflow/FlexFlow) and [Angel](https://github.com/Angel-ML/angel).
 
 ## Appendix
 The prerequisites for different modules in Hetu is listed as follows:
