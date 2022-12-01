@@ -10,6 +10,7 @@ class ViTConfig(object):
         num_hidden_layers=12,
         num_attention_heads=12,
         intermediate_size=3072,
+        num_labels=50,
         hidden_act="relu",
         hidden_dropout_prob=0.0,
         attention_probs_dropout_prob=0.0,
@@ -31,6 +32,7 @@ class ViTConfig(object):
         self.num_hidden_layers = num_hidden_layers
         self.num_attention_heads = num_attention_heads
         self.intermediate_size = intermediate_size
+        self.num_labels = num_labels
         self.hidden_act = hidden_act
         self.hidden_dropout_prob = hidden_dropout_prob
         self.attention_probs_dropout_prob = attention_probs_dropout_prob

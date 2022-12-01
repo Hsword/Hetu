@@ -395,3 +395,23 @@ class ViTModel(object):
         head_outputs = (sequence_output, pooled_output) if pooled_output is not None else (
             sequence_output,)
         return head_outputs
+
+
+class ViTForImageClassification(object):
+    def __init__(self, config):
+        self.config = config
+        self.num_labels = config.num_labels
+        self.vit = ViTModel(config, add_pooling_layer=False)
+        self.hidden_size = config.hidden_size
+        self.classifier = ht.layers.Linear(config.hidden_size, config.num_labels, weight_transpose=True)
+        
+    def __call__(self, pixel_values, input_shape, labels):
+        pixel_values = ht.transpose_op(pixel_values, (0, 3, 1, 2))
+        outputs = self.vit(pixel_values, input_shape)
+        sequence_output = ht.slice_op(outputs[0], (0, 0, 0), (-1, 1, -1))
+        sequence_output = ht.array_reshape_op(sequence_output, (-1, self.hidden_size))
+    
+        logits = self.classifier(sequence_output)
+        loss = ht.softmaxcrossentropy_op(logits, labels)
+        loss = ht.reduce_mean_op(loss, [0])
+        return loss, logits

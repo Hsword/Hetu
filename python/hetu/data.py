@@ -1,6 +1,7 @@
 import numpy as np
 import os
-
+from PIL import Image
+from .dataloader import ImageFolder
 
 def mnist(dataset='mnist.pkl.gz', onehot=True):
     import six.moves.cPickle as pickle
@@ -150,6 +151,19 @@ def cifar100(directory='CIFAR_100', onehot=True):
     return train_images, train_labels, test_images, test_labels
 
 
+def imagetnet(directory='ImagetNet1K', onehot=True, shuffle=True):
+    train = ImageFolder(os.path.join(directory, 'train'), transform=resize(size=(224, 224)))
+    val = ImageFolder(os.path.join(directory, 'val'), transform=resize(size=(224, 224)))
+    train_targets = train.targets
+    val_targets = val.targets
+    if shuffle:
+        train.shuffle()
+    if onehot:
+        train_targets = convert_to_one_hot(train_targets)
+        val_targets = convert_to_one_hot(val_targets)
+    return train, train_targets, val, val_targets
+
+
 def normalize_cifar(num_class=10, onehot=True):
     if num_class == 10:
         x_train, y_train, x_test, y_test = cifar10(onehot=onehot)
@@ -222,54 +236,84 @@ def convert_to_one_hot(vals, max_val=0):
 # Not in use currently #
 ########################
 
-def data_augmentation(images, mode='train', flip=False,
-                      crop=False, crop_shape=(24, 24, 3), whiten=False,
-                      noise=False, noise_mean=0, noise_std=0.01):
-    if crop:
-        if mode == 'train':
-            images = self._image_crop(images, shape=crop_shape)
-        elif mode == 'test':
-            images = self._image_crop_test(images, shape=crop_shape)
-    if flip:
-        images = self._image_flip(images)
-    if whiten:
-        images = self._image_whitening(images)
-    if noise:
-        images = self._image_noise(images, mean=noise_mean, std=noise_std)
+class resize(object):
+    def __init__(self, size, interpolation=Image.BILINEAR):
+        self.size = size
+        self.interpolation = interpolation
+    
+    def __call__(self, img):             
+        if isinstance(self.size, int) or len(self.size) == 1:
+            if isinstance(self.size, Sequence):
+                size = self.size[0]
+            w, h = img.size
+            if (w <= h and w == size) or (h <= w and h == size):
+                return img
+            if w < h:
+                ow = size
+                oh = int(size * h / w)
+                return img.resize((ow, oh), self.interpolation)
+            else:
+                oh = size
+                ow = int(size * w / h)
+                return img.resize((ow, oh), self.interpolation)
+        else:
+            return img.resize(self.size[::-1], self.interpolation)
 
-    return images
+class data_augmentation(object):
+    def __init__(self, mode='train', flip=False, crop=False, crop_shape=(24, 24, 3), whiten=False, noise=False, noise_mean=0, noise_std=0.01):
+        self.mode = mode
+        self.flip = flip
+        self.crop = crop
+        self.crop_shape = crop_shape
+        self.whiten = whiten
+        self.noise = noise
+        self.noise_std = noise_std
+    
+    def __call__(self, image):             
+        if self.crop:
+            if self.mode == 'train':
+                image = _image_crop(image, shape=self.crop_shape)
+            elif mode == 'test':
+                image = _image_crop_test(image, shape=self.crop_shape)
+        if self.flip:
+            image = _image_flip(image)
+        if self.whiten:
+            image = _image_whitening(image)
+        if self.noise:
+            image = _image_noise(image, mean=self.noise_mean, std=self.noise_std)
+
+        return image
 
 
 def _image_crop(images, shape):
     new_images = []
-    for i in range(images.shape[0]):
-        old_image = images[i, :, :, :]
-        old_image = numpy.pad(old_image, [[4, 4], [4, 4], [0, 0]], 'constant')
-        left = numpy.random.randint(old_image.shape[0] - shape[0] + 1)
-        top = numpy.random.randint(old_image.shape[1] - shape[1] + 1)
-        new_image = old_image[left: left+shape[0], top: top+shape[1], :]
-        new_images.append(new_image)
+    old_image = images[ :, :, :]
+    old_image = np.pad(old_image, [[4, 4], [4, 4], [0, 0]], 'constant')
+    left = np.random.randint(old_image.shape[0] - shape[0] + 1)
+    top = np.random.randint(old_image.shape[1] - shape[1] + 1)
+    new_image = old_image[left: left+shape[0], top: top+shape[1], :]
+    new_images.append(new_image)
 
-    return numpy.array(new_images)
+    return np.array(new_images)
 
 
 def _image_crop_test(images, shape):
     new_images = []
     for i in range(images.shape[0]):
         old_image = images[i, :, :, :]
-        old_image = numpy.pad(old_image, [[4, 4], [4, 4], [0, 0]], 'constant')
+        old_image = np.pad(old_image, [[4, 4], [4, 4], [0, 0]], 'constant')
         left = int((old_image.shape[0] - shape[0]) / 2)
         top = int((old_image.shape[1] - shape[1]) / 2)
         new_image = old_image[left: left+shape[0], top: top+shape[1], :]
         new_images.append(new_image)
 
-    return numpy.array(new_images)
+    return np.array(new_images)
 
 
 def _image_flip(images):
     for i in range(images.shape[0]):
         old_image = images[i, :, :, :]
-        if numpy.random.random() < 0.5:
+        if np.random.random() < 0.5:
             new_image = cv2.flip(old_image, 1)
         else:
             new_image = old_image
@@ -281,7 +325,7 @@ def _image_flip(images):
 def _image_whitening(images):
     for i in range(images.shape[0]):
         old_image = images[i, :, :, :]
-        new_image = (old_image - numpy.mean(old_image)) / numpy.std(old_image)
+        new_image = (old_image - np.mean(old_image)) / np.std(old_image)
         images[i, :, :, :] = new_image
 
     return images

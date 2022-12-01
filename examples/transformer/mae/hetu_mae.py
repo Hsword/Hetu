@@ -3,7 +3,7 @@ import numpy as np
 import collections.abc
 import math
 from typing import Dict, List, Optional, Set, Tuple, Union
-
+from copy import deepcopy
 from config import ViTMAEConfig
 
 
@@ -403,4 +403,93 @@ class ViTMAEModel(object):
         sequence_output = encoder_outputs[0]
         sequence_output = self.layernorm(sequence_output)
 
-        return [sequence_output]
+        return [sequence_output, mask, ids_restore, len_keep]
+
+class ViTMAEDecoder(object):
+    def __init__(self, config, num_patches):
+        self.config = config
+        self.num_patches = num_patches
+        self.hidden_size = config.hidden_size
+        self.decoder_hidden_size = config.decoder_hidden_size
+        self.decoder_embed = ht.layers.Linear(config.hidden_size, config.decoder_hidden_size, weight_transpose=True, bias=True)
+        self.mask_token = ht.init.random_normal(shape=(1, 1, config.decoder_hidden_size), stddev=config.initializer_range)
+        decoder_pos_embed = get_2d_sincos_pos_embed(
+            config.decoder_hidden_size, int(num_patches**0.5), add_cls_token=True
+        )
+        decoder_pos_embed = np.expand_dims(decoder_pos_embed,0)
+        self.decoder_pos_embed = ht.Variable(name='decoder_pos_embed', value=decoder_pos_embed, trainable=False)
+
+        decoder_config = deepcopy(config)
+        decoder_config.hidden_size = config.decoder_hidden_size
+        decoder_config.num_hidden_layers = config.decoder_num_hidden_layers
+        decoder_config.num_attention_heads = config.decoder_num_attention_heads
+        decoder_config.intermediate_size = config.decoder_intermediate_size
+        self.decoder_layers = [ViTMAELayer(decoder_config) for _ in range(config.decoder_num_hidden_layers)]
+
+        self.decoder_norm = ht.layers.LayerNorm(config.decoder_hidden_size, eps=config.layer_norm_eps)
+        self.pred_dim = config.patch_size**2 * config.num_channels
+        self.decoder_pred = ht.layers.Linear(config.decoder_hidden_size, self.pred_dim, weight_transpose=True, bias=True)
+
+    def __call__(self, hidden_states, hidden_states_shape, ids_restore, ids_restore_shape):
+        batch_size = hidden_states_shape[0]
+        hidden_states = ht.array_reshape_op(hidden_states, (-1, self.hidden_size))
+        x = self.decoder_embed(hidden_states)
+        x = ht.array_reshape_op(x, hidden_states_shape[:-1]+(-1, ))
+        mask_tokens = ht.repeat_op(self.mask_token, (batch_size, ids_restore_shape[1] + 1 - hidden_states_shape[1], 1))
+
+        x_ = ht.concat_op(ht.slice_op(x, (0, 1, 0), (-1, -1, -1)), mask_tokens, axis=1)
+        x_ = ht.gather_op(x_, dim=1, index=ht.repeat_op(ht.unsqueeze_op(ids_restore, -1), (1, 1, self.decoder_hidden_size)))
+        x = ht.concat_op(ht.slice_op(x, (0, 0, 0), (-1, 1, -1)), x_, axis=1)
+
+        hidden_states = x + ht.broadcast_shape_op(self.decoder_pos_embed, (batch_size, -1, -1))
+
+        for i, layer_module in enumerate(self.decoder_layers):
+            layer_outputs = layer_module(hidden_states, (batch_size, ids_restore_shape[1]+1, self.decoder_hidden_size))
+            hidden_states = layer_outputs[0]
+
+        hidden_states = self.decoder_norm(hidden_states)
+        hidden_states = ht.array_reshape_op(hidden_states, (-1, self.decoder_hidden_size))
+        logits = self.decoder_pred(hidden_states)
+        logits = ht.array_reshape_op(logits, (batch_size, -1, self.pred_dim))
+        logits = ht.slice_op(logits, (0, 1, 0), (-1, -1, -1))
+        return logits
+
+
+
+class ViTMAEForPreTraining(object):
+    def __init__(self, config):
+        self.config = config
+        self.vit = ViTMAEModel(config)
+        self.num_patches = self.vit.embeddings.num_patches
+        self.decoder = ViTMAEDecoder(config, num_patches=self.vit.embeddings.num_patches)
+
+    def patchify(self, pixel_values, input_shape):
+        patch_size, num_channels = self.config.patch_size, self.config.num_channels
+        batch_size = input_shape[0]
+        num_patches_one_direction = input_shape[2] // patch_size
+        patchified_pixel_values = ht.array_reshape_op(pixel_values, (batch_size, num_channels, num_patches_one_direction, patch_size,         num_patches_one_direction, patch_size))
+
+        patchified_pixel_values = ht.transpose_op(patchified_pixel_values, (0, 2, 4, 3, 5, 1))
+        patchified_pixel_values = ht.array_reshape_op(pixel_values, (
+            batch_size, num_patches_one_direction * num_patches_one_direction, patch_size**2 * num_channels
+        ))
+        return patchified_pixel_values
+
+
+    def forward_loss(self, pixel_values, input_shape, pred, mask):
+        target = self.patchify(pixel_values, input_shape)
+            
+        loss = pred + (-1)*target
+        loss = ht.pow_op(loss, 2)
+        loss = ht.reduce_mean_op(loss, -1)
+        loss = ht.reduce_sum_op(loss * mask, [0,1]) / ht.reduce_sum_op(mask, [0,1])
+        return loss
+
+    def __call__(self, pixel_values=None, input_shape=None, target_values=None, noise=None):
+        batch_size = input_shape[0]
+        pixel_values = ht.transpose_op(pixel_values, (0, 3, 1, 2))
+        latent, mask, ids_restore, len_keep = self.vit(pixel_values, input_shape, noise=noise)
+        ids_restore_shape = (batch_size, self.num_patches)
+        logits = self.decoder(latent, (batch_size, len_keep + 1 , self.config.hidden_size), ids_restore, ids_restore_shape)
+        loss = self.forward_loss(pixel_values, input_shape, logits, mask)
+        return loss
