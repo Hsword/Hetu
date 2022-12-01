@@ -15,7 +15,7 @@ sh prepare_env.sh
 ## Galvatron System Architecture
 Galvatron is consisted of four modules, including an automatic profiler, a strategy cost estimator, parallelism optimization block, and Galvatron runtime framework. To train Transformer models over multiple GPUs using automatic parallelism with Galvatron, users only need to provide with hardware environment and the Transformer model configuration.
 
-<div align=center> <img src="./figs/arch.jpg" width="800" /> </div>
+<div align=center> <img src="./figs/api.jpg" width="800" /> </div>
 
 ## Usage
 
@@ -66,8 +66,6 @@ Galvatron provides a simple way to train Transformer models in layerwise hybrid 
 Users can either train Transformer models with the optimal parallel strategy searched by the parallelsim optimization block to obtain the optimal throughput, or use any hybrid parallel strategy as they like. Galvatron support three hybrid parallel config modes, including JSON config mode, PYTHON config mode, and GLOBAL config mode. Users can specify hybrid parallel strategies by modifying only a few arguments or a few lines of codes. Enter the corresponding directory of the model to see detailed guidance.
 
 It is fairly simple to construct a layerwise hybrid parallel model in Galvatron, which only requires a few modification to the training scripts on single GPU.
-<div align=center> <img src="./figs/api.jpg" width="500" /> </div>
-
 
 In the model directory ```bert, t5, vit, swin```, to train the model on single GPU, run:
 ``` shell
