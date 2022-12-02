@@ -62,46 +62,46 @@ make hetu_cache -j 8
 
 ## Basic Usage
 
-Train Hetu resnet on gpu:
+ResNet training on singel gpu:
 
 ```bash
 bash examples/cnn/scripts/hetu_1gpu.sh resnet18 CIFAR10
 ```
 
-Train Hetu resnet with allreduce on 8 gpus:
+ResNet training with All-Reduce on 8 gpus:
 
 ```bash
 bash examples/cnn/scripts/hetu_8gpu.sh resnet18 CIFAR10
 ```
 
-Train Hetu BERT base model on gpu:
+BERT-base training on single gpu:
 
 ```bash
 cd examples/nlp/bert && bash scripts/create_datasets_from_start.sh # Dataset preparing
 bash scripts/train_hetu_bert_base.sh
 ```
 
-Train Hetu BERT base model with allreduce on 4 gpus:
+BERT-base training with All-Reduce on 4 gpus:
 
 ```bash
 cd examples/nlp/bert && bash scripts/create_datasets_from_start.sh # Dataset preparing
 bash scripts/train_hetu_bert_base_dp.sh
 ```
 
-Train Hetu Wide & Deep model on gpu:
+Wide & Deep training on single gpu:
 
 ```bash
 bash examples/ctr/tests/local_wdl_adult.sh
 ```
 
-Train Hetu Wide & Deep model parallelly on 4 gpus:
+Wide & Deep training on 4 gpus using [HET](https://arxiv.org/abs/2112.07221):
 
 ```bash
 bash examples/ctr/tests/hybrid_wdl_adult.sh
 ```
 
 ## More Examples
-Please refer to examples directory, which contains CNN, NLP, CTR, MoE, GNN training scripts. If you want more, please join our community and contact with us!
+Please refer to examples directory, which contains CNN, NLP, CTR, MoE, GNN training scripts. If you want to know more about the communication architecture (parameter server, collective communication) and automatic parallelism (e.g., data parallel, tensor parallel, pipeline parallel, shared data parallel expert parallel) provided by Hetu, please join our community and contact with us!
 
 ## Community
 * Email: xupeng.miao@pku.edu.cn
