@@ -5,7 +5,7 @@ import torch
 
 def conv2d(x, in_channel, out_channel, stride=1, padding=1, kernel_size=3, name=''):
     a = torch.nn.Conv2d(in_channel, out_channel, kernel_size, stride=stride)
-    weight = ht.Variable(name=name+'_weight', value=a.weight.detach().numpy(), ctx=ndarray.gpu(0))
+    weight = ht.Variable(name=name+'_weight', value=a.weight.detach().numpy(), ctx=x.ctx)
     # weight = init.he_normal(
     #     shape=(out_channel, in_channel, kernel_size, kernel_size), name=name+'_weight')
     x = ht.conv2d_op(x, weight, stride=stride, padding=padding)

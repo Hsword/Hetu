@@ -96,7 +96,7 @@ def pretrain(args):
     eval_nodes = {'train': [masked_lm_loss_mean,
                             next_sentence_loss_mean, loss, train_op]}
     strategy = ht.dist.DataParallel(aggregate='PS')
-    executor = ht.Executor(eval_nodes, dist_strategy=strategy, prefetch=False, dynamic_memory=True)
+    executor = ht.Executor(eval_nodes, dist_strategy=strategy, prefetch=False)
 
     global_step_num = 0
     for ep in range(num_epochs):
