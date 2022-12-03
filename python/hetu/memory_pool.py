@@ -21,7 +21,8 @@ import numpy as np
 class HetuMemoryPool(object):
     def __init__(self):
         # here the indexed_nodes only used for flexflow
-        self.indexed_nodes = (EmbeddingLookUp_Gradient, DataD2HSparseOp, DataH2DSparseOp, SparseSumOp)
+        self.indexed_nodes = (EmbeddingLookUp_Gradient,
+                              DataD2HSparseOp, DataH2DSparseOp, SparseSumOp)
         self.ln_bn_grad_nodes = (Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp,
                                  Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp)
 
