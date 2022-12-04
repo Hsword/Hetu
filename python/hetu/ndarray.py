@@ -666,13 +666,17 @@ class IndexedSlices(object):
                 shape, ctx=self.values.ctx, dtype=self.values.dtype)
 
 class RobeSlices(object):
-    __slots__ = ["indices", "values", "dense_shape", "lazy",
+    __slots__ = ["indices", "values", "x", "dense_shape", "Bg", "Cg", "Dg", "lazy",
                  "dedup_ind", "dedup_val", "dedup_args", "dense_arr", ]
 
-    def __init__(self, indices=None, values=None, dense_shape=None):
+    def __init__(self, indices=None, values=None, x=None, dense_shape=None):
         self.indices = indices
         self.values = values
+        self.x = x
         self.dense_shape = dense_shape
+        self.Bg = None
+        self.Cg = None
+        self.Dg = None
         self.lazy = False
         self.dense_arr = None
         self.dedup_args = None
@@ -685,9 +689,13 @@ class RobeSlices(object):
         assert isinstance(self.values, NDArray)
         return self.values.shape
 
-    def update(self, indices, values, dense_shape):
+    def update(self, indices, values, x, Bg, Cg, Dg, dense_shape):
         self.indices = indices
         self.values = values
+        self.x = x
+        self.Bg = Bg
+        self.Cg = Cg
+        self.Dg = Dg
         if self.dense_shape is not None:
             assert tuple(self.dense_shape) == tuple(dense_shape)
         else:

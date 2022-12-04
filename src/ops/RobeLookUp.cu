@@ -1,8 +1,8 @@
 #include "gpu_runtime.h"
 
-__global__ void robe_lookup_kernel(const float *input, const int *ids,
+__global__ void robe_lookup_kernel(const float *input, const int *ids, const int *x,
                                         float *output, size_t size,
-                                        size_t length, size_t roarsz) {
+                                        size_t length, int Bg, int Cg, int Dg, size_t roarsz) {
     size_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= size)
         return;
@@ -13,13 +13,16 @@ __global__ void robe_lookup_kernel(const float *input, const int *ids,
             output_ptr[i] = 0;
     } else {
         //const float *input_ptr = input + id;
-        for (int i = 0; i < length; i++)
-            output_ptr[i] = input[i+id<roarsz?(i+id):(i+id-roarsz)];
+        int X = x[index];
+        for (int i = 0; i < length; i++){
+            int sgn = (((1ll * X * Bg + 1ll * i * Cg + Dg)%998244353+998244353)%998244353 %2)*2-1;
+            output_ptr[i] = input[i+id<roarsz?(i+id):(i+id-roarsz)] * sgn;
+        }
     }
 }
 
-int DLGpuRobeLookUp(const DLArrayHandle input, const DLArrayHandle ids,
-                         DLArrayHandle output, int len,
+int DLGpuRobeLookUp(const DLArrayHandle input, const DLArrayHandle ids, const DLArrayHandle x,
+                         DLArrayHandle output, int len, int Bg, int Cg, int Dg,
                          DLStreamHandle stream_handle = NULL) {
     assert(input->ndim == 1);
     size_t size = 1;
@@ -40,6 +43,7 @@ int DLGpuRobeLookUp(const DLArrayHandle input, const DLArrayHandle ids,
     float *output_data = (float *)output->data;
     const float *input_data = (const float *)input->data;
     const int *id_list = (const int *)ids->data;
+    const int *x_list = (const int *)x->data;
     if (size <= 1024) {
         threads.x = size;
         blocks.x = 1;
@@ -50,10 +54,10 @@ int DLGpuRobeLookUp(const DLArrayHandle input, const DLArrayHandle ids,
     if (stream_handle)
         robe_lookup_kernel<<<blocks, threads, 0,
                                   *(cudaStream_t *)stream_handle->handle>>>(
-            input_data, id_list, output_data, size, length, roarsz);
+            input_data, id_list, x_list, output_data, size, length, roarsz, Bg, Cg, Dg);
     else
         robe_lookup_kernel<<<blocks, threads>>>(
-            input_data, id_list, output_data, size, length, roarsz);
+            input_data, id_list, x_list, output_data, size, length, roarsz, Bg, Cg, Dg);
     return 0;
 }
 

@@ -24,7 +24,7 @@ class RobeEmbedding(Embedding):
     def __call__(self, x):
         with ht.context(self.ctx):
             sparse_input = ht.robe_hash_op(x, self.Robe_array_size)
-            return ht.robe_lookup_op(self.Robe_array, sparse_input, self.embedding_dim)
+            return ht.robe_lookup_op(self.Robe_array, sparse_input, self.embedding_dim, x)
 
 class HashEmbedding(Embedding):
     def __init__(self, num_embeddings, embedding_dim, compress_rate=None, size_limit=None, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):

@@ -21,8 +21,9 @@ def sgd_update(param, grad, lr, l2reg, stream=None):
     if isinstance(grad, RobeSlices):
         assert isinstance(grad.indices, NDArray)
         assert isinstance(grad.values, NDArray)
-        _LIB.SGDOptimizerRobeUpdate(param.handle, grad.indices.handle, grad.values.handle, ctypes.c_float(
-            lr), stream.handle if stream else None)
+        assert isinstance(grad.x, NDArray)
+        _LIB.SGDOptimizerRobeUpdate(param.handle, grad.indices.handle, grad.values.handle, grad.x.handle, ctypes.c_float(
+            lr), ctypes.c_int(grad.Bg), ctypes.c_int(grad.Cg), ctypes.c_int(grad.Dg), stream.handle if stream else None)
     elif isinstance(grad, IndexedSlices):
         grad.deduplicate(stream)
         assert isinstance(grad.dedup_ind, NDArray)

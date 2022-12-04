@@ -338,10 +338,10 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle input_a, const DLArrayHandle input_b,
         const DLArrayHandle input_c, DLArrayHandle output,
         DLStreamHandle stream_handle);
-    
-    int DLGpuRobeLookUp(const DLArrayHandle input, const DLArrayHandle ids,
-                             DLArrayHandle output, int len,
-                             DLStreamHandle stream_handle);
+
+    int DLGpuRobeLookUp(const DLArrayHandle input, const DLArrayHandle ids, const DLArrayHandle x,
+                            DLArrayHandle output, int len, int Bg, int Cg, int Dg,
+                            DLStreamHandle stream_handle);
 
     int DLGpuRobeLookUp_Gradient(
         const DLArrayHandle output_grad, const DLArrayHandle ids,
@@ -735,10 +735,11 @@ HETUSYS_EXTERN_C {
     int SGDOptimizerUpdate(DLArrayHandle param, const DLArrayHandle grad,
                            float lr, DLStreamHandle stream_handle);
     int SGDOptimizerRobeUpdate(DLArrayHandle param,
-                                 const DLArrayHandle grad_indices,
-                                 const DLArrayHandle grad_values, float lr,
-                                 DLStreamHandle stream_handle);
-    
+                             const DLArrayHandle grad_indices,
+                             const DLArrayHandle grad_values,
+                             const DLArrayHandle grad_x,
+                             float lr, int Bg, int Cg, int Dg,
+                             DLStreamHandle stream_handle);
     int SGDOptimizerSparseUpdate(DLArrayHandle param,
                                  const DLArrayHandle grad_indices,
                                  const DLArrayHandle grad_values, float lr,
