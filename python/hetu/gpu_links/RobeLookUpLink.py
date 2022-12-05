@@ -5,7 +5,7 @@ from .._base import _LIB
 from .. import ndarray as _nd
 
 
-def robe_lookup(in_mat, ids, x, out_mat, len, Bg, Cg, Dg, stream=None):
+def robe_lookup(in_mat, ids, x, out_mat, len, Bg, Cg, Dg, Z, MO, stream=None):
     assert isinstance(in_mat, _nd.NDArray)
     assert isinstance(ids, _nd.NDArray)
     assert isinstance(x, _nd.NDArray)
@@ -15,7 +15,9 @@ def robe_lookup(in_mat, ids, x, out_mat, len, Bg, Cg, Dg, stream=None):
         len), ctypes.c_int(
         Bg), ctypes.c_int(
         Cg), ctypes.c_int(
-        Dg), stream.handle if stream else None)
+        Dg), ctypes.c_int(
+        Z), ctypes.c_int(
+        MO), stream.handle if stream else None)
 
 
 def robe_lookup_gradient(grad_out, ids, grad_in, stream=None):

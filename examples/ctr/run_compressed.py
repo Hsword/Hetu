@@ -134,10 +134,10 @@ def worker(args):
         embed_layer = htl.Embedding(
             num_embed, num_dim, initializer=initializer, ctx=ectx)
     elif args.method == 'robe':
-        compress_rate = 0.5
+        compress_rate = 0.1
         size_limit = None
         embed_layer = htl.RobeEmbedding(
-            num_embed, num_dim, compress_rate=compress_rate, size_limit=size_limit, initializer=initializer, ctx=ectx)
+            num_embed, num_dim, compress_rate=compress_rate, size_limit=size_limit, Z = args.Z, initializer=initializer, ctx=ectx)
     elif args.method == 'hash':
         compress_rate = 0.5
         size_limit = None
@@ -335,6 +335,8 @@ if __name__ == '__main__':
                         help="whether to use all data")
     parser.add_argument("--nepoch", type=int, default=-1,
                         help="num of epochs, each train 1/10 data")
+    parser.add_argument("--Z", type=int, default=None,
+                        help="block size in RobeZ")
     args = parser.parse_args()
     args.fname = '{}'.format(args.model)
     if args.method is None:

@@ -2,40 +2,40 @@
 
 __global__ void robe_lookup_kernel(const float *input, const int *ids, const int *x,
                                         float *output, size_t size,
-                                        size_t length, int Bg, int Cg, int Dg, size_t roarsz) {
+                                        size_t length, size_t roarsz, int Bg, int Cg, int Dg,int Z,int blk,int MO) {
     size_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= size)
         return;
-    int id = ids[index];
     float *output_ptr = output + length * index;
-    if (id < 0 || id >= roarsz) {
-        for (int i = 0; i < length; i++)
-            output_ptr[i] = 0;
-    } else {
-        //const float *input_ptr = input + id;
-        int X = x[index];
-        for (int i = 0; i < length; i++){
-            int sgn = (((1ll * X * Bg + 1ll * i * Cg + Dg)%998244353+998244353)%998244353 %2)*2-1;
-            output_ptr[i] = input[i+id<roarsz?(i+id):(i+id-roarsz)] * sgn;
-        }
+    
+    //const float *input_ptr = input + id;
+    int X = x[index];
+    for (int i = 0; i < length; i++){
+        int sgn = (((1ll * X * Bg + 1ll * i * Cg + Dg)%MO+MO)%MO %2)*2-1;
+        int wb = i/Z;
+        int id = ids[index * blk + wb];
+        output_ptr[i] = input[(id+i%Z)<roarsz?(id+i%Z):(id+i%Z-roarsz)] * sgn;
     }
+    
 }
 
 int DLGpuRobeLookUp(const DLArrayHandle input, const DLArrayHandle ids, const DLArrayHandle x,
-                         DLArrayHandle output, int len, int Bg, int Cg, int Dg,
+                         DLArrayHandle output, int len, int Bg, int Cg, int Dg, int Z, int MO,
                          DLStreamHandle stream_handle = NULL) {
+    
     assert(input->ndim == 1);
     size_t size = 1;
     for (int i = 0; i < output->ndim; i++) {
         if (i < output->ndim - 1) {
-            assert(ids->shape[i] == output->shape[i]);
+            assert(x->shape[i] == output->shape[i]);
         } else if (i == output->ndim - 1) {
             assert(len == output->shape[i]);
         }
     }
-    for (int i = 0; i < ids->ndim; i++) {
-        size = size * ids->shape[i];
+    for (int i = 0; i < x->ndim; i++) {
+        size = size * x->shape[i];
     }
+    int blk = ids->shape[ids->ndim - 1];
     size_t roarsz = input->shape[0];
     size_t length = (size_t)(len);
     dim3 blocks;
@@ -54,10 +54,11 @@ int DLGpuRobeLookUp(const DLArrayHandle input, const DLArrayHandle ids, const DL
     if (stream_handle)
         robe_lookup_kernel<<<blocks, threads, 0,
                                   *(cudaStream_t *)stream_handle->handle>>>(
-            input_data, id_list, x_list, output_data, size, length, roarsz, Bg, Cg, Dg);
+            input_data, id_list, x_list, output_data, size, length, roarsz, Bg, Cg, Dg, Z, blk, MO);
     else
         robe_lookup_kernel<<<blocks, threads>>>(
-            input_data, id_list, x_list, output_data, size, length, roarsz, Bg, Cg, Dg);
+            input_data, id_list, x_list, output_data, size, length, roarsz, Bg, Cg, Dg, Z, blk, MO);
+    
     return 0;
 }
 

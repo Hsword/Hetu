@@ -1,11 +1,11 @@
 #include "gpu_runtime.h"
 
-__global__ void robe_hash_kernel(const int *input, int *output, int roarsz, int Bh, int Ch, int MO,
+__global__ void robe_hash_kernel(const int *input, int *output, int roarsz, int Bh, int Ch, int Dh, int Z, int blk, int MO,
                                 size_t size) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (ind >= size)
         return;
-    output[ind] = ((input[ind] * Bh + Ch) % MO + MO) % MO % roarsz;
+    output[ind] = ((1ll * input[ind/blk] * Bh + 1ll * (ind % blk) * Ch + Dh) % MO + MO) % MO % roarsz;
 }
 
 __global__ void mod_hash_kernel(const int *input, int *output, int nembed,
@@ -60,12 +60,15 @@ __global__ void learn_hash_kernel(const int *input, const int *slope,
 }
 
 
-int DLGpuRobeHash(const DLArrayHandle input, DLArrayHandle output, int roarsz, int Bh, int Ch, int MO,
+int DLGpuRobeHash(const DLArrayHandle input, DLArrayHandle output, int roarsz, int Bh, int Ch, int Dh, int Z, int MO,
                  DLStreamHandle stream_handle = NULL) {
     size_t size = 1;
-    for (index_t i = 0; i < input->ndim; i++) {
-        size *= input->shape[i];
+    for (index_t i = 0; i < output->ndim; i++) {
+        size *= output->shape[i];
     }
+
+    int blk = output->shape[(output->ndim)-1];
+
     const int *input_data = (const int *)input->data;
     int *output_data = (int *)output->data;
     dim3 blocks, threads;
@@ -73,9 +76,9 @@ int DLGpuRobeHash(const DLArrayHandle input, DLArrayHandle output, int roarsz, i
     if (stream_handle)
         robe_hash_kernel<<<blocks, threads, 0,
                           *(cudaStream_t *)stream_handle->handle>>>(
-            input_data, output_data, roarsz, Bh, Ch, MO, size);
+            input_data, output_data, roarsz, Bh, Ch, Dh, Z, blk, MO, size);
     else
-        robe_hash_kernel<<<blocks, threads>>>(input_data, output_data, roarsz, Bh, Ch, MO, 
+        robe_hash_kernel<<<blocks, threads>>>(input_data, output_data, roarsz, Bh, Ch, Dh, Z, blk, MO, 
                                              size);
     return 0;
 }
