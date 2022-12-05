@@ -4,7 +4,7 @@ from .concatenate import Concatenate, ConcatenateLayers
 from .conv import Conv2d
 from .dropout import DropOut
 from .embedding import Embedding
-from .compressed_embedding import HashEmbedding, \
+from .compressed_embedding import RobeEmbedding, HashEmbedding, \
     CompositionalEmbedding, LearningEmbedding, \
     DPQEmbedding, AutoDimEmbedding, MDEmbedding, \
     DeepLightEmbedding, QuantizedEmbedding

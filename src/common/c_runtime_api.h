@@ -339,6 +339,14 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle input_c, DLArrayHandle output,
         DLStreamHandle stream_handle);
 
+    int DLGpuRobeLookUp(const DLArrayHandle input, const DLArrayHandle ids, const DLArrayHandle x,
+                         DLArrayHandle output, int len, int Bg, int Cg, int Dg, int Z, int MO,
+                         DLStreamHandle stream_handle);
+
+    int DLGpuRobeLookUp_Gradient(
+        const DLArrayHandle output_grad, const DLArrayHandle ids,
+        DLArrayHandle input_grad, DLStreamHandle stream_handle);
+    
     int DLGpuEmbeddingLookUp(const DLArrayHandle input, const DLArrayHandle ids,
                              DLArrayHandle output,
                              DLStreamHandle stream_handle);
@@ -726,7 +734,12 @@ HETUSYS_EXTERN_C {
         DLArrayHandle grad_values, float l2reg, DLStreamHandle stream_handle);
     int SGDOptimizerUpdate(DLArrayHandle param, const DLArrayHandle grad,
                            float lr, DLStreamHandle stream_handle);
-
+    int SGDOptimizerRobeUpdate(DLArrayHandle param,
+                             const DLArrayHandle grad_indices,
+                             const DLArrayHandle grad_values,
+                             const DLArrayHandle grad_x,
+                             float lr, int Bg, int Cg, int Dg, int Z, int MO,
+                             DLStreamHandle stream_handle);
     int SGDOptimizerSparseUpdate(DLArrayHandle param,
                                  const DLArrayHandle grad_indices,
                                  const DLArrayHandle grad_values, float lr,
@@ -1098,6 +1111,9 @@ HETUSYS_EXTERN_C {
                         DLArrayHandle output, int num_local_gpus,
                         DLStreamHandle stream_handle);
 
+    int DLGpuRobeHash(const DLArrayHandle input, DLArrayHandle output, int roarsz, int Bh, int Ch, int Dh, int Z, int MO,
+                 DLStreamHandle stream_handle);
+    
     int DLGpuModHash(const DLArrayHandle input, DLArrayHandle output,
                      int nembed, DLStreamHandle stream_handle);
 

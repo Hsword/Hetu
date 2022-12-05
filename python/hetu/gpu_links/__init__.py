@@ -41,6 +41,7 @@ from .SparseSetLink import *
 from .TanhLink import *
 from .SliceLink import *
 from .EmbeddingLookUpLink import *
+from .RobeLookUpLink import *
 from .SparseEmbeddingLookUpLink import *
 from .MinDistLink import *
 from .WhereLink import *
@@ -159,6 +160,8 @@ __all__ = [
     'matrix_slice_simple',
     'matrix_slice_gradient',
     'matrix_slice_gradient_simple',
+    'robe_lookup',
+    'robe_lookup_gradient',
     'embedding_lookup',
     'embedding_lookup_gradient',
     'sparse_embedding_lookup',

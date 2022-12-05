@@ -4,6 +4,16 @@ import ctypes
 from .._base import _LIB
 from .. import ndarray as _nd
 
+def robe_hash(in_arr, out_arr, roarsz, Bh, Ch, Dh, Z, MO, stream=None):
+    assert isinstance(in_arr, _nd.NDArray)
+    assert isinstance(out_arr, _nd.NDArray)
+    _LIB.DLGpuRobeHash(in_arr.handle, out_arr.handle, ctypes.c_int(
+        roarsz), ctypes.c_int(
+        Bh),ctypes.c_int(
+        Ch),ctypes.c_int(
+        Dh),ctypes.c_int(
+        Z),ctypes.c_int(
+        MO),stream.handle if stream else None)
 
 def mod_hash(in_arr, out_arr, nembed, stream=None):
     assert isinstance(in_arr, _nd.NDArray)

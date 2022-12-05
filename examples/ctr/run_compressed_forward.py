@@ -91,9 +91,14 @@ def worker(args):
 
     def run_epoch(train_batch_num, log_file=None):
         ep_st = time()
+        '''
         train_loss, train_acc, train_auc = train(
             train_batch_num, tqdm_enabled=True)
         return_vals = (train_auc,)
+        '''
+        train_loss, train_acc, train_auc = 0.0,0.0,0.0
+        return_vals = (train_auc,)
+
         ep_en = time()
         if args.val:
             val_loss, val_acc, val_auc, early_stop = validate(
@@ -134,10 +139,10 @@ def worker(args):
         embed_layer = htl.Embedding(
             num_embed, num_dim, initializer=initializer, ctx=ectx)
     elif args.method == 'robe':
-        compress_rate = 0.1
+        compress_rate = 0.5
         size_limit = None
         embed_layer = htl.RobeEmbedding(
-            num_embed, num_dim, compress_rate=compress_rate, size_limit=size_limit, Z = args.Z, initializer=initializer, ctx=ectx)
+            num_embed, num_dim, compress_rate=compress_rate, size_limit=size_limit, initializer=initializer, ctx=ectx)
     elif args.method == 'hash':
         compress_rate = 0.5
         size_limit = None
@@ -220,8 +225,9 @@ def worker(args):
         eval_nodes = embed_layer.make_subexecutors(
             model, dense_input, y_, prediction, loss, opt)
     else:
-        train_op = opt.minimize(loss)
-        eval_nodes = {'train': [loss, prediction, y_, train_op]}
+        #train_op = opt.minimize(loss)
+        eval_nodes = {'train': [loss]}
+        #eval_nodes = {'train': [loss, prediction, y_, train_op]}
         if args.method == 'dpq':
             eval_nodes['train'].append(embed_layer.codebook_update)
         elif args.method == 'prune':
@@ -229,6 +235,7 @@ def worker(args):
         if args.val:
             print('Validation enabled...')
             if args.method != 'dpq':
+                #eval_nodes['validate'] = [loss]
                 eval_nodes['validate'] = [loss, prediction, y_]
             else:
                 val_embed_input = embed_layer.make_inference()
@@ -335,8 +342,6 @@ if __name__ == '__main__':
                         help="whether to use all data")
     parser.add_argument("--nepoch", type=int, default=-1,
                         help="num of epochs, each train 1/10 data")
-    parser.add_argument("--Z", type=int, default=None,
-                        help="block size in RobeZ")
     args = parser.parse_args()
     args.fname = '{}'.format(args.model)
     if args.method is None:
