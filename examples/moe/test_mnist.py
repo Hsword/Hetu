@@ -1,5 +1,6 @@
 import numpy as np
 import hetu as ht
+from hetu import init
 from hetu import layers as htl
 import argparse
 import logging
@@ -13,6 +14,12 @@ def print_rank0(msg):
     if myrank == 0:
         logger.info(msg)
 
+def fc(x, shape, name):
+    weight = init.random_normal(shape=shape, stddev=0.1, name=name+'_weight')
+    bias = init.random_normal(shape=shape[-1:], stddev=0.1, name=name+'_bias')
+    x = ht.matmul_op(x, weight)
+    x = x + ht.broadcastto_op(bias, x)
+    return x
 
 def moe(args, x, y_):
     experts = []
@@ -27,11 +34,13 @@ def moe(args, x, y_):
 
     y, l_aux = model(x)
 
-    y=ht.array_reshape_op(y, [-1, args.num_tokens, args.model_dim])
-    y=ht.reduce_sum_op(y, axes = 2)
-    y=ht.softmax_op(y)
-    loss=ht.nll_loss_op(y, y_, args.num_tokens)
-    loss = loss + l_aux
+    y=ht.array_reshape_op(y, [args.batch_size, -1])
+    y=fc(y, (784, 10), "mlp")
+    #y=ht.reduce_sum_op(y, axes = 2)
+    #y=ht.softmax_op(y)
+    loss = ht.softmaxcrossentropy_op(y, y_)
+    loss = ht.reduce_mean_op(loss, [0])
+    loss = loss+0.01*l_aux 
     
 
     return loss, y
@@ -41,14 +50,14 @@ def moe(args, x, y_):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--num_tokens', type=int, default=1024)
-    parser.add_argument('--model_dim', type=int, default=2048)
+    parser.add_argument('--num_tokens', type=int, default=28)
+    parser.add_argument('--model_dim', type=int, default=28)
     parser.add_argument('--hidden_size', type=int, default=2048)
     parser.add_argument('--num_local_experts', type=int, default=2)
     parser.add_argument('--dtype', type=str, default='float32')
     parser.add_argument('--top', type=int, default=2)
     parser.add_argument('--l_aux_wt', type=float, default=0.0)
-    parser.add_argument('--num_steps', type=int, default=100)
+    parser.add_argument('--num_epochs', type=int, default=1)
     parser.add_argument('--comm-mode', default='AllReduce', help='communication mode')
 
     args = parser.parse_args()
@@ -63,15 +72,15 @@ if __name__ == "__main__":
     myrank = comm.myRank.value
     print("device_id: ", device_id)
     executor_ctx = ht.gpu(device_id % 8)
-    x_val = np.random.normal(size = (args.batch_size, args.num_tokens, args.model_dim))
-    x_val = ht.array(arr=x_val, ctx=executor_ctx)
-    x = ht.Variable(name='x', ctx=executor_ctx, trainable=False)
-    n_classes=2048
-    targets = np.random.randint(0, high=n_classes, size=(args.batch_size*args.num_tokens))
-    y_val=np.zeros(shape=(args.batch_size,), dtype=np.float32)
-    y_val=ht.array(arr=y_val, ctx=executor_ctx)
-    y_ = ht.Variable(name='y_', ctx=executor_ctx, trainable=False)
     opt = ht.optim.SGDOptimizer(learning_rate=1e-6)
+
+    datasets = ht.data.mnist()
+    train_set_x, train_set_y = datasets[0]
+    valid_set_x, valid_set_y = datasets[1]
+    test_set_x, test_set_y = datasets[2]
+    x = ht.dataloader_op([ht.Dataloader(train_set_x, args.batch_size, 'train')])
+    y_ = ht.dataloader_op([ht.Dataloader(train_set_y, args.batch_size, 'train')])
+    
 
     loss, y = moe(args, x, y_)
     train_op = opt.minimize(loss)
@@ -79,15 +88,15 @@ if __name__ == "__main__":
 
     executor = ht.Executor(eval_nodes, ctx=executor_ctx,
                            comm_mode=args.comm_mode)
+    n_train_batches = executor.get_batch_num('train')
     average_time=0.0
-    for i in range(300):
+    for i in range(10000):
         print_rank0("Step %d" % i)
         start=time.time()        
         loss_val, predict_y, y_val, _  = executor.run(
-            'train', eval_node_list=[loss, y, y_, train_op], feed_dict={x:x_val, y_: y_val})
-        loss_numpy=loss_val.asnumpy()
+            'train', eval_node_list=[loss, y, y_, train_op])
         end=time.time()
-        print_rank0("Train loss = %f" % loss_numpy)
+        print_rank0("Loss:"+str(loss_val.asnumpy()))
         print_rank0("Step time = %s sec."%(end-start))
        
         if i+10>=30:

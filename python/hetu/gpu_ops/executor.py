@@ -844,6 +844,7 @@ class SubExecutor(object):
                 self.indexed_slices_shape[node] = (
                     self.node_to_shape_map[node.inputs[1]], self.node_to_shape_map[node.inputs[0]])
             elif isinstance(node, (SparseSumOp, DataH2DSparseOp, DataD2HSparseOp, PipelineSendOp)) and node.use_indexed_slices:
+                print("???node:", node)
                 self.indexed_slices_shape[node] = self.indexed_slices_shape[node.inputs[0]]
             elif isinstance(node, AllReduceCommunicateOp) and node.use_indexed_slices:
                 ind_shape, val_shape = self.indexed_slices_shape[node.inputs[0]]
@@ -1119,7 +1120,7 @@ def gradients(
                 node_to_output_grads_list[node], node_to_output_grads_list[node][0].raw_ctx, sparse=False)
         elif isinstance(node, PlaceholderOp) and node.is_embed:
             output_grad, is_new = sum_node_list(
-                node_to_output_grads_list[node], node.raw_ctx, sparse=True)
+                node_to_output_grads_list[node], node.raw_ctx, sparse=False)
         else:
             output_grad, is_new = sum_node_list(
                 node_to_output_grads_list[node], node.raw_ctx, sparse=False)
