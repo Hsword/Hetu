@@ -26,7 +26,6 @@ In this directory we provide several models for CTR tasks. We use Wide & Deep mo
 ## Flags for test files
 Here we explain some of the flags you may use in test files:
 * model: to specify the model, candidates are ('wdl_criteo', 'dfm_criteo', 'dcn_criteo', 'wdl_adult')
-* config: to specify the configuration file in settings.
 * val: whether using validation.
 * cache: whether using cache in PS/Hybrid mode.
 * bsp: whether using bsp (default asp) in PS/Hybrid mode. (In Hybrid, AllReduce can enforce dense parameters to use bsp, so there will be no stragglers.) bsp 0, asp -1, ssp > 0
@@ -57,23 +56,23 @@ python tf_launch_worker.py --model {model}_{dataset} --rank {rank} --config {con
 
 
 ## Configuration
-We use a simple yaml file to specify the run configuration.
+We use a simple yaml file to specify the heturun configuration.
 
 ```yaml
-shared :
-    DMLC_PS_ROOT_URI : 127.0.0.1
-    DMLC_PS_ROOT_PORT : 13100
-    DMLC_NUM_WORKER : 4
-    DMLC_NUM_SERVER : 1
-launch :
-    worker : 4
-    server : 1
-    scheduler : true
+nodes:
+  - host: hostname1
+    servers: 1 
+    workers: 2
+    chief: true
+  - host: hostname2
+    servers: 1
+    workers: 2
+    chief: false
 ```
 
-The 4 k-v pair in "shared" are used for PS-lite parameter server and will be added into environment. When running on a cluster, you should change "DMLC_PS_ROOT_URI" into an available IP address in the cluster.
+Users only need to specify the hostname and the number of servers and workers on each host (machine). The hostname can be found by `socket.gethostname()` in Python. The number of servers determines the partitions of parameters; and the number of workers `n_workers` determines the GPUs to be used, the first `n_workers`  GPUs each bounded with one worker. Whether using PS or AllReduce should be specified in arguments of scripts, not in configuration files. One should set the number of servers larger than 0 in PS or Hybrid mode, while the number of servers equal to 0 in AllReduce mode.
 
-The following "launch" is only used in PS-mode (ommitted in hybrid mode). This means that the number of worker, server and scheduler launched locally on this machine. In hybrid mode, workers are launched by mpirun. Servers and schedulers will be launched by
+If running on single GPU, `heturun` command is useless; if running on multiple GPUs on the same host (machine), one can replace the configuration file with command `heturun -s {n_server} -w {n_worker}`, or simplify the hostname in configuration file using `localhost`; if running on multiple GPUs on multiple hosts (machines), a configuration file must be used, where the `chief` host launches the script.
 
 
 ## Examples
@@ -84,26 +83,18 @@ python run_hetu.py --model wdl_criteo (--all) (--val)
 ```
 
 ### PS mode execution
-Run ps locally, here we can also run on multiple nodes.
+Run ps locally with multiple GPUs, here we can also run on multiple nodes.
 ```bash
-# launch scheduler and server, -n means number of servers, --sched means using scheduler
-python -m hetu.launcher {config} -n 1 --sched
-# launch workers (or run scheduler and server together if configured in config file)
-python run_hetu.py --comm PS --model wdl_criteo --config {config} (--all) (--val) (--cache lfuopt) (--bound 10)
+heturun -s 1 -w 2 python run_hetu.py --comm PS --model wdl_criteo (--all) (--val) (--cache lfuopt) (--bound 10)
 ```
 You can also specify the cache to be used and also the cache bound.
 
 
 ### Hybrid mode execution
-You must launch a scheduler and server in one terminal:
 ```bash
-python -m hetu.launcher {config} -n 1 --sched
-```
-And then launch the workers simultaneously using mpirun command:
-```bash
-mpirun -np {num_worker} --allow-run-as-root python run_hetu.py --comm Hybrid ...
+heturun -s 1 -w 2 python run_hetu.py --comm Hybrid --model wdl_criteo (--all) (--val) (--cache lfuopt) (--bound 10)
 ```
 Or if in distributed nodes setting:
 ```
-mpirun -mca btl_tcp_if_include (network card name or ip) -x NCCL_SOCKET_IFNAME=(network card name) --host (host ips) --allow-run-as-root python run_hetu.py --comm Hybrid ...
+heturun -c config.yml python run_hetu.py --comm Hybrid --model wdl_criteo (--all) (--val) (--cache lfuopt) (--bound 10)
 ```
