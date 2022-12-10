@@ -23,7 +23,7 @@ from .EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient
 from ..optimizer import OptimizerOp
 from . import OnesLike
 from ..stream import create_stream_handle, Event
-from ..context import get_current_context, get_launch_config_by_traverse_nodes, DeviceGroup
+from ..context import get_current_context, get_launch_config_by_traverse_nodes, assign_context_by_traverse_nodes, DeviceGroup
 from ..memory_pool import HetuMemoryPool
 from .PipelineSend import PipelineSendOp
 from .PipelineReceive import PipelineReceiveOp
@@ -315,6 +315,8 @@ class HetuConfig(object):
                 self.min_dp_nrank = min_worker_num
             self.p2p_stream = create_stream_handle(
                 self.context) if init_p2p_stream else None
+            assign_context_by_traverse_nodes(
+                self.eval_node_list, self.context)
         else:
             self.context = ctx
 
@@ -1398,4 +1400,3 @@ def sum_node_list(node_list: OP_LIST, ctx: Optional[DeviceGroup], sparse: bool) 
         return node_list[0], False
     else:
         return sum_op(node_list, ctx=ctx, sparse=sparse), True
-

@@ -152,13 +152,15 @@ class SparseSumOp(Op):
         for input_val in input_vals:
             if self.on_cpu:
                 indices_list.append(input_val.indices.asnumpy().reshape(-1))
-                value_list.append(input_val.values.asnumpy().reshape(-1, embed_dim))
+                value_list.append(
+                    input_val.values.asnumpy().reshape(-1, embed_dim))
             else:
                 indices_size = 1
                 for shape in input_val.indices.shape:
                     indices_size *= shape
                 reshaped_indices = ndarray.empty((indices_size, ), ctx=ctx)
-                reshaped_values = ndarray.empty((indices_size, embed_dim), ctx=ctx)
+                reshaped_values = ndarray.empty(
+                    (indices_size, embed_dim), ctx=ctx)
                 array_reshape(input_val.indices, reshaped_indices)
                 array_reshape(input_val.values, reshaped_values)
                 indices_list.append(reshaped_indices)
@@ -166,16 +168,20 @@ class SparseSumOp(Op):
                 merged_size += indices_size
 
         if self.on_cpu:
-            output_indices = ndarray.array(np.concatenate(indices_list), ctx=ctx)
-            output_values = ndarray.array(np.concatenate(indices_list), ctx=ctx)
-            output_val.update(output_indices, output_values, input_vals[0].dense_shape)
+            output_indices = ndarray.array(
+                np.concatenate(indices_list), ctx=ctx)
+            output_values = ndarray.array(
+                np.concatenate(indices_list), ctx=ctx)
+            output_val.update(output_indices, output_values,
+                              input_vals[0].dense_shape)
             output_val.cpu_deduplicate()
         else:
             output_indices = ndarray.empty((merged_size, ), ctx=ctx)
             output_values = ndarray.empty((merged_size, embed_dim), ctx=ctx)
             concatenate(indices_list, output_indices)
             concatenate(value_list, output_values, axis=0)
-            output_val.update(output_indices, output_values, input_vals[0].dense_shape)
+            output_val.update(output_indices, output_values,
+                              input_vals[0].dense_shape)
             output_val.deduplicate(stream_handle)
 
     def gradient(self, output_grad):
@@ -213,7 +219,7 @@ class SparseSumOp(Op):
         super().forward_hook(config)
         for node in self.inputs:
             assert isinstance(node, (EmbeddingLookUp_Gradient,
-                              DataD2HSparseOp, DataH2DSparseOp))
+                                     DataD2HSparseOp, DataH2DSparseOp))
 
 
 def sum_op(node_list, ctx=None, sparse=False):
