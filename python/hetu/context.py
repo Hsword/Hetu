@@ -234,6 +234,52 @@ def get_launch_config_by_traverse_nodes(
     return launchMPI, launchPS, node_strategy, devices, min_worker_num
 
 
+def assign_context_by_traverse_nodes(
+    node_list: List[Op],
+    ctx: DLContext,
+) -> None:
+    from .dataloader import DataloaderOp
+    from .optimizer import OptimizerOp
+    from .gpu_ops.Variable import PlaceholderOp
+
+    def get_index(raw_ctx: DeviceGroup, ctx: DLContext) -> Tuple[int, bool]:
+        dp_index = -1
+        for i, c in enumerate(raw_ctx.workers):
+            if ctx == c:
+                dp_index = i
+        return dp_index, dp_index >= 0
+
+    def assign_ctx(node: Op) -> None:
+        cur_ctx = node.raw_ctx
+        if node in visited:
+            return
+        if isinstance(node, DataloaderOp):
+            return
+        elif isinstance(node, PlaceholderOp):
+            dp_index, local_dp = get_index(cur_ctx, ctx)
+            if local_dp:
+                node.ctx = ctx
+        elif isinstance(node, OptimizerOp):
+            for ori_grad in node.inputs:
+                assign_ctx(ori_grad)
+        else:
+            dp_index, local_dp = get_index(cur_ctx, ctx)
+            for i, n in enumerate(node.inputs):
+                if isinstance(n, DataloaderOp):
+                    if local_dp:
+                        n.set_dp_rank(dp_index, cur_ctx.worker_num)
+                    continue
+                assign_ctx(n)
+
+            if local_dp:
+                node.ctx = ctx
+
+    visited = {}
+
+    for node in node_list:
+        assign_ctx(node)
+
+
 class DistConfig(object):
     def __init__(
         self,
