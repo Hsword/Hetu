@@ -1,7 +1,6 @@
 import hetu as ht
 from hetu import init
 from hetu import ndarray
-import torch
 
 def conv2d(x, in_channel, out_channel, stride=1, padding=1, kernel_size=3, name=''):
     a = torch.nn.Conv2d(in_channel, out_channel, kernel_size, stride=stride)
