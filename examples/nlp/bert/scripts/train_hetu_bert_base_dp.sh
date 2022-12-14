@@ -2,8 +2,8 @@ workdir=$(cd $(dirname $0); pwd)
 mainpy=${workdir}/../train_hetu_bert_dp.py
 config=${workdir}/../config4.yml
 data_path=${workdir}/../data
-
-heturun -c ${config} python ${mainpy} \
+export PYTHONPATH=/jizhicfs/pinxuezhao/Hetu_newest/python
+/jizhicfs/pinxuezhao/Hetu_newest/bin/heturun -c ${config} python ${mainpy} \
 --num_gpus 4 \
 --train_batch_size 64 \
 --data_path ${data_path} \

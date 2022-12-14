@@ -75,11 +75,13 @@ def pretrain(args):
 
     strategy = ht.dist.DataParallel(aggregate='allreduce')
     eval_nodes=[masked_lm_loss_mean, next_sentence_loss_mean, loss, train_op]
+    print("1")
     executor = ht.Executor(eval_nodes, dist_strategy=strategy)
 
     rank, nrank = executor.rank, executor.config.nrank
     global_step_num = 0
     num_epochs = args.epochs
+    print("here")
     for ep in range(num_epochs):
         step_num = 0
         for train_file in train_files:

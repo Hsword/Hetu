@@ -103,11 +103,8 @@ if __name__ == "__main__":
             loss_val,  predict_y, y_moe_val, y_val, _  = executor.run(
                 'train', eval_node_list=[loss, y,y_moe, y_, train_op])
             loss_all += loss_val.asnumpy()
-    #        print("after moe:")
-    #;        print(y_moe_val.asnumpy())
             batch_num += 1
         loss_all /= batch_num
         print_rank0("Loss:"+str(loss_val.asnumpy()))
-       
 
     print_rank0("Success!")

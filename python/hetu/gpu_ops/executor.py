@@ -846,7 +846,6 @@ class SubExecutor(object):
                 self.indexed_slices_shape[node] = (
                     self.node_to_shape_map[node.inputs[1]], self.node_to_shape_map[node.inputs[0]])
             elif isinstance(node, (SparseSumOp, DataH2DSparseOp, DataD2HSparseOp, PipelineSendOp)) and node.use_indexed_slices:
-                print("???node:", node)
                 self.indexed_slices_shape[node] = self.indexed_slices_shape[node.inputs[0]]
             elif isinstance(node, AllReduceCommunicateOp) and node.use_indexed_slices:
                 ind_shape, val_shape = self.indexed_slices_shape[node.inputs[0]]
