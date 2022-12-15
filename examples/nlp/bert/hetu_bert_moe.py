@@ -553,7 +553,8 @@ class BertForPreTraining(object):
 
     def __init__(self, config, device_id):
         self.bert = BertModel(config, device_id)
-        self.cls = BertPreTrainingHeads(config, self.bert.embeddings.word_embeddings.weight)
+        index_all = ht.Variable('index_all', value=np.arange(config.vocab_size), dtype=np.long, trainable=False)
+        self.cls = BertPreTrainingHeads(config, self.bert.embeddings.word_embeddings(index_all))
 
         self.vocab_size=config.vocab_size
         self.moe_loss = dict()

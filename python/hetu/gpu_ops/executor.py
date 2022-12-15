@@ -1121,7 +1121,7 @@ def gradients(
                 node_to_output_grads_list[node], node_to_output_grads_list[node][0].raw_ctx, sparse=False)
         elif isinstance(node, PlaceholderOp) and node.is_embed:
             output_grad, is_new = sum_node_list(
-                node_to_output_grads_list[node], node.raw_ctx, sparse=False)
+                node_to_output_grads_list[node], node.raw_ctx, sparse=True)
         else:
             output_grad, is_new = sum_node_list(
                 node_to_output_grads_list[node], node.raw_ctx, sparse=False)

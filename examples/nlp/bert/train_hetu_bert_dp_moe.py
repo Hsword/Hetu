@@ -45,7 +45,8 @@ def pretrain(args):
     dataset = args.dataset
     if dataset not in ['wikicorpus_en', 'wiki_books']:
         raise(NotImplementedError)
-    file_dir = f'{args.data_path}/hdf5_lower_case_1_seq_len_128_max_pred_20_masked_lm_prob_0.15_random_seed_12345_dupe_factor_5/{dataset}/'
+   
+    file_dir = f'{args.data_path}/hdf5_lower_case_1_seq_len_512_max_pred_80_masked_lm_prob_0.15_random_seed_12345_dupe_factor_5/{dataset}/'
     file_name_format = dataset + '_training_%d.hdf5'
     train_file_num = 256
     train_files = [file_dir + file_name_format%file_id for file_id in range(train_file_num)]
@@ -69,19 +70,15 @@ def pretrain(args):
 
     loss = masked_lm_loss_mean + next_sentence_loss_mean + moe_loss[0]
     opt = ht.optim.AdamOptimizer(learning_rate=args.lr, beta1=0.9, beta2=0.999, epsilon=1e-8, l2reg = args.adam_weight_decay)
-        # opt = ht.optim.AdamOptimizer(learning_rate=lr, beta1=0.9, beta2=0.999, epsilon=1e-8)
-        # opt = ht.optim.SGDOptimizer(learning_rate=lr)
     train_op = opt.minimize(loss)
 
     strategy = ht.dist.DataParallel(aggregate='allreduce')
     eval_nodes=[masked_lm_loss_mean, next_sentence_loss_mean, loss, train_op]
-    print("1")
     executor = ht.Executor(eval_nodes, dist_strategy=strategy)
 
     rank, nrank = executor.rank, executor.config.nrank
     global_step_num = 0
     num_epochs = args.epochs
-    print("here")
     for ep in range(num_epochs):
         step_num = 0
         for train_file in train_files:

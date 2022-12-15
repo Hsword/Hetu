@@ -253,6 +253,7 @@ def assign_context_by_traverse_nodes(
         cur_ctx = node.raw_ctx
         if node in visited:
             return
+        visited[node] = True
         if isinstance(node, DataloaderOp):
             return
         elif isinstance(node, PlaceholderOp):
