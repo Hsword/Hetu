@@ -131,18 +131,18 @@ def worker(args):
         assert args.ectx < 8
         ectx = ht.gpu(args.ectx)
     if args.method == 'full':
-        embed_layer = htl.Embedding(
-            num_embed, num_dim, initializer=initializer, ctx=ectx)
+        embed_layer = htl.MultipleEmbedding(
+            num_embed_fields, num_dim, initializer=initializer, ctx=ectx)
     elif args.method == 'robe':
         compress_rate = 0.1
         size_limit = None
         embed_layer = htl.RobeEmbedding(
-            num_embed, num_dim, compress_rate=compress_rate, size_limit=size_limit, Z = args.Z, initializer=initializer, ctx=ectx)
+            num_embed, num_dim, compress_rate=compress_rate, size_limit=size_limit, Z=args.Z, initializer=initializer, ctx=ectx)
     elif args.method == 'hash':
-        compress_rate = 0.5
+        compress_rate = args.compress_rate
         size_limit = None
-        embed_layer = htl.HashEmbedding(
-            num_embed, num_dim, compress_rate=compress_rate, size_limit=size_limit, initializer=initializer, ctx=ectx)
+        embed_layer = htl.MultipleHashEmbedding(
+            num_embed_fields, num_dim, compress_rate=compress_rate, size_limit=size_limit, initializer=initializer, ctx=ectx)
     elif args.method == 'compo':
         num_tables = 2
         aggregator = 'mul'
@@ -337,6 +337,8 @@ if __name__ == '__main__':
                         help="num of epochs, each train 1/10 data")
     parser.add_argument("--Z", type=int, default=None,
                         help="block size in RobeZ")
+    parser.add_argument("--compress_rate", type=float, default=0.5,
+                        help="compress rate")
     args = parser.parse_args()
     args.fname = '{}'.format(args.model)
     if args.method is None:
@@ -365,6 +367,7 @@ if __name__ == '__main__':
         args.lr = 0.001
     else:
         args.fname += '_lr{}'.format(args.lr)
+    args.fname += f'_rate{args.compress_rate}'
     args.fname += '.log'
     args.fname = osp.join(osp.dirname(
         osp.abspath(__file__)), 'logs', args.fname)

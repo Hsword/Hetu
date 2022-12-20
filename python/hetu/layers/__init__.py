@@ -3,8 +3,8 @@ from .batch_split_layer import BatchSplitOnlyLayer, ReserveSplitLayer
 from .concatenate import Concatenate, ConcatenateLayers
 from .conv import Conv2d
 from .dropout import DropOut
-from .embedding import Embedding
-from .compressed_embedding import RobeEmbedding, HashEmbedding, \
+from .embedding import Embedding, MultipleEmbedding
+from .compressed_embedding import RobeEmbedding, HashEmbedding, MultipleHashEmbedding, \
     CompositionalEmbedding, LearningEmbedding, \
     DPQEmbedding, AutoDimEmbedding, MDEmbedding, \
     DeepLightEmbedding, QuantizedEmbedding

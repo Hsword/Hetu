@@ -50,7 +50,8 @@ class Embedding(BaseLayer):
         if sep:
             new_sparse_ops = []
             for i in range(tr_sparse.shape[1]):
-                cur_data = make_op_data(tr_sparse[:, i], None if va_sparse is None else va_sparse[:, i], dtype=np.int32)
+                cur_data = make_op_data(
+                    tr_sparse[:, i], None if va_sparse is None else va_sparse[:, i], dtype=np.int32)
                 new_sparse_ops.append(cur_data)
             sparse_input = new_sparse_ops
         else:
@@ -61,3 +62,33 @@ class Embedding(BaseLayer):
         self.sparse_op = sparse_input
         self.y_op = y_
         return dense_input, sparse_input, y_
+
+
+class MultipleEmbedding(Embedding):
+    def __init__(self, num_embed_fields, embedding_dim, initializer=ht.init.GenXavierNormal(), names='embedding', ctx=None):
+        self.num_embed_fields = num_embed_fields
+        self.embedding_dim = embedding_dim
+        if not isinstance(names, list):
+            names = [f'{names}_{i}' for i in range(len(num_embed_fields))]
+        self.name = names
+        self.ctx = ctx
+        self.embedding_table = [
+            initializer(
+                shape=(nemb, self.embedding_dim),
+                name=nam,
+                ctx=ctx,
+            ) for nemb, nam in zip(self.num_embed_fields, self.name)
+        ]
+
+    def __call__(self, xs):
+        with ht.context(self.ctx):
+            results = []
+            for emb, x in zip(self.embedding_table, xs):
+                results.append(ht.embedding_lookup_op(emb, x))
+            result = ht.concatenate_op(results, axis=1)
+            return result
+
+    def compute_all(self, func, batch_size, val=True):
+        # load data and lookup
+        dense, sparse, y_ = self.load_data(func, batch_size, val, sep=True)
+        return self(sparse), dense, y_

@@ -4,6 +4,7 @@ import math
 import numpy as np
 import os.path as osp
 
+
 class RobeEmbedding(Embedding):
     def __init__(self, num_embeddings, embedding_dim, compress_rate=None, size_limit=None, Z=None, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         assert compress_rate is None or size_limit is None
@@ -12,19 +13,20 @@ class RobeEmbedding(Embedding):
         else:
             if compress_rate is None:
                 compress_rate = 1.0
-            Robe_array_size = int(num_embeddings * embedding_dim * compress_rate)
+            Robe_array_size = int(
+                num_embeddings * embedding_dim * compress_rate)
         self.num_embeddings = num_embeddings
         self.Robe_array_size = Robe_array_size
         self.embedding_dim = embedding_dim
         if (Z is None):
             Z = embedding_dim
         else:
-            assert (Z<=embedding_dim)
+            assert (Z <= embedding_dim)
         self.Z = Z
 
-        self.MO=998244353
+        self.MO = 998244353
         print(self.Z)
-        
+
         self.name = name
         self.ctx = ctx
         self.Robe_array = initializer(
@@ -33,8 +35,10 @@ class RobeEmbedding(Embedding):
     def __call__(self, x):
         with ht.context(self.ctx):
             print("hahaha")
-            sparse_input = ht.robe_hash_op(x, self.Robe_array_size, self.embedding_dim, self.Z, self.MO)
+            sparse_input = ht.robe_hash_op(
+                x, self.Robe_array_size, self.embedding_dim, self.Z, self.MO)
             return ht.robe_lookup_op(self.Robe_array, sparse_input, self.embedding_dim, x, self.Z, self.MO)
+
 
 class HashEmbedding(Embedding):
     def __init__(self, num_embeddings, embedding_dim, compress_rate=None, size_limit=None, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
@@ -58,6 +62,43 @@ class HashEmbedding(Embedding):
         with ht.context(self.ctx):
             sparse_input = ht.mod_hash_op(x, self.real_num_embeds)
             return ht.embedding_lookup_op(self.embedding_table, sparse_input)
+
+
+class MultipleHashEmbedding(Embedding):
+    def __init__(self, num_embed_fields, embedding_dim, compress_rate=None, size_limit=None, initializer=ht.init.GenXavierNormal(), names='embedding', ctx=None):
+        assert compress_rate is None or size_limit is None
+        if size_limit is not None:
+            compress_rate = size_limit / sum(num_embed_fields)
+        real_num_embeds = [math.ceil(nemb * compress_rate)
+                           for nemb in num_embed_fields]
+        self.num_embed_fields = num_embed_fields
+        self.real_num_embeds = real_num_embeds
+        self.embedding_dim = embedding_dim
+        if not isinstance(names, list):
+            names = [f'{names}_{i}' for i in range(len(num_embed_fields))]
+        self.name = names
+        self.ctx = ctx
+        self.embedding_table = [
+            initializer(
+                shape=(nemb, self.embedding_dim),
+                name=nam,
+                ctx=ctx,
+            ) for nemb, nam in zip(self.real_num_embeds, self.name)
+        ]
+
+    def __call__(self, xs):
+        with ht.context(self.ctx):
+            results = []
+            for emb, x, rnum in zip(self.embedding_table, xs, self.real_num_embeds):
+                x = ht.mod_hash_op(x, rnum)
+                results.append(ht.embedding_lookup_op(emb, x))
+            result = ht.concatenate_op(results, axis=1)
+            return result
+
+    def compute_all(self, func, batch_size, val=True):
+        # load data and lookup
+        dense, sparse, y_ = self.load_data(func, batch_size, val, sep=True)
+        return self(sparse), dense, y_
 
 
 class CompositionalEmbedding(Embedding):
