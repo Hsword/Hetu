@@ -50,7 +50,6 @@ def moe(args, x, y_):
 
     return loss,  y2, y
 
-# NCCL_DEBUG=INFO mpirun --allow-run-as-root -np 4 -x PYTHONPATH=/home/v-xiaonannie/Hetu/python /opt/conda/bin/python /home/v-xiaonannie/Hetu/tests/test_moe_op.py 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
