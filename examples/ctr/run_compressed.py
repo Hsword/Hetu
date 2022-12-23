@@ -48,6 +48,8 @@ def worker(args):
                 loss_val, predict_y, y_val = executor.run(
                     'train', convert_to_numpy_ret_vals=True)[:3]
             acc_val = get_acc(y_val, predict_y)
+            executor.log('train_loss', loss_val)
+            executor.step_logger()
             train_loss.append(loss_val[0])
             train_acc.append(acc_val)
             if auc_enabled:
@@ -94,6 +96,8 @@ def worker(args):
         train_loss, train_acc, train_auc = train(
             train_batch_num, tqdm_enabled=True)
         return_vals = (train_auc,)
+        results = {'avg_train_loss': train_loss,
+                   'train_acc': train_acc, 'train_auc': train_auc}
         ep_en = time()
         if args.val:
             val_loss, val_acc, val_auc, early_stop = validate(
@@ -101,9 +105,12 @@ def worker(args):
             printstr = "train_loss: %.4f, train_acc: %.4f, train_auc: %.4f, test_loss: %.4f, test_acc: %.4f, test_auc: %.4f, train_time: %.4f"\
                 % (train_loss, train_acc, train_auc, val_loss, val_acc, val_auc, ep_en - ep_st)
             return_vals += (val_auc,)
+            results.update({'avg_val_loss': val_loss,
+                            'val_acc': val_acc, 'val_auc': val_auc})
         else:
             printstr = "train_loss: %.4f, train_acc: %.4f, train_auc: %.4f, train_time: %.4f"\
                 % (train_loss, train_acc, train_auc, ep_en - ep_st)
+        executor.multi_log(results)
         print(printstr)
         if log_file is not None:
             print(printstr, file=log_file, flush=True)
@@ -236,8 +243,11 @@ def worker(args):
                     val_embed_input, dense_input, y_)
                 eval_nodes['validate'] = [val_loss, val_prediction, y_]
     executor_log_path = osp.join(osp.dirname(osp.abspath(__file__)), 'logs')
+    project = 'embedmem'
+    run_name = osp.split(args.fname)[1][:-4]
     executor = ht.Executor(eval_nodes, ctx=ctx, seed=123,
-                           log_path=executor_log_path)
+                           log_path=executor_log_path, logger='wandb', project=project, run_name=run_name)
+    executor.set_config(args)
 
     # enable early stopping if no increase within 2 epoch
     best_acc = 0

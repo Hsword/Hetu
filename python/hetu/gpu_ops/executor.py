@@ -167,6 +167,7 @@ class HetuConfig(object):
         'prefetch',
         'cache_bound',
         'log_path',
+        'logger',
         'my_eval_nodes',
         'param_allreduce_group',
         'placeholder_to_arr_map',
@@ -202,6 +203,9 @@ class HetuConfig(object):
         enable_lazy: bool = False,
         cache_bound: int = 100,
         log_path: Optional[str] = None,
+        logger: Optional[str] = None,
+        project: Optional[str] = None,
+        run_name: Optional[str] = None,
         pipeline: Optional[str] = None,
         dist_strategy: Optional[Strategy] = None,
         use_preduce: bool = False,
@@ -392,6 +396,16 @@ class HetuConfig(object):
             assert os.path.isdir(
                 log_path), 'Need to specify a work directory to save logs.'
             self.ps_comm.startRecord(ctypes.c_char_p(bytes(log_path, 'utf-8')))
+        if logger is not None:
+            assert project is not None and run_name is not None
+            if logger == 'wandb':
+                from ..logger import WandbLogger
+                self.logger = WandbLogger(
+                    project, run_name, self.rank, self.nrank, self.context, self.nccl_comm, self.nccl_stream)
+            else:
+                raise ValueError
+        else:
+            self.logger = None
 
         self.placeholder_to_arr_map = dict()
         topo_sort_with_hook(self.my_eval_nodes, self)
@@ -434,6 +448,7 @@ class Executor(object):
 
         self.eval_node_dict: Dict[str: OP_LIST] = eval_node_dict
         self.config = config
+        self.logger = self.config.logger
 
         def get_sub_executor(k: str) -> Type[SubExecutor]:
             if timing:
@@ -474,6 +489,19 @@ class Executor(object):
     ) -> None:
         self.subexecutor[name].profile(
             feed_shapes, log_file, profiler=profiler)
+
+    def set_config(self, attrs):
+        self.logger.set_config(attrs)
+
+    def log(self, name, value):
+        self.logger.wrapped_log(name, value)
+
+    def multi_log(self, results):
+        for k, v in results.items():
+            self.log(k, v)
+
+    def step_logger(self):
+        self.logger.step()
 
     def run(
         self,
