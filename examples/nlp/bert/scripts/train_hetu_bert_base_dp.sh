@@ -3,7 +3,7 @@ mainpy=${workdir}/../train_hetu_bert_dp.py
 config=${workdir}/../config4.yml
 data_path=${workdir}/../data
 export PYTHONPATH=$HETU_PATH
-heturun -c ${config} python3 ${mainpy} \
+heturun -c ${config} python ${mainpy} \
 --num_gpus 4 \
 --train_batch_size 64 \
 --data_path ${data_path} \

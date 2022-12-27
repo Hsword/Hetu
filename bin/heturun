@@ -1,2 +1,2 @@
 #!/bin/bash
-python3 $(cd $(dirname $0); pwd)/../python/runner.py $@
+python $(cd $(dirname $0); pwd)/../python/runner.py $@

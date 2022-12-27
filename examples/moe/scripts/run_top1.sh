@@ -1,1 +1,1 @@
-NCCL_DEBUG=DEBUG mpirun --allow-run-as-root -np 8 -x PYTHONPATH=/home/Hetu/python python test_moe_top.py --top=1 --num_local_experts=2 --batch_size=16
+NCCL_DEBUG=DEBUG mpirun --allow-run-as-root -np 8 -x PYTHONPATH=/jizhicfs/pinxuezhao/Hetu_newest/python python3 /jizhicfs/pinxuezhao/Hetu_newest/examples/moe/test_moe_top.py --top=1 --num_local_experts=2 --batch_size=16
