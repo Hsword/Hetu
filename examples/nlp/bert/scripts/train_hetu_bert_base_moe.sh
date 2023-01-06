@@ -1,9 +1,9 @@
 workdir=$(cd $(dirname $0); pwd)
-mainpy=${workdir}/../train_hetu_bert_dp.py
+mainpy=${workdir}/../train_hetu_bert_dp_moe.py
 config=${workdir}/../config4.yml
 data_path=${workdir}/../data
 export PYTHONPATH=$HETU_PATH
-heturun -c ${config} python ${mainpy} \
+heturun -c ${config} python3 ${mainpy} \
 --num_gpus 4 \
 --train_batch_size 64 \
 --data_path ${data_path} \

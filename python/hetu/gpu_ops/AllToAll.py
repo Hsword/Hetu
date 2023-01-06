@@ -46,7 +46,6 @@ class AllToAllOp(Op):
         self.inputs[0].inplace = False
         self.dtype = ncclDataType_t.ncclFloat32
         self.comm = config.nccl_comm
-        self.myrank = self.comm.myRank.value
 
 def alltoall_op(node, ctx=None):
     """AllToAll Unit.
