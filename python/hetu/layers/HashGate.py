@@ -1,4 +1,3 @@
-from turtle import forward
 from .base import BaseLayer
 import hetu as ht
 import math

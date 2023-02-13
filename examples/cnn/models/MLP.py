@@ -25,7 +25,7 @@ def mlp(x, y_):
     '''
 
     print("Building MLP model...")
-    x = fc(x, (3072, 256), 'mlp_fc1', with_relu=True)
+    x = fc(x, (784, 256), 'mlp_fc1', with_relu=True)
     x = fc(x, (256, 256), 'mlp_fc2', with_relu=True)
     y = fc(x, (256, 10), 'mlp_fc3', with_relu=False)
     loss = ht.softmaxcrossentropy_op(y, y_)

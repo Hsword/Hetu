@@ -149,6 +149,7 @@ class OptimizerOp(Op):
             cur_param = self.optimizer.params[i]
             if "expert" in cur_param.name:
                 # expert parameter no use allreduce
+                new_inputs.append(node)
                 continue
             current_strategy = config.node_strategy.get(
                 cur_param, self.comm_mode)

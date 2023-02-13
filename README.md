@@ -62,39 +62,46 @@ make hetu_cache -j 8
 
 ## Basic Usage
 
-Train logistic regression on gpu:
+ResNet training on singel gpu:
 
 ```bash
-bash examples/cnn/scripts/hetu_1gpu.sh logreg MNIST
+bash examples/cnn/scripts/hetu_1gpu.sh resnet18 CIFAR10
 ```
 
-Train a 3-layer mlp on gpu:
+ResNet training with All-Reduce on 8 gpus:
 
 ```bash
-bash examples/cnn/scripts/hetu_1gpu.sh mlp CIFAR10
+bash examples/cnn/scripts/hetu_8gpu.sh resnet18 CIFAR10
 ```
 
-Train a 3-layer cnn with gpu:
+BERT-base training on single gpu:
 
 ```bash
-bash examples/cnn/scripts/hetu_1gpu.sh cnn_3_layers MNIST
+cd examples/nlp/bert && bash scripts/create_datasets_from_start.sh # Dataset preparing
+bash scripts/train_hetu_bert_base.sh
 ```
 
-Train a 3-layer mlp with allreduce on 8 gpus (use mpirun):
+BERT-base training with All-Reduce on 4 gpus:
 
 ```bash
-bash examples/cnn/scripts/hetu_8gpu.sh mlp CIFAR10
+cd examples/nlp/bert && bash scripts/create_datasets_from_start.sh # Dataset preparing
+bash scripts/train_hetu_bert_base_dp.sh
 ```
 
-Train a 3-layer mlp with PS on 1 server and 2 workers:
+Wide & Deep training on single gpu:
 
 ```bash
-# in the script we launch the scheduler and server, and two workers
-bash examples/cnn/scripts/hetu_2gpu_ps.sh mlp CIFAR10
+bash examples/ctr/tests/local_wdl_adult.sh
+```
+
+Wide & Deep training on 4 gpus using [HET](https://arxiv.org/abs/2112.07221):
+
+```bash
+bash examples/ctr/tests/hybrid_wdl_adult.sh
 ```
 
 ## More Examples
-Please refer to examples directory, which contains CNN, NLP, CTR, MoE, GNN training scripts. If you want more, please join our community and contact with us!
+Please refer to examples directory, which contains CNN, NLP, CTR, MoE, GNN training scripts. If you want to know more about the communication architecture (parameter server, collective communication) and automatic parallelism (e.g., data parallel, tensor parallel, pipeline parallel, shared data parallel expert parallel) provided by Hetu, please join our community and contact with us!
 
 ## Community
 * Email: xupeng.miao@pku.edu.cn

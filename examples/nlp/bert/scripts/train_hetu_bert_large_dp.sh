@@ -1,6 +1,12 @@
-heturun -c config4.yml python train_hetu_bert_dp.py \
+workdir=$(cd $(dirname $0); pwd)
+mainpy=${workdir}/../train_hetu_bert_dp.py
+config=${workdir}/../config4.yml
+data_path=${workdir}/../data
+
+heturun -c ${config} python ${mainpy} \
 --num_gpus 4 \
 --train_batch_size 32 \
+--data_path ${data_path} \
 --dataset wikicorpus_en \
 --vocab_size 30522 \
 --hidden_size 1024 \
