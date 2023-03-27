@@ -41,6 +41,7 @@ class SliceAssignOp(Op):
 class SliceAssignMatrixOp(Op):
     def __init__(self, node_A, node_B, begin_pos_A, output_shape_A, begin_pos_B, output_shape_B, ctx=None):
         super().__init__(SliceAssignMatrixOp, [node_A, node_B], ctx)
+        self.grad = False
         self.begin_pos_A = list(begin_pos_A)
         self.begin_pos_B = list(begin_pos_B)
         self.output_shape_A = list(output_shape_A)
@@ -55,6 +56,7 @@ class SliceAssignMatrixOp(Op):
             slice_assign_matrix(input_vals[0], input_vals[1], output_val, self.begin_pos_A, self.end_pos_A, self.begin_pos_B, stream_handle)
 
     def gradient(self, output_grad):
+        self.grad = True
         self.grad_node_A = slice_assign_matrix_gradient_op(self.inputs[0], output_grad, ctx=self.raw_ctx)
         self.grad_node_B = slice_assign_matrix_gradient_op(self.inputs[1], output_grad, ctx=self.raw_ctx)
         return [output_grad - self.grad_node_A, self.grad_node_B]
@@ -91,15 +93,16 @@ class SliceAssignMatrixOp(Op):
             assert self.end_pos_B[i] <= input_shapes[1][i]
             assert self.end_pos_A[i] - self.begin_pos_A[i] == self.end_pos_B[i] - self.begin_pos_B[i]
         
-        self.grad_node_A.begin_pos_A = self.begin_pos_A
-        self.grad_node_A.end_pos_A = self.end_pos_A
-        self.grad_node_A.begin_pos_B = self.begin_pos_B
-        self.grad_node_A.end_pos_B = self.end_pos_B 
-
-        self.grad_node_B.begin_pos_A = self.begin_pos_B
-        self.grad_node_B.end_pos_A = self.end_pos_B
-        self.grad_node_B.begin_pos_B = self.begin_pos_A
-        self.grad_node_B.end_pos_B = self.end_pos_A                            
+        if self.grad:
+            self.grad_node_A.begin_pos_A = self.begin_pos_A
+            self.grad_node_A.end_pos_A = self.end_pos_A
+            self.grad_node_A.begin_pos_B = self.begin_pos_B
+            self.grad_node_A.end_pos_B = self.end_pos_B 
+    
+            self.grad_node_B.begin_pos_A = self.begin_pos_B
+            self.grad_node_B.end_pos_A = self.end_pos_B
+            self.grad_node_B.begin_pos_B = self.begin_pos_A
+            self.grad_node_B.end_pos_B = self.end_pos_A                            
         return input_shapes[0]
 
 

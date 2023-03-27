@@ -201,7 +201,16 @@ HETUSYS_EXTERN_C {
     int DLGpuMatrixElementwiseMultiply(
         const DLArrayHandle matA, const DLArrayHandle matB,
         DLArrayHandle output, DLStreamHandle stream_handle);
-
+    
+    int DLGpuMatrixElementwiseMultiplySimple(const DLArrayHandle matA,
+                                    const DLArrayHandle matB,
+                                    DLArrayHandle output,
+                                    DLStreamHandle stream_handle);
+    int DLGpuMatrixElementwiseMultiplyLazy(const DLArrayHandle matA,
+                                  const DLArrayHandle matB,
+                                  DLArrayHandle output,
+                                  const DLArrayHandle gpu_buf,
+                                  DLStreamHandle stream_handle);
     /*!
      * \brief Multiply matrix by const and store to output.
      * \param input The input array.

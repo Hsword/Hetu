@@ -43,7 +43,7 @@ if __name__ == "__main__":
     assert args.comm_mode in (None, 'allreduce', 'ps', 'hybrid')
 
     args.model = args.model.lower()
-    assert args.model in ['alexnet', 'cnn_3_layers', 'lenet', 'logreg', 'lstm', 'mlp', 'resnet18', 'resnet34', 'rnn', 'vgg16', 'vgg19'], \
+    assert args.model in ['alexnet', 'cnn_3_layers', 'lenet', 'resnet18', 'resnet34', 'vgg16', 'vgg19'], \
         'Model not supported!'
     model = eval('models.' + args.model)
 

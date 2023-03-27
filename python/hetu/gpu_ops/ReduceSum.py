@@ -10,6 +10,8 @@ class ReduceSumOp(Op):
         self.ori_status = None
         self.tar_status = None
         self.grad_node = None
+        self.axes = None
+        self.keepdims = None
         if axes is not None:
             if isinstance(axes, int):
                 axes = [axes]
@@ -49,6 +51,9 @@ class ReduceSumOp(Op):
         return [self.grad_node]
 
     def infer_shape(self, input_shapes):
+        if self.axes is None and self.keepdims is None:
+            self.naive_copy = True
+            return input_shapes[0]
         assert self.axes is not None and self.keepdims is not None
         assert len(input_shapes) == 1
         input_shape = list(input_shapes[0])

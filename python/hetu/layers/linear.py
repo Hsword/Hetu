@@ -24,10 +24,10 @@ class Linear(BaseLayer):
             weight_shape = (self.out_features, self.in_features) if weight_transpose else (
                 self.in_features, self.out_features)
             self.weight_var = initializer(
-                shape=weight_shape, name=self.name+'_weight')
+                shape=weight_shape, name=self.name+'.weight')
         if self.bias:
             self.bias_var = ht.init.zeros(
-                shape=(self.out_features,), name=self.name+'_bias')
+                shape=(self.out_features,), name=self.name+'.bias')
 
     def __call__(self, x):
         if self.bias:
