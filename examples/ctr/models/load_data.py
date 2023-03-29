@@ -186,49 +186,50 @@ def process_all_criteo_data(path=default_criteo_path, return_val=True, separate_
         return files[0], files[2], files[4]
 
 
-def get_separate_fields(sparse, path):
+def get_separate_fields(path, sparse, num_embed_fields=None):
     if osp.exists(path):
-        return np.load(path)
+        return np.memmap(path, mode='r', dtype=np.int32).reshape(-1, 26)
     else:
-        num_embed_fields = [1460, 583, 10131227, 2202608, 305, 24, 12517, 633, 3, 93145, 5683,
-                            8351593, 3194, 27, 14992, 5461306, 10, 5652, 2173, 4, 7046547, 18, 15, 286181, 105, 142572]
+        if num_embed_fields is None:
+            num_embed_fields = [1460, 583, 10131227, 2202608, 305, 24, 12517, 633, 3, 93145, 5683,
+                                8351593, 3194, 27, 14992, 5461306, 10, 5652, 2173, 4, 7046547, 18, 15, 286181, 105, 142572]
         accum = 0
+        sparse = np.array(sparse)
         for i in range(26):
             sparse[:, i] -= accum
             accum += num_embed_fields[i]
-        np.save(path, sparse)
+        sparse.tofile(path)
         return sparse
 
 
 def process_all_criteo_data_by_day(path=default_criteo_path, return_val=True, separate_fields=False):
     days = 7
     in_path = osp.join(path, 'train.txt')
-    train_path = osp.join(path, 'kaggle_processed_train_hetu.npz')
-    val_path = osp.join(path, 'kaggle_processed_val_hetu.npz')
-    test_path = osp.join(path, 'kaggle_processed_test_hetu.npz')
+    phases = ['train', 'val', 'test']
+    keys = ['dense', 'sparse', 'label']
+    dtypes = [np.float32, np.int32, np.int32]
+    shapes = [(-1, 13), (-1, 26), (-1,)]
+    all_data_path = [
+        [osp.join(path, f'kaggle_processed_{ph}_{k}.bin') for k in keys] for ph in phases]
 
-    data_ready = osp.exists(train_path)
-    if return_val:
-        data_ready = data_ready and osp.exists(test_path)
+    data_ready = all([osp.exists(p) for value in all_data_path for p in value])
 
     if not data_ready:
-        pro_path = osp.join(path, 'kaggle_processed_hetu.npz')
-        pro_data_ready = osp.exists(pro_path)
+        ckeys = keys + ['count']
+        cdtypes = dtypes + [np.int32]
+        cshapes = shapes + [(-1,)]
+        pro_paths = [
+            osp.join(path, f'kaggle_processed_{k}.bin') for k in ckeys]
+        pro_data_ready = all([osp.exists(path) for path in pro_paths])
 
         if not pro_data_ready:
             print("Reading raw data={}".format(in_path))
-            dense, sparse, labels, counts = read_criteo_from_raw(
-                in_path, return_counts=True)
-            np.savez_compressed(
-                pro_path,
-                sparse=sparse,
-                dense=dense,
-                label=labels,
-                count=counts,
-            )
-        print("Reading pre-processed data={}".format(pro_path))
-        data = np.load(pro_path)
-        dense, sparse, label, count = data['dense'], data['sparse'], data['label'], data['count']
+            all_data = read_criteo_from_raw(in_path, return_counts=True)
+            for data, path, dtype in zip(all_data, pro_paths, cdtypes):
+                data = np.array(data, dtype=dtype)
+                data.tofile(path)
+        dense, sparse, label, count = [np.fromfile(path, dtype=dtype).reshape(
+            shape) for path, dtype, shape in zip(pro_paths, cdtypes, cshapes)]
         counts = []
         for i in range(len(count) - 1):
             counts.append(count[i+1] - count[i])
@@ -253,32 +254,28 @@ def process_all_criteo_data_by_day(path=default_criteo_path, return_val=True, se
         # randomize
         train_indices = np.random.permutation(train_indices)
         print("Randomized indices across days ...")
+        indices = [train_indices, val_indices, test_indices]
 
         # create training, validation, and test sets
-        for ind, cur_path in zip([train_indices, val_indices, test_indices], [train_path, val_path, test_path]):
-            cur_dense = dense[ind]
-            cur_sparse = sparse[ind]
-            cur_label = label[ind]
-            np.savez_compressed(
-                cur_path,
-                sparse=cur_sparse,
-                dense=cur_dense,
-                label=cur_label,
-                count=counts,
-            )
+        for ind, cur_paths in zip(indices, all_data_path):
+            cur_data = [dense[ind], sparse[ind], label[ind]]
+            for d, p in zip(cur_data, cur_paths):
+                d.tofile(p)
 
-    train_data = np.load(train_path)
-    train_dense, train_sparse, train_label = train_data[
-        'dense'], train_data['sparse'], train_data['label']
-    if separate_fields:
-        train_sparse = get_separate_fields(
-            train_sparse, osp.join(path, 'train_sep_sparse.npy'))
-    if return_val:
-        test_data = np.load(test_path)
-        test_dense, test_sparse, test_label = test_data['dense'], test_data['sparse'], test_data['label']
+    def get_data(phase):
+        index = {'train': 0, 'val': 1, 'test': 2}[phase]
+        # train and val
+        dense, sparse, label = [np.memmap(p, mode='r', dtype=dtype).reshape(
+            shape) for p, dtype, shape in zip(all_data_path[index], dtypes, shapes)]
         if separate_fields:
-            test_sparse = get_separate_fields(
-                test_sparse, osp.join(path, 'test_sep_sparse.npy'))
+            sparse = get_separate_fields(
+                osp.join(path, f'kaggle_processed_{phase}_sparse_sep.bin'), sparse)
+        return dense, sparse, label
+
+    train_dense, train_sparse, train_label = get_data('train')
+    # val_dense, val_sparse, val_label = get_data('val')
+    test_dense, test_sparse, test_label = get_data('test')
+    if return_val:
         return (train_dense, test_dense), (train_sparse, test_sparse), (train_label, test_label)
     else:
         return train_dense, train_sparse, train_label
@@ -287,6 +284,7 @@ def process_all_criteo_data_by_day(path=default_criteo_path, return_val=True, se
 ###########################################################################
 # adult
 ###########################################################################
+
 
 def maybe_download(train_data, test_data):
     """if adult data "train.csv" and "test.csv" are not in your directory,

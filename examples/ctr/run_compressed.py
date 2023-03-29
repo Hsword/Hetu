@@ -1,7 +1,9 @@
 import hetu as ht
 import hetu.layers as htl
 
+import os
 import os.path as osp
+import pickle
 import numpy as np
 from time import time
 import argparse
@@ -9,30 +11,46 @@ from tqdm import tqdm
 from sklearn import metrics
 
 
+def get_ctx(idx):
+    if idx < 0:
+        ctx = ht.cpu(0)
+    else:
+        assert idx < 8
+        ctx = ht.gpu(idx)
+    return ctx
+
+
+def handle_inf_nan(arr):
+    arr[np.isnan(arr)] = 0
+    arr[np.isinf(arr)] = 0
+    return arr
+
+
+def get_auc(ground_truth_y, predicted_y):
+    # auc for an epoch
+    cur_gt = np.concatenate(ground_truth_y)
+    cur_pr = np.concatenate(predicted_y)
+    cur_gt = handle_inf_nan(cur_gt)
+    cur_pr = handle_inf_nan(cur_pr)
+    return metrics.roc_auc_score(cur_gt, cur_pr)
+
+
+def get_acc(y_val, predict_y):
+    # acc for an iteration
+    if y_val.shape[1] == 1:  # for criteo case
+        acc_val = np.equal(
+            y_val,
+            predict_y > 0.5).astype(np.float32)
+    else:
+        acc_val = np.equal(
+            np.argmax(y_val, 1),
+            np.argmax(predict_y, 1)).astype(np.float32)
+    return acc_val
+
+
 def worker(args):
-    def get_auc(ground_truth_y, predicted_y):
-        # auc for an epoch
-        cur_gt = np.concatenate(ground_truth_y)
-        cur_pr = np.concatenate(predicted_y)
-        cur_gt[np.isnan(cur_gt)] = 0
-        cur_gt[np.isinf(cur_gt)] = 0
-        cur_pr[np.isnan(cur_pr)] = 0
-        cur_pr[np.isinf(cur_pr)] = 0
-        return metrics.roc_auc_score(cur_gt, cur_pr)
 
-    def get_acc(y_val, predict_y):
-        # acc for an iteration
-        if y_val.shape[1] == 1:  # for criteo case
-            acc_val = np.equal(
-                y_val,
-                predict_y > 0.5).astype(np.float32)
-        else:
-            acc_val = np.equal(
-                np.argmax(y_val, 1),
-                np.argmax(predict_y, 1)).astype(np.float32)
-        return acc_val
-
-    def train(iterations, auc_enabled=True, tqdm_enabled=False):
+    def train(iterations, epoch, part, auc_enabled=True, tqdm_enabled=False):
         localiter = tqdm(range(iterations)
                          ) if tqdm_enabled else range(iterations)
         train_loss = []
@@ -48,7 +66,8 @@ def worker(args):
                 loss_val, predict_y, y_val = executor.run(
                     'train', convert_to_numpy_ret_vals=True)[:3]
             acc_val = get_acc(y_val, predict_y)
-            executor.log('train_loss', loss_val)
+            executor.multi_log(
+                {'epoch': epoch, 'part': part, 'train_loss': loss_val})
             executor.step_logger()
             train_loss.append(loss_val[0])
             train_acc.append(acc_val)
@@ -61,7 +80,7 @@ def worker(args):
             return_vals += (train_auc,)
         return return_vals
 
-    def validate(iterations, tqdm_enabled=False):
+    def validate(iterations, epoch, part, tqdm_enabled=False):
         localiter = tqdm(range(iterations)
                          ) if tqdm_enabled else range(iterations)
         test_loss = []
@@ -69,12 +88,12 @@ def worker(args):
         ground_truth_y = []
         predicted_y = []
         for it in localiter:
-            loss_val, test_y_predicted, y_test_val = executor.run(
+            loss_value, test_y_predicted, y_test_value = executor.run(
                 'validate', convert_to_numpy_ret_vals=True)
-            correct_prediction = get_acc(y_test_val, test_y_predicted)
-            test_loss.append(loss_val[0])
+            correct_prediction = get_acc(y_test_value, test_y_predicted)
+            test_loss.append(loss_value[0])
             test_acc.append(correct_prediction)
-            ground_truth_y.append(y_test_val)
+            ground_truth_y.append(y_test_value)
             predicted_y.append(test_y_predicted)
         test_auc = get_auc(ground_truth_y, predicted_y)
         test_loss = np.mean(test_loss)
@@ -83,73 +102,109 @@ def worker(args):
         nonlocal best_auc
         nonlocal ep_count
         ep_count += 1
-        if test_acc > best_acc:
-            best_acc = test_acc
-            ep_count = 0
+        # if test_acc > best_acc:
+        #     best_acc = test_acc
+        #     ep_count = 0
         if test_auc > best_auc:
             best_auc = test_auc
             ep_count = 0
+        try_save_ckpt(test_auc, (epoch, part))
         return test_loss, test_acc, test_auc, ep_count >= stop_interval
 
-    def run_epoch(train_batch_num, log_file=None):
+    def try_save_ckpt(test_auc, cur_meta):
+        if args.save_topk > 0 and test_auc > topk_auc[-1]:
+            idx = None
+            for i, auc in enumerate(topk_auc):
+                if test_auc >= auc:
+                    idx = i
+                    break
+            if idx is not None:
+                topk_auc.insert(idx, test_auc)
+                topk_ckpts.insert(idx, cur_meta)
+                ep, part = cur_meta
+                executor.save(args.save_dir, f'ep{ep}_{part}.pkl', {
+                              'epoch': ep, 'part': part, 'npart': args.num_test_every_epoch})
+                rm_auc = topk_auc.pop()
+                rm_meta = topk_ckpts.pop()
+                print(
+                    f'Save ep{ep}_{part}.pkl with auc {test_auc}; current ckpts {topk_ckpts} with aucs {topk_auc}.')
+                if rm_meta is not None:
+                    ep, part = rm_meta
+                    os.remove(osp.join(args.save_dir, f'ep{ep}_{part}.pkl'))
+                    print(f'Remove ep{ep}_{part}.pkl with auc {rm_auc}.')
+
+    def run_epoch(train_batch_num, epoch, part, log_file=None):
         ep_st = time()
         train_loss, train_acc, train_auc = train(
-            train_batch_num, tqdm_enabled=True)
+            train_batch_num, epoch, part, tqdm_enabled=True)
         return_vals = (train_auc,)
-        results = {'avg_train_loss': train_loss,
+        results = {'epoch': epoch, 'part': part, 'avg_train_loss': train_loss,
                    'train_acc': train_acc, 'train_auc': train_auc}
         ep_en = time()
         if args.val:
-            val_loss, val_acc, val_auc, early_stop = validate(
-                executor.get_batch_num('validate'))
+            test_loss, test_acc, test_auc, early_stop = validate(
+                executor.get_batch_num('validate'), epoch, part, True)
             printstr = "train_loss: %.4f, train_acc: %.4f, train_auc: %.4f, test_loss: %.4f, test_acc: %.4f, test_auc: %.4f, train_time: %.4f"\
-                % (train_loss, train_acc, train_auc, val_loss, val_acc, val_auc, ep_en - ep_st)
-            return_vals += (val_auc,)
-            results.update({'avg_val_loss': val_loss,
-                            'val_acc': val_acc, 'val_auc': val_auc})
+                % (train_loss, train_acc, train_auc, test_loss, test_acc, test_auc, ep_en - ep_st)
+            return_vals += (test_auc,)
+            results.update({'avg_test_loss': test_loss,
+                            'test_acc': test_acc, 'test_auc': test_auc})
         else:
             printstr = "train_loss: %.4f, train_acc: %.4f, train_auc: %.4f, train_time: %.4f"\
                 % (train_loss, train_acc, train_auc, ep_en - ep_st)
         executor.multi_log(results)
+        executor.step_logger()
         print(printstr)
         if log_file is not None:
             print(printstr, file=log_file, flush=True)
         return return_vals, early_stop
 
+    topk_auc = [0 for _ in range(args.save_topk)]
+    topk_ckpts = [None for _ in range(args.save_topk)]
+
     assert args.method != 'autodim' or args.val
     batch_size = args.bs
-    num_embed = 33762577
-    num_embed_fields = [1460, 583, 10131227, 2202608, 305, 24, 12517, 633, 3, 93145, 5683,
-                        8351593, 3194, 27, 14992, 5461306, 10, 5652, 2173, 4, 7046547, 18, 15, 286181, 105, 142572]
     num_dim = args.dim
     learning_rate = args.lr
     dataset = args.dataset
+    if args.dataset == 'criteo':
+        num_embed = 33762577
+        num_embed_fields = [1460, 583, 10131227, 2202608, 305, 24, 12517, 633, 3, 93145, 5683,
+                            8351593, 3194, 27, 14992, 5461306, 10, 5652, 2173, 4, 7046547, 18, 15, 286181, 105, 142572]
+    else:
+        raise NotImplementedError
 
-    border = np.sqrt(1 / max(num_embed_fields))
-    initializer = ht.init.GenUniform(minval=-border, maxval=border)
-    if args.ctx < 0:
-        ctx = ht.cpu(0)
+    if args.debug:
+        print('Use zero initializer for debug.')
+        initializer = ht.init.GenZeros()
     else:
-        assert args.ctx < 8
-        ctx = ht.gpu(args.ctx)
-    if args.ectx < 0:
-        ectx = ht.cpu(0)
-    else:
-        assert args.ectx < 8
-        ectx = ht.gpu(args.ectx)
+        border = np.sqrt(1 / max(num_embed_fields))
+        initializer = ht.init.GenUniform(minval=-border, maxval=border)
+    ctx = get_ctx(args.ctx)
+    ectx = get_ctx(args.ectx)
+
     if args.method == 'full':
-        embed_layer = htl.MultipleEmbedding(
-            num_embed_fields, num_dim, initializer=initializer, ctx=ectx)
+        if args.use_multi:
+            embed_layer = htl.MultipleEmbedding(
+                num_embed_fields, num_dim, initializer=initializer, ctx=ectx)
+        else:
+            embed_layer = htl.Embedding(
+                num_embed, num_dim, initializer=initializer, ctx=ectx)
     elif args.method == 'robe':
-        compress_rate = 0.1
+        compress_rate = args.compress_rate
         size_limit = None
+        Z = 1
         embed_layer = htl.RobeEmbedding(
-            num_embed, num_dim, compress_rate=compress_rate, size_limit=size_limit, Z=args.Z, initializer=initializer, ctx=ectx)
+            num_embed, num_dim, compress_rate=compress_rate, size_limit=size_limit, Z=Z, initializer=initializer, ctx=ectx)
     elif args.method == 'hash':
         compress_rate = args.compress_rate
         size_limit = None
-        embed_layer = htl.MultipleHashEmbedding(
-            num_embed_fields, num_dim, compress_rate=compress_rate, size_limit=size_limit, initializer=initializer, ctx=ectx)
+        if args.use_multi:
+            embed_layer = htl.MultipleHashEmbedding(
+                num_embed_fields, num_dim, compress_rate=compress_rate, size_limit=size_limit, initializer=initializer, ctx=ectx)
+        else:
+            embed_layer = htl.HashEmbedding(
+                num_embed, num_dim, compress_rate=compress_rate, size_limit=size_limit, initializer=initializer, ctx=ectx)
     elif args.method == 'compo':
         num_tables = 2
         aggregator = 'mul'
@@ -195,17 +250,25 @@ def worker(args):
         raise NotImplementedError
 
     # define models for criteo
-    if args.all:
+    if True:
         from models.load_data import process_all_criteo_data_by_day
         func = process_all_criteo_data_by_day
-    elif args.val:
-        from models.load_data import process_head_criteo_data
-        func = process_head_criteo_data
     else:
-        from models.load_data import process_sampled_criteo_data
-        func = process_sampled_criteo_data
+        raise NotImplementedError
+        if args.val:
+            from models.load_data import process_head_criteo_data
+            func = process_head_criteo_data
+        else:
+            from models.load_data import process_sampled_criteo_data
+            func = process_sampled_criteo_data
 
-    model = args.model(num_dim, 26, 13)
+    if args.dataset == 'criteo':
+        num_sparse = 26
+        num_dense = 13
+    else:
+        raise NotImplementedError
+
+    model = args.model(num_dim, num_sparse, num_dense)
 
     embed_input, dense_input, y_ = embed_layer.compute_all(
         func, batch_size, args.val)
@@ -223,7 +286,6 @@ def worker(args):
     opt = optimizer(learning_rate=learning_rate)
 
     if args.method == 'autodim':
-        print('Validation enabled...')
         eval_nodes = embed_layer.make_subexecutors(
             model, dense_input, y_, prediction, loss, opt)
     else:
@@ -234,19 +296,35 @@ def worker(args):
         elif args.method == 'prune':
             eval_nodes['train'].append(embed_layer.make_prune_op())
         if args.val:
-            print('Validation enabled...')
             if args.method != 'dpq':
                 eval_nodes['validate'] = [loss, prediction, y_]
             else:
-                val_embed_input = embed_layer.make_inference()
-                val_loss, val_prediction = model(
-                    val_embed_input, dense_input, y_)
-                eval_nodes['validate'] = [val_loss, val_prediction, y_]
-    executor_log_path = osp.join(osp.dirname(osp.abspath(__file__)), 'logs')
+                test_embed_input = embed_layer.make_inference()
+                test_loss, test_prediction = model(
+                    test_embed_input, dense_input, y_)
+                eval_nodes['validate'] = [test_loss, test_prediction, y_]
     project = 'embedmem'
     run_name = osp.split(args.fname)[1][:-4]
-    executor = ht.Executor(eval_nodes, ctx=ctx, seed=123,
-                           log_path=executor_log_path, logger='wandb', project=project, run_name=run_name)
+    executor = ht.Executor(
+        eval_nodes,
+        ctx=ctx,
+        seed=args.seed,
+        log_path=args.log_dir,
+        logger=args.logger,
+        project=project,
+        run_name=run_name,
+        run_id=args.run_id,
+    )
+    start_ep = 0
+    if args.load_ckpt is not None:
+        with open(args.load_ckpt, 'rb') as fr:
+            meta = pickle.load(fr)
+            executor.load_dict(meta['state_dict'])
+            start_epoch = meta['epoch']
+            start_part = meta['part']
+            assert meta['npart'] == args.num_test_every_epoch
+            start_ep = start_epoch * args.num_test_every_epoch + start_part + 1
+            print(f'Load ckpt from {osp.split(args.load_ckpt)[-1]}.')
     executor.set_config(args)
 
     # enable early stopping if no increase within 2 epoch
@@ -262,22 +340,23 @@ def worker(args):
         embed_layer.get_arch_params(executor.config.placeholder_to_arr_map)
         prev_auc = None
         check_auc = True
-    if args.all and dataset == 'criteo':
-        print('Processing all data...')
+    if dataset == 'criteo':
         log_file = open(args.fname, 'w')
-        total_epoch = args.nepoch if args.nepoch > 0 else 11
+        total_epoch = args.nepoch * args.num_test_every_epoch if args.nepoch > 0 else 11
         train_batch_num = executor.get_batch_num('train')
-        npart = 100
+        npart = args.num_test_every_epoch
         base_batch_num = train_batch_num // npart
         residual = train_batch_num % npart
-        for ep in range(total_epoch):
-            print("epoch %d" % ep)
-            results, early_stop = run_epoch(base_batch_num + (ep %
-                                                              npart < residual), log_file)
+        for ep in range(start_ep, total_epoch):
+            real_ep = ep // npart
+            real_part = ep % npart
+            print(f"Epoch {real_ep}({real_part})")
+            results, early_stop = run_epoch(
+                base_batch_num + (real_part < residual), real_ep, real_part, log_file)
             if check_auc:
                 cur_auc = results[1]
                 if prev_auc is not None and cur_auc <= prev_auc:
-                    print("Switch to retrain stage...")
+                    print("Switch to retrain stage.")
                     check_auc = False
                     executor.return_tensor_values()
                     embed_input = embed_layer.make_retrain(
@@ -288,8 +367,8 @@ def worker(args):
                     eval_nodes = {
                         'train': [loss, prediction, y_, train_op],
                         'validate': [loss, prediction, y_]}
-                    executor = ht.Executor(eval_nodes, ctx=ctx, seed=123,
-                                           log_path=executor_log_path)
+                    executor = ht.Executor(eval_nodes, ctx=ctx, seed=args.seed,
+                                           log_path=args.log_dir)
                 prev_auc = cur_auc
             if early_stop:
                 print('Early stop!')
@@ -298,22 +377,22 @@ def worker(args):
         total_epoch = args.nepoch if args.nepoch > 0 else 50
         train_batch_num = executor.get_batch_num('train')
         for ep in range(total_epoch):
-            print("epoch %d" % ep)
-            run_epoch(train_batch_num)
+            print(f"epoch {ep}")
+            run_epoch(train_batch_num, ep, 0)
 
     if args.method == 'prune':
         # check inference; use sparse embedding
         executor.return_tensor_values()
-        val_embed_input = embed_layer.make_inference(executor)
-        val_loss, val_prediction = model(
-            val_embed_input, dense_input, y_)
-        eval_nodes = {'validate': [val_loss, val_prediction, y_]}
-        executor = ht.Executor(eval_nodes, ctx=ctx, seed=123,
-                               log_path=executor_log_path)
-        val_loss, val_acc, val_auc, early_stop = validate(
+        test_embed_input = embed_layer.make_inference(executor)
+        test_loss, test_prediction = model(
+            test_embed_input, dense_input, y_)
+        eval_nodes = {'validate': [test_loss, test_prediction, y_]}
+        executor = ht.Executor(eval_nodes, ctx=ctx,
+                               seed=args.seed, log_path=args.log_dir)
+        test_loss, test_acc, test_auc, early_stop = validate(
             executor.get_batch_num('validate'))
         printstr = "infer_loss: %.4f, infer_acc: %.4f, infer_auc: %.4f"\
-            % (val_loss, val_acc, val_auc)
+            % (test_loss, test_acc, test_auc)
         print(printstr)
         if log_file is not None:
             print(printstr, file=log_file, flush=True)
@@ -321,68 +400,86 @@ def worker(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default='DLRM_Head',
+    parser.add_argument("--model", type=str, default='dlrm',
                         help="model to be tested")
-    parser.add_argument("--method", type=str, default=None,
+    parser.add_argument("--method", type=str, default='full',
                         help="method to be used")
     parser.add_argument("--ectx", type=int, default=None,
                         help="context for embedding table")
-    parser.add_argument("--ctx", type=int, default=None,
+    parser.add_argument("--ctx", type=int, default=0,
                         help="context for model")
-    parser.add_argument("--bs", type=int, default=None,
+    parser.add_argument("--bs", type=int, default=128,
                         help="batch size to be used")
-    parser.add_argument("--opt", type=str, default=None,
+    parser.add_argument("--opt", type=str, default='sgd',
                         help="optimizer to be used, can be SGD, Amsgrad, Adam, Adagrad")
-    parser.add_argument("--dim", type=int, default=None,
+    parser.add_argument("--dim", type=int, default=16,
                         help="dimension to be used")
-    parser.add_argument("--lr", type=float, default=None,
+    parser.add_argument("--lr", type=float, default=1e-3,
                         help="learning rate to be used")
     parser.add_argument("--dataset", type=str, default='criteo',
                         help="dataset to be used")
-    parser.add_argument("--val", action="store_true",
-                        help="whether to use validation")
-    parser.add_argument("--all", action="store_true",
-                        help="whether to use all data")
+    # parser.add_argument("--val", action="store_true",
+    #                     help="whether to use validation")
     parser.add_argument("--nepoch", type=int, default=-1,
-                        help="num of epochs, each train 1/10 data")
-    parser.add_argument("--Z", type=int, default=None,
-                        help="block size in RobeZ")
+                        help="num of epochs")
+    parser.add_argument("--num_test_every_epoch", type=int, default=100,
+                        help="evaluate each 1/100 epoch in default")
+    parser.add_argument("--seed", type=int, default=123,
+                        help="random seed")
+    parser.add_argument("--use_multi", type=int, default=0,
+                        help="whether use multi embedding")
     parser.add_argument("--compress_rate", type=float, default=0.5,
                         help="compress rate")
+    parser.add_argument("--logger", type=str, default="hetu",
+                        help="logger to be used")
+    parser.add_argument("--run_id", type=str, default=None,
+                        help="run id to be logged")
+    parser.add_argument("--debug", action="store_true",
+                        help="whether in debug mode")
+    parser.add_argument("--load_ckpt", type=str, default=None,
+                        help="ckpt to be used")
+    parser.add_argument("--save_topk", type=int, default=0,
+                        help="number of ckpts to be saved")
     args = parser.parse_args()
-    args.fname = '{}'.format(args.model)
-    if args.method is None:
-        args.method = 'full'
-    else:
-        args.fname += '_{}'.format(args.method)
-    if args.ctx is None:
-        args.ctx = 0
+
+    args.opt = args.opt.lower()
+    assert args.opt in ['sgd', 'adam', 'adagrad', 'amsgrad']
     if args.ectx is None:
         args.ectx = args.ctx
-    if args.bs is None:
-        args.bs = 128
+    args.val = True
+
+    infos = [
+        f'{args.model}',
+        f'{args.dataset}',
+        f'{args.method}',
+        f'{args.opt}',
+        f'dim{args.dim}',
+        # f'bs{args.bs}',
+        # f'lr{args.lr}',
+        f'cr{args.compress_rate}',
+        f'multi{args.use_multi}',
+    ]
+    if args.debug:
+        infos.append(f'debug')
+    args.fname = '_'.join(infos) + '.log'
+    args.log_dir = osp.join(osp.dirname(osp.abspath(__file__)), 'logs')
+    os.makedirs(args.log_dir, exist_ok=True)
+    args.save_dir = osp.join(osp.dirname(
+        osp.abspath(__file__)), 'ckpts', args.fname[:-4])
+    args.fname = osp.join(args.log_dir, args.fname)
+    if osp.isdir(args.save_dir):
+        print('Warning: the save dir already exists!')
+    os.makedirs(args.save_dir, exist_ok=True)
+    if args.load_ckpt is not None:
+        if not osp.isfile(args.load_ckpt):
+            args.load_ckpt = osp.join(args.save_dir, args.load_ckpt)
+            assert osp.isfile(args.load_ckpt)
+
+    print(f'Use {args.model} on {args.dataset}.')
+    if args.model.lower().startswith('dlrm'):
+        from models import DLRM_Head
+        model = DLRM_Head
     else:
-        args.fname += '_bs{}'.format(args.bs)
-    if args.opt is None:
-        args.opt = 'adam'
-    else:
-        args.opt = args.opt.lower()
-        assert args.opt in ['sgd', 'adam', 'adagrad', 'amsgrad']
-        args.fname += '_opt{}'.format(args.opt)
-    if args.dim is None:
-        args.dim = 16
-    else:
-        args.fname += '_dim{}'.format(args.dim)
-    if args.lr is None:
-        args.lr = 0.001
-    else:
-        args.fname += '_lr{}'.format(args.lr)
-    args.fname += f'_rate{args.compress_rate}'
-    args.fname += '.log'
-    args.fname = osp.join(osp.dirname(
-        osp.abspath(__file__)), 'logs', args.fname)
-    import models
-    print('Model:', args.model)
-    model = eval('models.' + args.model)
+        raise NotImplementedError
     args.model = model
     worker(args)

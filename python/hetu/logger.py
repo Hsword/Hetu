@@ -77,11 +77,10 @@ class HetuLogger(object):
 
     def step(self):
         # logging here
-        raise NotImplementedError
         self._buffer.clear()
 
-    def set_config(self):
-        raise NotImplementedError
+    def set_config(self, attrs):
+        print(attrs)
 
     def __del__(self):
         if self._buffer != {}:
@@ -89,14 +88,19 @@ class HetuLogger(object):
 
 
 class WandbLogger(HetuLogger):
-    def __init__(self, project, name, rank, nrank, ctx, comm, handle):
+    def __init__(self, project, name, id, rank, nrank, ctx, comm, handle):
         # use single process to log finally
         assert WANDB_IMPORT, 'Import error, please install wandb first.'
         super().__init__(rank, nrank, ctx, comm, handle)
         self._project = project
         self._name = name
         if self.need_log:
-            self.logger = wandb.init(project=project, name=name)
+            self.logger = wandb.init(
+                project=project,
+                name=name,
+                id=id,
+                resume="allow",
+            )
 
     @property
     def name(self):
@@ -108,11 +112,12 @@ class WandbLogger(HetuLogger):
         self._buffer.clear()
 
     def set_config(self, attrs):
+        print(attrs)
         if isinstance(attrs, argparse.Namespace):
             attrs = vars(attrs)
         assert isinstance(attrs, dict)
         if self.need_log:
-            wandb.config.update(attrs)
+            wandb.config.update(attrs, allow_val_change=True)
 
     def __del__(self):
         super().__del__()

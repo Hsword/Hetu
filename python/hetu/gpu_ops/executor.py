@@ -206,6 +206,7 @@ class HetuConfig(object):
         logger: Optional[str] = None,
         project: Optional[str] = None,
         run_name: Optional[str] = None,
+        run_id: Optional[str] = None,
         pipeline: Optional[str] = None,
         dist_strategy: Optional[Strategy] = None,
         use_preduce: bool = False,
@@ -401,7 +402,11 @@ class HetuConfig(object):
             if logger == 'wandb':
                 from ..logger import WandbLogger
                 self.logger = WandbLogger(
-                    project, run_name, self.rank, self.nrank, self.context, self.nccl_comm, self.nccl_stream)
+                    project, run_name, run_id, self.rank, self.nrank, self.context, self.nccl_comm, self.nccl_stream)
+            elif logger == 'hetu':
+                from ..logger import HetuLogger
+                self.logger = HetuLogger(
+                    self.rank, self.nrank, self.context, self.nccl_comm, self.nccl_stream)
             else:
                 raise ValueError
         else:
@@ -522,9 +527,10 @@ class Executor(object):
     def get_batch_num(self, name: str = 'default') -> int:
         return self.subexecutor[name].batch_num
 
-    def save(self, file_path: str, file_name: str) -> None:
+    def save(self, file_path: str, file_name: str, others: Optional[dict] = None) -> None:
         assert os.path.isdir(
             file_path), 'Need to specify a work directory to save parameters.'
+        assert others is None or 'state_dict' not in others
         state_dic = {}
         if self.comm_mode in (None, 'AllReduce'):
             # when using allreduce, users need to specify the worker whose rank equals 0 to save
@@ -546,7 +552,11 @@ class Executor(object):
             self.ps_comm.BarrierWorker()
 
         with open(os.path.join(file_path, file_name), "wb") as writer:
-            pickle.dump(state_dic, writer)
+            if others is None:
+                pickle.dump(state_dic, writer)
+            else:
+                others['state_dict'] = state_dic
+                pickle.dump(others, writer)
 
     def load(self, file_path: str, file_name: str, consider_splits: bool = False) -> None:
         assert os.path.isdir(
