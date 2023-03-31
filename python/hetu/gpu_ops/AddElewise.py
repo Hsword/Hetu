@@ -22,10 +22,8 @@ class AddOp(Op):
 
     def _compute_with_index(self, input_vals, output_val, stream_handle=None):
         def cpu_oneside_add(sparse, dense):
-            sparse.cpu_deduplicate()
             dense[sparse.indices.asnumpy().astype(
                 np.int)] += sparse.values.asnumpy()
-            sparse.free_deduplicate()
         first_indexed = isinstance(input_vals[0], ndarray.IndexedSlices)
         second_indexed = isinstance(input_vals[1], ndarray.IndexedSlices)
         if self.on_cpu:

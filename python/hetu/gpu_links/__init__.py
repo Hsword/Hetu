@@ -163,7 +163,6 @@ __all__ = [
     'robe_lookup',
     'robe_lookup_gradient',
     'embedding_lookup',
-    'embedding_lookup_gradient',
     'sparse_embedding_lookup',
     'minimum_distance_vector',
     'where',

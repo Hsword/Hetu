@@ -31,10 +31,8 @@ class SumOp(Op):
         output_val += input_val.asnumpy()
 
     def _indexed_cpu_callback(self, input_val, output_val):
-        input_val.cpu_deduplicate()
         output_val[input_val.indices.asnumpy().astype(
             np.int)] += input_val.values.asnumpy()
-        input_val.free_deduplicate()
 
     def _simple_gpu_callback(self, input_val, output_val, ind, stream_handle):
         matrix_elementwise_add_simple(

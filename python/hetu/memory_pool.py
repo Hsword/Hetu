@@ -48,7 +48,7 @@ class HetuMemoryPool(object):
             if outdeg[node] > 0 or node in persistent_nodes or isinstance(node, self.indexed_nodes):
                 return
             assert outdeg[node] == 0
-            if node.inplace or isinstance(node, EmbeddingLookUp_Gradient):
+            if node.inplace:
                 for n in node.inputs:
                     release_node(n)
             else:
@@ -56,7 +56,7 @@ class HetuMemoryPool(object):
                              node.dtype)].append(node)
 
         for node in computing_nodes:
-            if node.inplace or isinstance(node, EmbeddingLookUp_Gradient):
+            if node.inplace:
                 continue
             shape = node_to_shape[node]
             key = (shape, node.ctx, node.dtype)
@@ -101,9 +101,6 @@ class HetuMemoryPool(object):
                     node_to_arr_map[node] = None
                 elif isinstance(node, RobeLookUp_Gradient):
                     node_to_arr_map[node] = ndarray.RobeSlices(
-                        dense_shape=shape)
-                elif isinstance(node, EmbeddingLookUp_Gradient):
-                    node_to_arr_map[node] = ndarray.IndexedSlices(
                         dense_shape=shape)
                 elif node in indexed_slices_shape:
                     ind_shape, val_shape = indexed_slices_shape[node]

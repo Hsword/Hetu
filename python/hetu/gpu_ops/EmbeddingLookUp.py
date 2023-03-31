@@ -3,8 +3,8 @@ from .Node import Op
 from .. import ndarray
 from .._base import DNNL_LIB
 import numpy as np
-from ..cpu_links import embedding_lookup as cpu_embedding_lookup
-from ..gpu_links import embedding_lookup
+from ..cpu_links import embedding_lookup as cpu_embedding_lookup, reduce_indexedslice as cpu_reduce_indexedslice
+from ..gpu_links import embedding_lookup, reduce_indexedslice_get_workspace_size, reduce_indexedslice
 
 
 class EmbeddingLookUp(Op):
@@ -156,21 +156,40 @@ class EmbeddingLookUp_Gradient(Op):
                          inputs, ctx)
         self.embed_shape = embed_shape
         self.use_indexed_slices = True
+        self.dedup_args = None
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        assert self.embed_shape
         if self.index is None:
-            output_val.update(
-                values=input_vals[0], indices=input_vals[1], dense_shape=self.embed_shape)
+            index = input_vals[1]
         else:
-            output_val.update(
-                values=input_vals[0], indices=self.index, dense_shape=self.embed_shape)
+            index = self.index
+        if self.on_gpu:
+            reduce_indexedslice(index, input_vals[0], output_val.indices, output_val.values,
+                                self.dedup_args['sp'], self.dedup_args['size'], self.dedup_args['eb'], stream_handle)
+        else:
+            cpu_reduce_indexedslice(
+                index, input_vals[0], output_val.indices, output_val.values)
 
     def gradient(self, output_grad):
         raise NotImplementedError
 
     def infer_shape(self, input_shapes):
         assert self.embed_shape
+        if self.on_gpu:
+            if self.index is None:
+                ind_shape = input_shapes[1]
+            else:
+                ind_shape = self.index.shape
+            ind_size = int(np.prod(ind_shape))
+            ws_size = reduce_indexedslice_get_workspace_size(ind_size)
+            all_ws_size = 2 * ind_size + 2 + (ws_size + 3) // 4
+            self.dedup_args = {
+                'sp': ndarray.empty((all_ws_size, ), ctx=self.ctx),
+                'size': ws_size,
+                'eb': int(np.ceil(np.log2(self.embed_shape[0]))),
+            }
+        else:
+            self.dedup_args = {}
         return self.embed_shape
 
     def backward_hook(self, config):

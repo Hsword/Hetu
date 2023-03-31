@@ -582,8 +582,7 @@ def dense_to_sparse(arr):
 
 
 class IndexedSlices(object):
-    __slots__ = ["indices", "values", "dense_shape", "lazy",
-                 "dedup_ind", "dedup_val", "dedup_args", "dense_arr", ]
+    __slots__ = ["indices", "values", "dense_shape", "lazy", "dense_arr", ]
 
     def __init__(self, indices=None, values=None, dense_shape=None):
         self.indices = indices
@@ -591,7 +590,6 @@ class IndexedSlices(object):
         self.dense_shape = dense_shape
         self.lazy = False
         self.dense_arr = None
-        self.dedup_args = None
 
     def get_dense_shape(self):
         assert self.dense_shape is not None
@@ -601,63 +599,17 @@ class IndexedSlices(object):
         assert isinstance(self.values, NDArray)
         return self.values.shape
 
-    def update(self, indices, values, dense_shape):
-        self.indices = indices
-        self.values = values
-        if self.dense_shape is not None:
-            assert tuple(self.dense_shape) == tuple(dense_shape)
-        else:
-            self.dense_shape = dense_shape
-
-    def deduplicate(self, stream=None):
-        if is_gpu_ctx(self.indices.ctx):
-            self.gpu_deduplicate(stream)
-        else:
-            self.cpu_deduplicate()
-
-    def gpu_deduplicate(self, stream):
-        assert is_gpu_ctx(self.indices.ctx)
-        self.try_init_deduplicate(True)
-        from .gpu_links import reduce_indexedslice
-        reduce_indexedslice(self.indices, self.values, self.dedup_ind, self.dedup_val,
-                            self.dedup_args['sp'], self.dedup_args['size'], self.dedup_args['eb'], stream)
-
-    def cpu_deduplicate(self):
-        assert not is_gpu_ctx(self.indices.ctx)
-        self.try_init_deduplicate(False)
-        from .cpu_links import reduce_indexedslice
-        reduce_indexedslice(self.indices, self.values,
-                            self.dedup_ind, self.dedup_val)
-
     def to_dense(self, stream=None):
         self.try_init_dense()
-        self.deduplicate(stream)
         if is_gpu_ctx(self.indices.ctx):
             _LIB.DLGpuArraySet(self.dense_arr.handle, ctypes.c_float(
                 0), stream.handle if stream else None)
-            _LIB.IndexedSlices2Dense(self.dedup_val.handle, self.dedup_ind.handle,
+            _LIB.IndexedSlices2Dense(self.values.handle, self.indices.handle,
                                      self.dense_arr.handle, stream.handle if stream else None)
         else:
             _LIB.cpu_IndexedSlices2Dense(
-                self.dedup_ind.handle, self.dedup_val.handle, self.dense_arr.handle)
+                self.indices.handle, self.values.handle, self.dense_arr.handle)
         return self.dense_arr
-
-    def try_init_deduplicate(self, on_gpu):
-        if self.dedup_args is None:
-            if on_gpu:
-                from .gpu_links import reduce_indexedslice_get_workspace_size
-                ind_size = int(np.prod(self.indices.shape))
-                ws_size = reduce_indexedslice_get_workspace_size(ind_size)
-                all_ws_size = 2 * ind_size + 2 + (ws_size + 3) // 4
-                self.dedup_args = {
-                    'sp': empty((all_ws_size, ), ctx=self.indices.ctx),
-                    'size': ws_size,
-                    'eb': int(np.ceil(np.log2(self.get_dense_shape()[0]))),
-                }
-            else:
-                self.dedup_args = {}
-            self.dedup_ind = empty_like(self.indices)
-            self.dedup_val = empty_like(self.values)
 
     def try_init_dense(self):
         shape = self.get_dense_shape()
@@ -665,9 +617,10 @@ class IndexedSlices(object):
             self.dense_arr = empty(
                 shape, ctx=self.values.ctx, dtype=self.values.dtype)
 
+
 class RobeSlices(object):
-    __slots__ = ["indices", "values", "x", "dense_shape", "Bg", "Cg", "Dg", "Z", "MO", "lazy",
-                 "dedup_ind", "dedup_val", "dedup_args", "dense_arr", ]
+    __slots__ = ["indices", "values", "x", "dense_shape",
+                 "Bg", "Cg", "Dg", "Z", "MO", "lazy", "dense_arr", ]
 
     def __init__(self, indices=None, values=None, x=None, dense_shape=None):
         self.indices = indices
@@ -681,7 +634,6 @@ class RobeSlices(object):
         self.MO = None
         self.lazy = False
         self.dense_arr = None
-        self.dedup_args = None
 
     def get_dense_shape(self):
         assert self.dense_shape is not None
@@ -698,66 +650,9 @@ class RobeSlices(object):
         self.Bg = Bg
         self.Cg = Cg
         self.Dg = Dg
-        self.Z=Z
-        self.MO=MO
+        self.Z = Z
+        self.MO = MO
         if self.dense_shape is not None:
             assert tuple(self.dense_shape) == tuple(dense_shape)
         else:
             self.dense_shape = dense_shape
-    '''
-    def deduplicate(self, stream=None):
-        if is_gpu_ctx(self.indices.ctx):
-            self.gpu_deduplicate(stream)
-        else:
-            self.cpu_deduplicate()
-
-    def gpu_deduplicate(self, stream):
-        assert is_gpu_ctx(self.indices.ctx)
-        self.try_init_deduplicate(True)
-        from .gpu_links import reduce_indexedslice
-        reduce_indexedslice(self.indices, self.values, self.dedup_ind, self.dedup_val,
-                            self.dedup_args['sp'], self.dedup_args['size'], self.dedup_args['eb'], stream)
-
-    def cpu_deduplicate(self):
-        assert not is_gpu_ctx(self.indices.ctx)
-        self.try_init_deduplicate(False)
-        from .cpu_links import reduce_indexedslice
-        reduce_indexedslice(self.indices, self.values,
-                            self.dedup_ind, self.dedup_val)
-    
-    def to_dense(self, stream=None):
-        self.try_init_dense()
-        self.deduplicate(stream)
-        if is_gpu_ctx(self.indices.ctx):
-            _LIB.DLGpuArraySet(self.dense_arr.handle, ctypes.c_float(
-                0), stream.handle if stream else None)
-            _LIB.IndexedSlices2Dense(self.dedup_val.handle, self.dedup_ind.handle,
-                                     self.dense_arr.handle, stream.handle if stream else None)
-        else:
-            _LIB.cpu_IndexedSlices2Dense(
-                self.dedup_ind.handle, self.dedup_val.handle, self.dense_arr.handle)
-        return self.dense_arr
-
-    def try_init_deduplicate(self, on_gpu):
-        if self.dedup_args is None:
-            if on_gpu:
-                from .gpu_links import reduce_indexedslice_get_workspace_size
-                ind_size = int(np.prod(self.indices.shape))
-                ws_size = reduce_indexedslice_get_workspace_size(ind_size)
-                all_ws_size = 2 * ind_size + 2 + (ws_size + 3) // 4
-                self.dedup_args = {
-                    'sp': empty((all_ws_size, ), ctx=self.indices.ctx),
-                    'size': ws_size,
-                    'eb': int(np.ceil(np.log2(self.get_dense_shape()[0]))),
-                }
-            else:
-                self.dedup_args = {}
-            self.dedup_ind = empty_like(self.indices)
-            self.dedup_val = empty_like(self.values)
-
-    def try_init_dense(self):
-        shape = self.get_dense_shape()
-        if self.dense_arr is None:
-            self.dense_arr = empty(
-                shape, ctx=self.values.ctx, dtype=self.values.dtype)
-    '''
