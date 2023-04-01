@@ -416,6 +416,15 @@ class HetuConfig(object):
         topo_sort_with_hook(self.my_eval_nodes, self)
 
 
+def flatten(container):
+    for i in container:
+        if isinstance(i, (list, tuple)):
+            for j in flatten(i):
+                yield j
+        else:
+            yield i
+
+
 class Executor(object):
     """Executor computes values for given set of nodes in computation graph."""
 
@@ -433,6 +442,8 @@ class Executor(object):
         """
         if not isinstance(eval_node_dict, dict):
             eval_node_dict = {'default': eval_node_dict}
+        eval_node_dict = {k: list(flatten(v))
+                          for k, v in eval_node_dict.items()}
         train_name, val_name = None, None
         for k, v in eval_node_dict.items():
             if any([isinstance(node, OptimizerOp) for node in v]):

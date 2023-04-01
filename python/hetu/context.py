@@ -908,13 +908,12 @@ class GraphStatus(object):
         opt = None
         for node in self.node_list:
             if isinstance(node, OptimizerOp):
-                assert opt is None
-                opt = node
-        self.opt: Optional[OptimizerOp] = opt
+                opt = node.optimizer
+        self.opt = opt
         if opt is not None:
-            self.bf_map = self.opt.optimizer.backward2forward
+            self.bf_map = self.opt.backward2forward
         self.forward_node_list: List[Op] = self.node_list.copy() if opt is None \
-            else [opt.optimizer.loss]
+            else [opt.loss]
 
         # node status
         # in mp if parse_dispatch or complete_graph are called
@@ -2162,10 +2161,6 @@ class GraphStatus(object):
                 if not isinstance(layer, OpLayerGradient):
                     layer.reset_inputs(
                         self.node_cur_state_map, self.node_tar_state_map, self.model_parallel)
-            # # replace var in opt
-            # if self.opt is not None:
-            #     self.init_extended_opt()
-            #     self.opt.optimizer.params, self.opt.inputs = self.extended_opt
             self.extended = True
 
     def shrink_oplayers(self) -> None:
@@ -2173,34 +2168,16 @@ class GraphStatus(object):
             for layer in self.oplayers:
                 for node, i in self.oplayers[layer]:
                     node.inputs[i] = layer
-            # # replace var in opt
-            # if self.opt is not None:
-            #     self.opt.optimizer.params, self.opt.inputs = self.shrinked_opt
             self.extended = False
 
-    # def init_extended_opt(self):
-    #     if self.extended_opt is None:
-    #         from .layers.base import OpLayerGradient
-    #         self.shrinked_opt = (
-    #             self.opt.optimizer.params.copy(), self.opt.inputs.copy())
-    #         new_params, new_grads = self.shrinked_opt
-    #         for layer in self.oplayers:
-    #             if not isinstance(layer, OpLayerGradient):
-    #                 index = new_params.index(layer)
-    #                 new_params = new_params[:index] + \
-    #                     layer.params + new_params[index+1:]
-    #                 new_grads = new_grads[:index] + \
-    #                     layer.param_grads + new_grads[index+1:]
-    #         self.extended_opt = (new_params, new_grads)
-
     def set_grad_ctx(self, none_ctx: DeviceGroup) -> None:
-        for2back = self.opt.optimizer.forward2backward
+        for2back = self.opt.forward2backward
         for grad in for2back.pop(None):
             grad.raw_ctx = none_ctx
         for node, grads in for2back.items():
             for grad in grads:
                 grad.raw_ctx = node.raw_ctx
-        self.opt.raw_ctx = none_ctx
+        # self.opt.raw_ctx = none_ctx
 
     def assert_opt(self) -> None:
         assert self.opt is not None

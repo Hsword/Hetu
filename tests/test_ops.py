@@ -1,6 +1,6 @@
 import numpy as np
 import hetu as ht
-from tester import HetuTester, HetuOptimzierTester
+from tester import HetuTester, HetuOptimizerTester
 
 
 def test_add_const():
@@ -352,45 +352,45 @@ def test_optimizers():
 
     # np.random.seed(123)
     if tests['sgd']:
-        tester = HetuOptimzierTester(
+        tester = HetuOptimizerTester(
             ht.optim.SGDOptimizer(100), test_shapes)
         tester.test(rtol=1e-6, atol=1e-6)
-        tester = HetuOptimzierTester(
+        tester = HetuOptimizerTester(
             ht.optim.SGDOptimizer(100, 0.3), test_shapes)
         tester.test(iters=3, rtol=1e-3, atol=1e-3)
     if tests['momentum']:
-        tester = HetuOptimzierTester(
+        tester = HetuOptimizerTester(
             ht.optim.MomentumOptimizer(100), test_shapes)
         tester.test(rtol=1e-6, atol=1e-6)
-        tester = HetuOptimzierTester(
+        tester = HetuOptimizerTester(
             ht.optim.MomentumOptimizer(100, l2reg=0.3), test_shapes)
         tester.test(rtol=1e-4, atol=1e-4)
     if tests['nesterov']:
-        tester = HetuOptimzierTester(
+        tester = HetuOptimizerTester(
             ht.optim.MomentumOptimizer(100, nesterov=True), test_shapes)
         tester.test(rtol=1e-6, atol=1e-6)
-        tester = HetuOptimzierTester(
+        tester = HetuOptimizerTester(
             ht.optim.MomentumOptimizer(100, nesterov=True, l2reg=0.3), test_shapes)
         tester.test(rtol=1e-4, atol=1e-4)
     if tests['adagrad']:
-        tester = HetuOptimzierTester(
+        tester = HetuOptimizerTester(
             ht.optim.AdaGradOptimizer(100), test_shapes)
         tester.test(atol=1e-7)
-        tester = HetuOptimzierTester(
+        tester = HetuOptimizerTester(
             ht.optim.AdaGradOptimizer(100, l2reg=0.001), test_shapes)
         tester.test(rtol=1e-5, atol=2e-5)
     if tests['adam']:
-        tester = HetuOptimzierTester(
+        tester = HetuOptimizerTester(
             ht.optim.AdamOptimizer(100), test_shapes)
         tester.test(atol=1e-6, rtol=1e-6)
-        tester = HetuOptimzierTester(
+        tester = HetuOptimizerTester(
             ht.optim.AdamOptimizer(100, l2reg=0.3), test_shapes)
         tester.test(rtol=1e-4, atol=2e-5)
     if tests['amsgrad']:
-        tester = HetuOptimzierTester(
+        tester = HetuOptimizerTester(
             ht.optim.AdamOptimizer(100, amsgrad=True), test_shapes)
         tester.test(atol=1e-6, rtol=1e-6)
-        tester = HetuOptimzierTester(
+        tester = HetuOptimizerTester(
             ht.optim.AdamOptimizer(100, l2reg=0.3, amsgrad=True), test_shapes)
         tester.test(rtol=1e-3, atol=2e-5)
 

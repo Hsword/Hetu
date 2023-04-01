@@ -78,7 +78,7 @@ class HetuTester(object):
               (self.gpu_op, input_shapes))
 
 
-class HetuOptimzierTester(HetuTester):
+class HetuOptimizerTester(HetuTester):
     def __init__(self, opt, input_shapes):
         assert isinstance(opt, ht.optim.Optimizer)
         opt.backward2forward = {}
@@ -116,10 +116,10 @@ class HetuOptimzierTester(HetuTester):
                 'gtemp{}'.format(i), value=gtensors[-1], ctx=ht.gpu(0)))
             cparams[-1].on_cpu = gparams[-1].on_gpu = True
             cparams[-1].on_gpu = gparams[-1].on_cpu = False
-        self.cpu_opt.tensors = ctensors
-        self.cpu_opt.params = cparams
-        self.gpu_opt.tensors = gtensors
-        self.gpu_opt.params = gparams
+        self.cparams = cparams
+        self.gparams = gparams
+        self.ctensors = ctensors
+        self.gtensors = gtensors
         self.make_ops()
         self.make_executors()
 
@@ -163,15 +163,17 @@ class HetuOptimzierTester(HetuTester):
         return ind
 
     def make_ops(self):
-        self.cpu_op = ht.optim.OptimizerOp(self.cpu_inputs, self.cpu_opt)
-        self.gpu_op = ht.optim.OptimizerOp(self.gpu_inputs, self.gpu_opt)
+        self.cpu_op = [self.cpu_opt.opt_op_type(
+            param, grad, self.cpu_opt) for param, grad in zip(self.cparams, self.cpu_inputs)]
+        self.gpu_op = [self.gpu_opt.opt_op_type(
+            param, grad, self.gpu_opt) for param, grad in zip(self.gparams, self.gpu_inputs)]
 
     def test(self, iters=5, rtol=1e-7, atol=0):
         sparse_atol = 5e-5
         for _ in range(iters):
             self.run(self.input_vals)
             self.gpu_executor.config.comp_stream.sync()
-            for i, (ctensor, gtensor) in enumerate(zip(self.cpu_opt.tensors, self.gpu_opt.tensors)):
+            for i, (ctensor, gtensor) in enumerate(zip(self.ctensors, self.gtensors)):
                 cur_atol = atol
                 if i == self.ind:
                     cur_atol = sparse_atol

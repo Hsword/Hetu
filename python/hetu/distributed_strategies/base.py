@@ -100,7 +100,7 @@ class Strategy(object):
 
         visited_key = {}
         merging = {}
-        for2back = graph_status.opt.optimizer.forward2backward
+        for2back = graph_status.opt.forward2backward
         forward_loss = graph_status.forward_node_list[0]
         # here we specially handle oplayers
         # we add contents of oplayer into visited keys
