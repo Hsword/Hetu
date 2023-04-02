@@ -758,41 +758,44 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle grad_values, DLArrayHandle acc, float lr, float eps,
         DLStreamHandle stream_handle);
 
+    int BetatsUpdate(DLArrayHandle betats, float beta1, float beta2,
+                     DLStreamHandle stream_handle);
+
     int AdamOptimizerUpdate(DLArrayHandle param, const DLArrayHandle grad,
                             DLArrayHandle expavg, DLArrayHandle expavgsq,
                             DLArrayHandle maxv, float lr, float beta1,
-                            float beta2, float beta1t, float beta2t, float eps,
+                            float beta2, DLArrayHandle beta_ts, float eps,
                             DLStreamHandle stream_handle);
 
     int AdamOptimizerSparseUpdate(
         DLArrayHandle param, const DLArrayHandle grad_indices,
         const DLArrayHandle grad_values, DLArrayHandle expavg,
         DLArrayHandle expavgsq, DLArrayHandle maxv, float lr, float beta1,
-        float beta2, float beta1t, float beta2t, float eps,
+        float beta2, DLArrayHandle beta_ts, float eps,
         DLStreamHandle stream_handle);
 
     int AdamWOptimizerUpdate(DLArrayHandle param, const DLArrayHandle grad,
                              DLArrayHandle expavg, DLArrayHandle expavgsq,
-                             float lr, float beta1, float beta2, float beta1t,
-                             float beta2t, float eps, float weight_decay,
-                             DLStreamHandle stream_handle);
+                             float lr, float beta1, float beta2,
+                             DLArrayHandle beta_ts, float eps,
+                             float weight_decay, DLStreamHandle stream_handle);
     int AdamWOptimizerSparseUpdate(
         DLArrayHandle param, const DLArrayHandle grad_indices,
         const DLArrayHandle grad_values, DLArrayHandle expavg,
         DLArrayHandle expavgsq, float lr, float beta1, float beta2,
-        float beta1t, float beta2t, float eps, float weight_decay,
+        DLArrayHandle beta_ts, float eps, float weight_decay,
         DLStreamHandle stream_handle);
 
     int LambOptimizerUpdate(DLArrayHandle param, const DLArrayHandle grad,
                             DLArrayHandle expavg, DLArrayHandle expavgsq,
-                            float lr, float beta1, float beta2, float beta1t,
-                            float beta2t, float eps, float weight_decay,
-                            DLStreamHandle stream_handle);
+                            float lr, float beta1, float beta2,
+                            DLArrayHandle beta_ts, float eps,
+                            float weight_decay, DLStreamHandle stream_handle);
     int LambOptimizerSparseUpdate(
         DLArrayHandle param, const DLArrayHandle grad_indices,
         const DLArrayHandle grad_values, DLArrayHandle expavg,
         DLArrayHandle expavgsq, float lr, float beta1, float beta2,
-        float beta1t, float beta2t, float eps, float weight_decay,
+        DLArrayHandle beta_ts, float eps, float weight_decay,
         DLStreamHandle stream_handle);
 
     int DeduplicateIndexedSlices(
@@ -942,15 +945,16 @@ HETUSYS_EXTERN_C {
         DLArrayHandle param, const DLArrayHandle indices,
         const DLArrayHandle values, DLArrayHandle acc, float learning_rate,
         float eps);
+    int cpu_BetatsUpdate(DLArrayHandle betats, float beta1, float beta2);
     int cpu_AdamOptimizerUpdate(
         DLArrayHandle param, const DLArrayHandle grad, DLArrayHandle expavg,
         DLArrayHandle expavgsq, DLArrayHandle maxv, float learning_rate,
-        float beta1, float beta2, float beta1t, float beta2t, float eps);
+        float beta1, float beta2, DLArrayHandle beta_ts, float eps);
     int cpu_AdamOptimizerSparseUpdate(
         DLArrayHandle param, const DLArrayHandle indices,
         const DLArrayHandle values, DLArrayHandle expavg,
         DLArrayHandle expavgsq, DLArrayHandle maxv, float learning_rate,
-        float beta1, float beta2, float beta1t, float beta2t, float eps);
+        float beta1, float beta2, DLArrayHandle beta_ts, float eps);
 
     int cpu_ReduceIndexedSlice(
         const DLArrayHandle in_indices, const DLArrayHandle in_values,

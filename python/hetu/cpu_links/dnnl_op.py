@@ -360,11 +360,18 @@ def adagrad_update(param, grad, accumulation, lr, l2reg, eps):
                                         ctypes.c_float(lr), ctypes.c_float(eps))
 
 
-def adam_update(param, grad, expavg, expavgsq, maxv, lr, beta1, beta2, beta1t, beta2t, l2reg, eps):
+def betats_update(betats, beta1, beta2):
+    assert isinstance(betats, NDArray)
+    _LIB.cpu_BetatsUpdate(betats.handle, ctypes.c_float(
+        beta1), ctypes.c_float(beta2))
+
+
+def adam_update(param, grad, expavg, expavgsq, maxv, lr, beta1, beta2, betats, l2reg, eps):
     assert isinstance(param, NDArray)
     assert isinstance(grad, (NDArray, IndexedSlices))
     assert isinstance(expavg, NDArray)
     assert isinstance(expavgsq, NDArray)
+    assert isinstance(betats, NDArray)
     assert maxv is None or isinstance(maxv, NDArray)
     grad = add_l2_regularization(param, grad, l2reg)
     if isinstance(grad, IndexedSlices):
@@ -376,15 +383,13 @@ def adam_update(param, grad, expavg, expavgsq, maxv, lr, beta1, beta2, beta1t, b
                                            ctypes.c_float(
                                                lr), ctypes.c_float(beta1),
                                            ctypes.c_float(
-                                               beta2), ctypes.c_float(beta1t),
-                                           ctypes.c_float(beta2t), ctypes.c_float(eps))
+                                               beta2), betats.handle, ctypes.c_float(eps))
     else:
         _LIB.cpu_AdamOptimizerUpdate(param.handle, grad.handle, expavg.handle,
                                      expavgsq.handle, None if maxv is None else maxv.handle,
                                      ctypes.c_float(lr), ctypes.c_float(beta1),
                                      ctypes.c_float(
-                                         beta2), ctypes.c_float(beta1t),
-                                     ctypes.c_float(beta2t), ctypes.c_float(eps))
+                                         beta2), betats.handle, ctypes.c_float(eps))
 
 
 def reduce_indexedslice(in_indices, in_values, out_indices, out_values):

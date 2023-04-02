@@ -1,13 +1,13 @@
 import numpy as np
 import ctypes
 import hetu as ht
-from .ndarray import NDArray, IndexedSlices, array
+from .ndarray import NDArray, IndexedSlices, is_gpu_ctx
 from .lr_scheduler import FixedScheduler
 from .gpu_ops.Node import Op
 from .gpu_ops.ParameterServerCommunicate import ParameterServerCommunicateOp
 from .gpu_ops.Variable import PlaceholderOp
-from .gpu_links.OptimizerLink import sgd_update, momentum_update, adagrad_update, adam_update, adamw_update, lamb_update
-from .cpu_links.dnnl_op import sgd_update as cpu_sgd_update, momentum_update as cpu_momentum_update, adagrad_update as cpu_adagrad_update, adam_update as cpu_adam_update
+from .gpu_links.OptimizerLink import sgd_update, momentum_update, adagrad_update, adam_update, adamw_update, lamb_update, betats_update
+from .cpu_links.dnnl_op import sgd_update as cpu_sgd_update, momentum_update as cpu_momentum_update, adagrad_update as cpu_adagrad_update, adam_update as cpu_adam_update, betats_update as cpu_betats_update
 from ._base import DNNL_LIB
 
 
@@ -70,6 +70,18 @@ class Optimizer(object):
         grads, self.backward2forward, self.forward2backward = ht.gradients(
             loss, var_list, return_all=True)
         opt_nodes = []
+        if isinstance(self, (AdamOptimizer, AdamWOptimizer, LambOptimizer)):
+            names = {}
+            gidx = 0
+            for p in var_list:
+                pctx = p.ctx
+                if pctx not in names:
+                    names[pctx] = gidx
+                    gidx += 1
+            self.betatss = {ctx: _raw_init_states(
+                (2,), f'betats_{names[ctx]}', ctx, ht.init.constant, fill_value=1.0) for ctx in names}
+            self.betats_update_ops = {ctx: betats_update_op(
+                betats, self.beta1, self.beta2, ctx) for ctx, betats in self.betatss.items()}
         for param, grad in zip(var_list, grads):
             opt_nodes.append(self.opt_op_type(param, grad, self))
         return opt_nodes
@@ -176,14 +188,24 @@ class SGDOptimizer(Optimizer):
 
 
 def _init_states(param, name, func=None, **kargs):
+    return _raw_init_states(
+        param.shape,
+        f'{param.name}_{name}',
+        param.ctx,
+        func,
+        **kargs,
+    )
+
+
+def _raw_init_states(shape, name, ctx, func=None, **kargs):
     if func is None:
         from .initializers import zeros
         func = zeros
     state = func(
-        param.shape,
-        name=f'{param.name}_{name}',
+        shape,
+        name=name,
         trainable=False,
-        ctx=param.ctx,
+        ctx=ctx,
         **kargs,
     )
     return state
@@ -301,39 +323,67 @@ class AdaGradOptimizer(Optimizer):
         return (ctypes.c_int(3), (ctypes.c_float * 3)(self.learning_rate, self.initial_accumulator_value, self.eps), ctypes.c_int(3))
 
 
+class BetatsUpdateOp(Op):
+    # assistant op for betats in adam, adamw, lamb
+    def __init__(self, betats, beta1, beta2, ctx=None):
+        super().__init__(BetatsUpdateOp, [betats], ctx)
+        self.beta1 = beta1
+        self.beta2 = beta2
+
+    def infer_shape(self, input_shapes):
+        return None
+
+    def compute(self, input_vals, output_val, stream_handle=None):
+        if self.on_gpu:
+            betats_update(input_vals[0], self.beta1, self.beta2, stream_handle)
+        else:
+            if DNNL_LIB['cpu_BetatsUpdate']:
+                cpu_betats_update(input_vals[0], self.beta1, self.beta2)
+            else:
+                betats = input_vals[0]
+                np_betats = betats.asnumpy()
+                np_betats[0] *= self.beta1
+                np_betats[1] *= self.beta2
+                betats[:] = np_betats
+
+
+def betats_update_op(betats, beta1, beta2, ctx=None):
+    return BetatsUpdateOp(betats, beta1, beta2, ctx)
+
+
 class AdamUpdateOp(OptimizerOp):
     def __init__(self, param, grad, optimizer):
         from .initializers import zeros
         m = _init_states(param, 'adam_m', zeros)
         v = _init_states(param, 'adam_v', zeros)
-        states = [m, v]
+        pctx = param.ctx
+        states = [m, v, optimizer.betatss[pctx],
+                  optimizer.betats_update_ops[pctx]]
         if optimizer.amsgrad:
             maxv = _init_states(param, 'adam_maxv', zeros)
             states.append(maxv)
         self.amsgrad = optimizer.amsgrad
         self.beta1 = optimizer.beta1
         self.beta2 = optimizer.beta2
-        self.beta1_t = optimizer.beta1_t
-        self.beta2_t = optimizer.beta2_t
         self.epsilon = optimizer.epsilon
         super().__init__(param, grad, optimizer, *states)
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        self.beta1_t *= self.beta1
-        self.beta2_t *= self.beta2
-        tensor, grad, m, v = input_vals[:4]
+        tensor, grad, m, v, betats = input_vals[:5]
         if self.amsgrad:
-            maxv = input_vals[4]
+            maxv = input_vals[-1]
         else:
             maxv = None
         if self.on_gpu:
             adam_update(tensor, grad, m, v, maxv, self.learning_rate, self.beta1,
-                        self.beta2, self.beta1_t, self.beta2_t, self.epsilon, self.l2reg, stream_handle)
+                        self.beta2, betats, self.epsilon, self.l2reg, stream_handle)
         else:
             if DNNL_LIB['cpu_AdamOptimizerSparseUpdate'] and DNNL_LIB['cpu_AdamOptimizerUpdate']:
                 cpu_adam_update(tensor, grad, m, v, maxv, self.learning_rate,
-                                self.beta1, self.beta2, self.beta1_t, self.beta2_t, self.l2reg, self.epsilon)
+                                self.beta1, self.beta2, betats, self.l2reg, self.epsilon)
             else:
+                cur_beta_ts = betats.asnumpy()
+                cur_beta1_t, cur_beta2_t = cur_beta_ts[0], cur_beta_ts[1]
                 if isinstance(grad, IndexedSlices):
                     np_indices = grad.indices.asnumpy()
                     np_tensor = tensor.asnumpy()
@@ -356,8 +406,8 @@ class AdamUpdateOp(OptimizerOp):
                             (1 - self.beta1) * new_value[j]
                         np_v[ind] = self.beta2 * np_v[ind] + \
                             (1 - self.beta2) * new_value[j] * new_value[j]
-                        mc = np_m[ind] / (1 - self.beta1_t)
-                        vc = np_v[ind] / (1 - self.beta2_t)
+                        mc = np_m[ind] / (1 - cur_beta1_t)
+                        vc = np_v[ind] / (1 - cur_beta2_t)
                         if self.amsgrad:
                             np_maxv[ind] = np.maximum(vc, np_maxv[ind])
                             np_tensor[ind] -= self.learning_rate * \
@@ -378,8 +428,8 @@ class AdamUpdateOp(OptimizerOp):
                         m.asnumpy() + (1 - self.beta1) * grad
                     v[:] = self.beta2 * v.asnumpy() + \
                         (1 - self.beta2) * grad * grad
-                    mc = m.asnumpy() / (1 - self.beta1_t)
-                    vc = v.asnumpy() / (1 - self.beta2_t)
+                    mc = m.asnumpy() / (1 - cur_beta1_t)
+                    vc = v.asnumpy() / (1 - cur_beta2_t)
                     if self.amsgrad:
                         cur_maxv = np.maximum(vc, maxv.asnumpy())
                         tensor[:] = prev_param - \
@@ -396,9 +446,7 @@ class AdamOptimizer(Optimizer):
     def __init__(self, learning_rate=0.01, beta1=0.9, beta2=0.999, epsilon=1e-7, l2reg=0, amsgrad=False):
         super(AdamOptimizer, self).__init__(learning_rate, l2reg)
         self.beta1 = beta1
-        self.beta1_t = 1.0
         self.beta2 = beta2
-        self.beta2_t = 1.0
         self.epsilon = epsilon
         self.amsgrad = amsgrad
         self.opt_op_type = AdamUpdateOp

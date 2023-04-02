@@ -86,6 +86,20 @@ class HetuOptimizerTester(HetuTester):
         opt.loss = None
         self.cpu_opt = opt
         self.gpu_opt = copy(opt)
+        has_betats = (ht.optim.AdamOptimizer,
+                      ht.optim.AdamWOptimizer, ht.optim.LambOptimizer)
+        if isinstance(self.cpu_opt, has_betats):
+            ctx = ht.cpu()
+            self.cpu_opt.betatss = {ctx: ht.init.constant(
+                (2,), 1.0, f'adam_betats_cpu', False, ctx)}
+            self.cpu_opt.betats_update_ops = {ctx: ht.optim.betats_update_op(
+                self.cpu_opt.betatss[ctx], self.cpu_opt.beta1, self.cpu_opt.beta2, ctx)}
+        if isinstance(self.gpu_opt, has_betats):
+            ctx = ht.gpu(0)
+            self.gpu_opt.betatss = {ctx: ht.init.constant(
+                (2,), 1.0, f'adam_betats_gpu', False, ctx)}
+            self.gpu_opt.betats_update_ops = {ctx: ht.optim.betats_update_op(
+                self.gpu_opt.betatss[ctx], self.gpu_opt.beta1, self.gpu_opt.beta2, ctx)}
         self.input_shapes = input_shapes
         ind = self.make_inputs(input_shapes)
 

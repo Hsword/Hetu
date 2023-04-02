@@ -188,11 +188,18 @@ extern "C" int cpu_AdaGradOptimizerSparseUpdate(DLArrayHandle param,
     return 0;
 }
 
+extern "C" int cpu_BetatsUpdate(DLArrayHandle betats, float beta1,
+                                float beta2) {
+    float *betats_data = (float *)(betats->data);
+    betats_data[0] *= beta1;
+    betats_data[1] *= beta2;
+}
+
 extern "C" int
 cpu_AdamOptimizerUpdate(DLArrayHandle param, const DLArrayHandle grad,
                         DLArrayHandle expavg, DLArrayHandle expavgsq,
                         DLArrayHandle maxv, float learning_rate, float beta1,
-                        float beta2, float beta1t, float beta2t, float eps) {
+                        float beta2, DLArrayHandle betats, float eps) {
     int num = 1;
     for (int i = 0; i < param->ndim; i++)
         num *= param->shape[i];
@@ -201,6 +208,8 @@ cpu_AdamOptimizerUpdate(DLArrayHandle param, const DLArrayHandle grad,
     float *grad_data = (float *)(grad->data);
     float *expavg_data = (float *)(expavg->data);
     float *expavgsq_data = (float *)(expavgsq->data);
+    float *betats_data = (float *)(betats->data);
+    float beta1t = betats_data[0], beta2t = betats_data[1];
 
     if (maxv != NULL) {
         float *maxv_data = (float *)(maxv->data);
@@ -238,7 +247,7 @@ cpu_AdamOptimizerSparseUpdate(DLArrayHandle param, const DLArrayHandle indices,
                               const DLArrayHandle values, DLArrayHandle expavg,
                               DLArrayHandle expavgsq, DLArrayHandle maxv,
                               float learning_rate, float beta1, float beta2,
-                              float beta1t, float beta2t, float eps) {
+                              DLArrayHandle betats, float eps) {
     size_t num = arrSize(indices);
     assert(param->ndim == 2);
     size_t width = param->shape[1];
@@ -248,6 +257,8 @@ cpu_AdamOptimizerSparseUpdate(DLArrayHandle param, const DLArrayHandle indices,
     const float *value_data = (const float *)(values->data);
     float *expavg_data = (float *)(expavg->data);
     float *expavgsq_data = (float *)(expavgsq->data);
+    float *betats_data = (float *)(betats->data);
+    float beta1t = betats_data[0], beta2t = betats_data[1];
 
     if (maxv != NULL) {
         float *maxv_data = (float *)(maxv->data);

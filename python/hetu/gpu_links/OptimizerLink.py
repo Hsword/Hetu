@@ -61,48 +61,57 @@ def adagrad_update(param, grad, accumulation, lr, eps, l2reg, stream=None):
             lr), ctypes.c_float(eps), stream.handle if stream else None)
 
 
-def adam_update(param, grad, expavg, expavgsq, maxv, lr, beta1, beta2, beta1t, beta2t, eps, l2reg, stream=None):
+def betats_update(betats, beta1, beta2, stream=None):
+    assert isinstance(betats, NDArray)
+    _LIB.BetatsUpdate(betats.handle, ctypes.c_float(beta1),
+                      ctypes.c_float(beta2), stream.handle if stream else None)
+
+
+def adam_update(param, grad, expavg, expavgsq, maxv, lr, beta1, beta2, betats, eps, l2reg, stream=None):
     assert isinstance(param, NDArray)
     assert isinstance(grad, (NDArray, IndexedSlices))
     assert isinstance(expavg, NDArray)
     assert isinstance(expavgsq, NDArray)
+    assert isinstance(betats, NDArray)
     assert maxv is None or isinstance(maxv, NDArray)
     grad = add_l2_regularization(param, grad, l2reg, stream)
     if isinstance(grad, NDArray):
         _LIB.AdamOptimizerUpdate(param.handle, grad.handle, expavg.handle, expavgsq.handle, None if maxv is None else maxv.handle, ctypes.c_float(lr), ctypes.c_float(beta1), ctypes.c_float(beta2),
-                                 ctypes.c_float(beta1t), ctypes.c_float(beta2t), ctypes.c_float(eps), stream.handle if stream else None)
+                                 betats.handle, ctypes.c_float(eps), stream.handle if stream else None)
     else:
         assert isinstance(grad.indices, NDArray)
         assert isinstance(grad.values, NDArray)
         _LIB.AdamOptimizerSparseUpdate(param.handle, grad.indices.handle, grad.values.handle, expavg.handle, expavgsq.handle, None if maxv is None else maxv.handle, ctypes.c_float(lr), ctypes.c_float(beta1), ctypes.c_float(beta2),
-                                       ctypes.c_float(beta1t), ctypes.c_float(beta2t), ctypes.c_float(eps),  stream.handle if stream else None)
+                                       betats.handle, ctypes.c_float(eps),  stream.handle if stream else None)
 
 
-def adamw_update(param, grad, expavg, expavgsq, lr, beta1, beta2, beta1t, beta2t, eps, weight_decay, stream=None):
+def adamw_update(param, grad, expavg, expavgsq, lr, beta1, beta2, betats, eps, weight_decay, stream=None):
     assert isinstance(param, NDArray)
     assert isinstance(grad, (NDArray, IndexedSlices))
     assert isinstance(expavg, NDArray)
     assert isinstance(expavgsq, NDArray)
+    assert isinstance(betats, NDArray)
     if isinstance(grad, NDArray):
         _LIB.AdamWOptimizerUpdate(param.handle, grad.handle, expavg.handle, expavgsq.handle, ctypes.c_float(lr), ctypes.c_float(beta1), ctypes.c_float(beta2),
-                                  ctypes.c_float(beta1t), ctypes.c_float(beta2t), ctypes.c_float(eps), ctypes.c_float(weight_decay), stream.handle if stream else None)
+                                  betats.handle, ctypes.c_float(eps), ctypes.c_float(weight_decay), stream.handle if stream else None)
     else:
         assert isinstance(grad.indices, NDArray)
         assert isinstance(grad.values, NDArray)
         _LIB.AdamWOptimizerSparseUpdate(param.handle, grad.indices.handle, grad.values.handle, expavg.handle, expavgsq.handle, ctypes.c_float(lr), ctypes.c_float(beta1), ctypes.c_float(beta2),
-                                        ctypes.c_float(beta1t), ctypes.c_float(beta2t), ctypes.c_float(eps), ctypes.c_float(weight_decay), stream.handle if stream else None)
+                                        betats.handle, ctypes.c_float(eps), ctypes.c_float(weight_decay), stream.handle if stream else None)
 
 
-def lamb_update(param, grad, expavg, expavgsq, lr, beta1, beta2, beta1t, beta2t, eps, weight_decay, stream=None):
+def lamb_update(param, grad, expavg, expavgsq, lr, beta1, beta2, betats, eps, weight_decay, stream=None):
     assert isinstance(param, NDArray)
     assert isinstance(grad, (NDArray, IndexedSlices))
     assert isinstance(expavg, NDArray)
     assert isinstance(expavgsq, NDArray)
+    assert isinstance(betats, NDArray)
     if isinstance(grad, NDArray):
         _LIB.LambOptimizerUpdate(param.handle, grad.handle, expavg.handle, expavgsq.handle, ctypes.c_float(lr), ctypes.c_float(beta1), ctypes.c_float(beta2),
-                                 ctypes.c_float(beta1t), ctypes.c_float(beta2t), ctypes.c_float(eps), ctypes.c_float(weight_decay), stream.handle if stream else None)
+                                 betats.handle, ctypes.c_float(eps), ctypes.c_float(weight_decay), stream.handle if stream else None)
     else:
         assert isinstance(grad.indices, NDArray)
         assert isinstance(grad.values, NDArray)
         _LIB.LambOptimizerSparseUpdate(param.handle, grad.indices.handle, grad.values.handle, expavg.handle, expavgsq.handle, ctypes.c_float(lr), ctypes.c_float(beta1), ctypes.c_float(beta2),
-                                       ctypes.c_float(beta1t), ctypes.c_float(beta2t), ctypes.c_float(eps), ctypes.c_float(weight_decay), stream.handle if stream else None)
+                                       betats.handle, ctypes.c_float(eps), ctypes.c_float(weight_decay), stream.handle if stream else None)

@@ -391,8 +391,8 @@ int AdaGradOptimizerSparseUpdate(DLArrayHandle param,
 __global__ void adam_sparse_update(float *param, const float *grad_data,
                                    const int *indices_data, float *m, float *v,
                                    float lr, float beta1, float beta2,
-                                   float beta1t, float beta2t, float eps,
-                                   size_t size, size_t length) {
+                                   float *betats, float eps, size_t size,
+                                   size_t length) {
     size_t thread_ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (thread_ind >= size)
         return;
@@ -412,17 +412,16 @@ __global__ void adam_sparse_update(float *param, const float *grad_data,
     float cur_v = beta2 * (*v_ptr) + (1 - beta2) * cur_grad * cur_grad;
     *m_ptr = cur_m;
     *v_ptr = cur_v;
-    cur_m /= (1 - beta1t);
-    cur_v /= (1 - beta2t);
+    cur_m /= (1 - betats[0]);
+    cur_v /= (1 - betats[1]);
     *(param_ptr) -= lr * cur_m / (sqrtf(cur_v) + eps);
 }
 
 __global__ void amsgrad_sparse_update(float *param, const float *grad_data,
                                       const int *indices_data, float *m,
                                       float *v, float *maxv, float lr,
-                                      float beta1, float beta2, float beta1t,
-                                      float beta2t, float eps, size_t size,
-                                      size_t length) {
+                                      float beta1, float beta2, float *betats,
+                                      float eps, size_t size, size_t length) {
     size_t thread_ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (thread_ind >= size)
         return;
@@ -443,8 +442,8 @@ __global__ void amsgrad_sparse_update(float *param, const float *grad_data,
     float cur_v = beta2 * (*v_ptr) + (1 - beta2) * cur_grad * cur_grad;
     *m_ptr = cur_m;
     *v_ptr = cur_v;
-    cur_m /= (1 - beta1t);
-    cur_v /= (1 - beta2t);
+    cur_m /= (1 - betats[0]);
+    cur_v /= (1 - betats[1]);
     float cur_maxv = fmaxf(*maxv_ptr, cur_v);
     *maxv_ptr = cur_maxv;
     *(param_ptr) -= lr * cur_m / (sqrtf(cur_maxv) + eps);
@@ -455,8 +454,8 @@ int AdamOptimizerSparseUpdate(DLArrayHandle param,
                               const DLArrayHandle grad_values,
                               DLArrayHandle expavg, DLArrayHandle expavgsq,
                               DLArrayHandle maxv, float lr, float beta1,
-                              float beta2, float beta1t, float beta2t,
-                              float eps, DLStreamHandle stream_handle = NULL) {
+                              float beta2, DLArrayHandle betats, float eps,
+                              DLStreamHandle stream_handle = NULL) {
     size_t size = 1;
     size_t length = param->shape[1];
     for (int i = 0; i < grad_values->ndim; ++i) {
@@ -470,6 +469,7 @@ int AdamOptimizerSparseUpdate(DLArrayHandle param,
     const int *indices_data = (const int *)grad_indices->data;
     float *m_data = (float *)expavg->data;
     float *v_data = (float *)expavgsq->data;
+    float *betats_data = (float *)betats->data;
     if (size <= 1024) {
         threads.x = size;
         blocks.x = 1;
@@ -483,11 +483,11 @@ int AdamOptimizerSparseUpdate(DLArrayHandle param,
             amsgrad_sparse_update<<<blocks, threads, 0,
                                     *(cudaStream_t *)stream_handle->handle>>>(
                 param_data, grad_data, indices_data, m_data, v_data, maxv_data,
-                lr, beta1, beta2, beta1t, beta2t, eps, size, length);
+                lr, beta1, beta2, betats_data, eps, size, length);
         } else {
             amsgrad_sparse_update<<<blocks, threads>>>(
                 param_data, grad_data, indices_data, m_data, v_data, maxv_data,
-                lr, beta1, beta2, beta1t, beta2t, eps, size, length);
+                lr, beta1, beta2, betats_data, eps, size, length);
         }
 
     } else {
@@ -495,11 +495,11 @@ int AdamOptimizerSparseUpdate(DLArrayHandle param,
             adam_sparse_update<<<blocks, threads, 0,
                                  *(cudaStream_t *)stream_handle->handle>>>(
                 param_data, grad_data, indices_data, m_data, v_data, lr, beta1,
-                beta2, beta1t, beta2t, eps, size, length);
+                beta2, betats_data, eps, size, length);
         } else {
             adam_sparse_update<<<blocks, threads>>>(
                 param_data, grad_data, indices_data, m_data, v_data, lr, beta1,
-                beta2, beta1t, beta2t, eps, size, length);
+                beta2, betats_data, eps, size, length);
         }
     }
     return 0;
@@ -508,7 +508,7 @@ int AdamOptimizerSparseUpdate(DLArrayHandle param,
 __global__ void adamw_sparse_update(float *param, const float *grad_data,
                                     const int *indices_data, float *m, float *v,
                                     float lr, float beta1, float beta2,
-                                    float beta1t, float beta2t, float eps,
+                                    float *betats, float eps,
                                     float weight_decay, size_t size,
                                     size_t length) {
     size_t thread_ind = blockIdx.x * blockDim.x + threadIdx.x;
@@ -530,8 +530,8 @@ __global__ void adamw_sparse_update(float *param, const float *grad_data,
     float cur_v = beta2 * (*v_ptr) + (1 - beta2) * cur_grad * cur_grad;
     *m_ptr = cur_m;
     *v_ptr = cur_v;
-    cur_m /= (1 - beta1t);
-    cur_v /= (1 - beta2t);
+    cur_m /= (1 - betats[0]);
+    cur_v /= (1 - betats[1]);
     float update = cur_m / (sqrtf(cur_v) + eps);
     *(param_ptr) -= lr * (update + weight_decay * (*param_ptr));
 }
@@ -540,8 +540,9 @@ int AdamWOptimizerSparseUpdate(DLArrayHandle param,
                                const DLArrayHandle grad_indices,
                                const DLArrayHandle grad_values,
                                DLArrayHandle expavg, DLArrayHandle expavgsq,
-                               float lr, float beta1, float beta2, float beta1t,
-                               float beta2t, float eps, float weight_decay,
+                               float lr, float beta1, float beta2,
+                               DLArrayHandle betats, float eps,
+                               float weight_decay,
                                DLStreamHandle stream_handle = NULL) {
     size_t size = 1;
     size_t length = param->shape[1];
@@ -556,6 +557,7 @@ int AdamWOptimizerSparseUpdate(DLArrayHandle param,
     const int *indices_data = (const int *)grad_indices->data;
     float *m_data = (float *)expavg->data;
     float *v_data = (float *)expavgsq->data;
+    float *betats_data = (float *)betats->data;
     if (size <= 1024) {
         threads.x = size;
         blocks.x = 1;
@@ -567,11 +569,11 @@ int AdamWOptimizerSparseUpdate(DLArrayHandle param,
         adamw_sparse_update<<<blocks, threads, 0,
                               *(cudaStream_t *)stream_handle->handle>>>(
             param_data, grad_data, indices_data, m_data, v_data, lr, beta1,
-            beta2, beta1t, beta2t, eps, weight_decay, size, length);
+            beta2, betats_data, eps, weight_decay, size, length);
     else
         adamw_sparse_update<<<blocks, threads>>>(
             param_data, grad_data, indices_data, m_data, v_data, lr, beta1,
-            beta2, beta1t, beta2t, eps, weight_decay, size, length);
+            beta2, betats_data, eps, weight_decay, size, length);
     return 0;
 }
 
@@ -595,8 +597,8 @@ __global__ void get_indexed_params(float *indexed_param, const float *param,
 __global__ void calc_lamb_update_sparse(float *update, const float *grad_data,
                                         const int *indices_data, float *m,
                                         float *v, float beta1, float beta2,
-                                        float beta1t, float beta2t, float eps,
-                                        size_t size, size_t length) {
+                                        float *betats, float eps, size_t size,
+                                        size_t length) {
     size_t thread_ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (thread_ind >= size)
         return;
@@ -615,8 +617,8 @@ __global__ void calc_lamb_update_sparse(float *update, const float *grad_data,
     float cur_v = beta2 * (*v_ptr) + (1 - beta2) * cur_grad * cur_grad;
     *m_ptr = cur_m;
     *v_ptr = cur_v;
-    cur_m /= (1 - beta1t);
-    cur_v /= (1 - beta2t);
+    cur_m /= (1 - betats[0]);
+    cur_v /= (1 - betats[1]);
     update[thread_ind] = cur_m / (sqrtf(cur_v) + eps);
 }
 
@@ -645,8 +647,9 @@ int LambOptimizerSparseUpdate(DLArrayHandle param,
                               const DLArrayHandle grad_indices,
                               const DLArrayHandle grad_values,
                               DLArrayHandle expavg, DLArrayHandle expavgsq,
-                              float lr, float beta1, float beta2, float beta1t,
-                              float beta2t, float eps, float weight_decay,
+                              float lr, float beta1, float beta2,
+                              DLArrayHandle betats, float eps,
+                              float weight_decay,
                               DLStreamHandle stream_handle = NULL) {
     int dev_id = (param->ctx).device_id;
     cudaSetDevice(dev_id);
@@ -702,6 +705,7 @@ int LambOptimizerSparseUpdate(DLArrayHandle param,
     const int *indices_data = (const int *)grad_indices->data;
     float *m_data = (float *)expavg->data;
     float *v_data = (float *)expavgsq->data;
+    float *betats_data = (float *)betats->data;
     if (size_sparse <= 1024) {
         threads.x = size_sparse;
         blocks.x = 1;
@@ -743,11 +747,11 @@ int LambOptimizerSparseUpdate(DLArrayHandle param,
         calc_lamb_update_sparse<<<blocks, threads, 0,
                                   *(cudaStream_t *)stream_handle->handle>>>(
             (float *)intermediate, grad_data, indices_data, m_data, v_data,
-            beta1, beta2, beta1t, beta2t, eps, size_sparse, length);
+            beta1, beta2, betats_data, eps, size_sparse, length);
     else
         calc_lamb_update_sparse<<<blocks, threads>>>(
             (float *)intermediate, grad_data, indices_data, m_data, v_data,
-            beta1, beta2, beta1t, beta2t, eps, size_sparse, length);
+            beta1, beta2, betats_data, eps, size_sparse, length);
 
     // Calculate Norm2 of update
     CUDNN_CALL(cudnnSetTensorNdDescriptor(adesc, CUDNN_DATA_FLOAT, ndim,
