@@ -545,12 +545,12 @@ class Executor(object):
         state_dic = {}
         if self.comm_mode in (None, 'AllReduce'):
             # when using allreduce, users need to specify the worker whose rank equals 0 to save
-            for node in self.param_nodes:
-                state_dic[node.name] = self.config.placeholder_to_arr_map[node].asnumpy()
+            for node, value in self.config.placeholder_to_arr_map.items():
+                state_dic[node.name] = value.asnumpy()
         else:
             self.ps_comm.BarrierWorker()
             if self.config.rank == 0:
-                for node in self.param_nodes:
+                for node, value in self.config.placeholder_to_arr_map.items():
                     if node.is_embed or self.comm_mode == 'PS':
                         node.event.sync()
                         nodeid = ctypes.c_int(node.id)
@@ -558,8 +558,7 @@ class Executor(object):
                             nodeid, ctypes.c_char_p(bytes(file_path, 'utf-8')))
                         self.ps_comm.Wait(nodeid)
                     else:
-                        state_dic[node.name] = \
-                            self.config.placeholder_to_arr_map[node].asnumpy()
+                        state_dic[node.name] = value.asnumpy()
             self.ps_comm.BarrierWorker()
 
         with open(os.path.join(file_path, file_name), "wb") as writer:
@@ -584,7 +583,7 @@ class Executor(object):
         consider_splits: bool = False
     ) -> None:
         if self.comm_mode in (None, 'AllReduce'):
-            for node in self.param_nodes:
+            for node in self.config.placeholder_to_arr_map:
                 if node.name in state_dict:
                     value = state_dict[node.name]
                     if consider_splits and node.reshaped:
@@ -602,7 +601,7 @@ class Executor(object):
             assert file_path is not None
             self.ps_comm.BarrierWorker()
             if self.config.rank == 0:
-                for node in self.param_nodes:
+                for node in self.config.placeholder_to_arr_map:
                     if node.is_embed or self.comm_mode == 'PS':
                         node.event.sync()
                         nodeid = ctypes.c_int(node.id)
@@ -1103,15 +1102,16 @@ class SubExecutor(object):
 
         # get dataloader values
         for node in self.dataloader_nodes:
-            local_shape = node.get_cur_shape(self.name)
+            if dataloader_step:
+                cur_value = node.get_arr(self.name)
+            else:
+                cur_value = node.get_next_arr(self.name)
+            self.node_to_arr_map[node] = cur_value
+            local_shape = cur_value.shape
+            feed_shapes[node] = local_shape
             local_realloc = local_shape != self.node_to_shape_map.get(
                 node, None)
             need_reallocation = need_reallocation or local_realloc
-            if dataloader_step:
-                self.node_to_arr_map[node] = node.get_arr(self.name)
-            else:
-                self.node_to_arr_map[node] = node.get_next_arr(self.name)
-            feed_shapes[node] = local_shape
 
         # in pipedream, we should retrieve the latest model parameter.
         if self.config.pipeline == "pipedream":

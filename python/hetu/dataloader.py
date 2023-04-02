@@ -10,7 +10,7 @@ from .gpu_ops.Node import Op
 
 # Multi-Process not useful now, since we don't have memory to CPU bottleneck
 class Dataloader(object):
-    def __init__(self, raw_data, batch_size, name='default', func=None, batch_func=None, drop_last=True, dtype=np.float32):
+    def __init__(self, raw_data, batch_size, name='default', func=None, batch_func=None, drop_last=True, offset=0, dtype=np.float32):
         self.func = func if func else lambda x: x
         self.dtype = dtype
         self.raw_data = np.array(self.func(raw_data), dtype=self.dtype)
@@ -28,6 +28,7 @@ class Dataloader(object):
         self.parts = None
         self.slices = None
         self.batch_num = None
+        self.batch_index = offset
 
     def init_states(self):
         if self.dp_nrank is not None:
@@ -37,75 +38,45 @@ class Dataloader(object):
             ending = start + cur_size
             self.raw_data = self.raw_data[start:ending]
         self.samples_num = len(self.raw_data)
-        self.queue_size = 3  # if use prefetch, needs 3; if only current batch, needs 2
-        self.batch_size = min(int(self.batch_size),
-                              self.samples_num // self.queue_size)
+        self.batch_size = int(self.batch_size)
         assert self.batch_size > 0, 'Batch size %d invalid.' % self.batch_size
         self.batch_num = self.get_batch_num(self.samples_num)
-        self.shape = tuple([self.batch_size] + list(self.raw_data.shape[1:]))
-        self.set_slices()
-        self.seq = np.arange(self.samples_num)
-
-        self.index = 0
-        self.arrs = []
-        self.arr_map = {}
-        # prefetch to fill up the queue
-        for i in range(self.queue_size):
-            next_index = self.index + self.batch_size
-            self.arrs.append(ndarray.array(
-                self.reshape_tensor(self.raw_data[self.seq[self.index:next_index]]), ctx=ndarray.cpu(0), dtype=self.dtype))
-            self.index = next_index
-            self.arr_map[i] = i
-        self.max_key = self.queue_size - 1
-
+        if self.batch_index >= self.batch_num:
+            self.batch_index = 0
+        self.sample_shape = list(self.raw_data.shape[1:])
+        self.shape = tuple([self.batch_size] + self.sample_shape)
+        self.arr = ndarray.empty(
+            self.shape, ctx=ndarray.cpu(0), dtype=self.dtype)
         # in case the last batch's shape is different, pre-allocate an array
+        self.rest_arr = None
         if not self.drop_last:
             assert self.parts is None, 'Model parallel cannot use dataloader without drop_last.'
             res_num = self.samples_num % self.batch_size
-            if res_num > 0:
-                self.arrs.append(ndarray.empty(
-                    tuple([res_num] + list(self.shape[1:])), ctx=ndarray.cpu(0), dtype=self.dtype))
-            self.rest = self.queue_size
-
-        self.batch_index = 0
+            if res_num > 0 and res_num != self.batch_size:
+                self.rest_arr = ndarray.empty(
+                    tuple([res_num] + self.sample_shape), ctx=ndarray.cpu(0), dtype=self.dtype)
+        self.set_slices()
 
     def _get_arr(self, batchind):
-        # get specific batch
-        # if the batch to be fetched is the newest one, replace the oldest with new batch
-        assert batchind in self.arr_map
-        res = self.arrs[self.arr_map[batchind]]
-        if batchind == self.max_key:
-            self.max_key = (self.max_key + 1) % self.samples_num
-            min_key = (self.max_key - self.queue_size) % self.samples_num
-            if self.index >= self.samples_num or (self.drop_last and self.index + self.batch_size > self.samples_num):
-                self.index = 0
-            next_index = self.index + self.batch_size
-            if next_index <= self.samples_num:
-                temp_ind = self.arr_map.pop(min_key)
-                if temp_ind == self.queue_size and not self.drop_last:
-                    temp_ind = self.rest
-                    self.rest = self.queue_size
-                self.arr_map[self.max_key] = temp_ind
-                self.arrs[temp_ind][:] = self.reshape_tensor(
-                    self.raw_data[self.seq[self.index:next_index]])
-            else:
-                assert not self.drop_last
-                self.arrs[-1][:] = self.reshape_tensor(
-                    self.raw_data[self.seq[self.index:next_index]])
-                self.rest = self.arr_map.pop(min_key)
-                self.arr_map[self.max_key] = self.queue_size
-            self.index = next_index
-        return res
+        index = batchind * self.batch_size
+        res = self.raw_data[index:index+self.batch_size]
+        if res.shape[0] != self.batch_size:
+            self.rest_arr[:] = res
+            return self.rest_arr
+        else:
+            self.arr[:] = res
+            return self.arr
 
     def get_arr(self):
         # step forward in this function
         res = self._get_arr(self.batch_index)
         self.last_batch_size = res.shape[0]
-        self.batch_index = (self.batch_index + 1) % self.samples_num
+        self.batch_index = (self.batch_index + 1) % self.batch_num
         return res
 
     def get_next_arr(self):
         res = self._get_arr(self.batch_index)
+        self.last_batch_size = res.shape[0]
         return res
 
     def set_dp_rank(self, dp_rank, dp_nrank):
@@ -149,9 +120,6 @@ class Dataloader(object):
             return self.batch_func(tensor)
         return self.batch_func(tensor[self.slices])
 
-    def get_cur_shape(self):
-        return tuple(self.arrs[self.arr_map[self.batch_index]].shape)
-
     def get_batch_num(self, samples_num=None):
         if samples_num is None:
             samples_num = len(self.raw_data)
@@ -182,9 +150,6 @@ class GNNDataLoaderOp(Op):
 
     def get_next_arr(self, name):
         return self.handler(self.nxt_graph)
-
-    def get_cur_shape(self, name):
-        return self.handler(self.graph).shape
 
     def gradient(self, output_grad):
         return None
@@ -237,9 +202,6 @@ class DataloaderOp(Op):
 
     def get_next_arr(self, name):
         return self.dataloaders[name].get_next_arr()
-
-    def get_cur_shape(self, name):
-        return self.dataloaders[name].get_cur_shape()
 
     def gradient(self, output_grad):
         return None
