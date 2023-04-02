@@ -11,6 +11,46 @@ from tqdm import tqdm
 from sklearn import metrics
 
 
+def get_data(args):
+    batch_size = args.bs
+
+    from models.load_data import process_all_criteo_data_by_day
+    dense, sparse, labels = process_all_criteo_data_by_day(
+        return_val=True, separate_fields=args.use_multi)
+
+    tr_name = 'train'
+    va_name = 'validate'
+
+    def make_dataloader_op(tr_data, va_data, dtype=np.float32):
+        train_dataloader = ht.Dataloader(
+            tr_data, batch_size, tr_name, dtype=dtype)
+        valid_dataloader = ht.Dataloader(
+            va_data, batch_size, va_name, dtype=dtype)
+        data_op = ht.dataloader_op(
+            [train_dataloader, valid_dataloader], dtype=dtype)
+        return data_op
+
+    # define models for criteo
+    tr_dense, va_dense = dense
+    tr_sparse, va_sparse = sparse
+    tr_labels, va_labels = labels
+    tr_labels = tr_labels.reshape((-1, 1))
+    va_labels = va_labels.reshape((-1, 1))
+    dense_input = make_dataloader_op(tr_dense, va_dense)
+    y_ = make_dataloader_op(tr_labels, va_labels)
+    if args.use_multi:
+        new_sparse_ops = []
+        for i in range(tr_sparse.shape[1]):
+            cur_data = make_dataloader_op(
+                tr_sparse[:, i], None if va_sparse is None else va_sparse[:, i], dtype=np.int32)
+            new_sparse_ops.append(cur_data)
+        embed_input = new_sparse_ops
+    else:
+        embed_input = make_dataloader_op(tr_sparse, va_sparse, dtype=np.int32)
+    print("Data loaded.")
+    return embed_input, dense_input, y_
+
+
 def get_ctx(idx):
     if idx < 0:
         ctx = ht.cpu(0)
@@ -249,30 +289,19 @@ def worker(args):
     else:
         raise NotImplementedError
 
-    # define models for criteo
-    if True:
-        from models.load_data import process_all_criteo_data_by_day
-        func = process_all_criteo_data_by_day
-    else:
-        raise NotImplementedError
-        if args.val:
-            from models.load_data import process_head_criteo_data
-            func = process_head_criteo_data
-        else:
-            from models.load_data import process_sampled_criteo_data
-            func = process_sampled_criteo_data
-
+    # define models
     if args.dataset == 'criteo':
         num_sparse = 26
         num_dense = 13
     else:
         raise NotImplementedError
-
     model = args.model(num_dim, num_sparse, num_dense)
 
-    embed_input, dense_input, y_ = embed_layer.compute_all(
-        func, batch_size, args.val)
-    loss, prediction = model(embed_input, dense_input, y_)
+    data_ops = get_data(args)
+    embed_input, dense_input, y_ = data_ops
+    data_ops = data_ops[0] + list(data_ops[1:]) if args.use_multi else data_ops
+    loss, prediction = model(embed_layer(embed_input), dense_input, y_)
+
     if args.method == 'dpq' and embed_layer.mode == 'vq':
         loss = ht.add_op(loss, embed_layer.reg)
     if args.opt == 'sgd':
@@ -316,14 +345,21 @@ def worker(args):
         run_id=args.run_id,
     )
     start_ep = 0
+    total_epoch = args.nepoch * args.num_test_every_epoch if args.nepoch > 0 else 11
+    train_batch_num = executor.get_batch_num('train')
+    npart = args.num_test_every_epoch
+    base_batch_num = train_batch_num // npart
+    residual = train_batch_num % npart
     if args.load_ckpt is not None:
         with open(args.load_ckpt, 'rb') as fr:
             meta = pickle.load(fr)
             executor.load_dict(meta['state_dict'])
             start_epoch = meta['epoch']
-            start_part = meta['part']
+            start_part = meta['part'] + 1
             assert meta['npart'] == args.num_test_every_epoch
-            start_ep = start_epoch * args.num_test_every_epoch + start_part + 1
+            start_ep = start_epoch * args.num_test_every_epoch + start_part
+            for op in data_ops:
+                op.set_batch_index('train', start_part * base_batch_num)
             print(f'Load ckpt from {osp.split(args.load_ckpt)[-1]}.')
     executor.set_config(args)
 
@@ -342,11 +378,6 @@ def worker(args):
         check_auc = True
     if dataset == 'criteo':
         log_file = open(args.fname, 'w')
-        total_epoch = args.nepoch * args.num_test_every_epoch if args.nepoch > 0 else 11
-        train_batch_num = executor.get_batch_num('train')
-        npart = args.num_test_every_epoch
-        base_batch_num = train_batch_num // npart
-        residual = train_batch_num % npart
         for ep in range(start_ep, total_epoch):
             real_ep = ep // npart
             real_part = ep % npart
@@ -447,6 +478,14 @@ if __name__ == '__main__':
     if args.ectx is None:
         args.ectx = args.ctx
     args.val = True
+
+    assert args.method in ('full', 'robe', 'hash', 'compo',
+                           'learn', 'dpq', 'autodim', 'md', 'prune', 'quantize')
+    if args.method in ('robe', 'compo', 'learn', 'dpq', 'prune', 'quantize'):
+        # TODO: improve in future
+        args.use_multi = 0
+    elif args.method in ('md', 'autodim'):
+        args.use_multi = 1
 
     infos = [
         f'{args.model}',

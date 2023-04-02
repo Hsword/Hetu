@@ -95,11 +95,6 @@ class MultipleHashEmbedding(Embedding):
             result = ht.concatenate_op(results, axis=1)
             return result
 
-    def compute_all(self, func, batch_size, val=True):
-        # load data and lookup
-        dense, sparse, y_ = self.load_data(func, batch_size, val, sep=True)
-        return self(sparse), dense, y_
-
 
 class CompositionalEmbedding(Embedding):
     # compositional embedding
@@ -497,6 +492,7 @@ class AutoDimEmbedding(Embedding):
 
     def make_retrain(self, func, separate_num_embeds, stream):
         from ..gpu_links import argmax
+        assert False, 'need re-write here'
         _, xs, _ = super().load_data(func, self.batch_size,
                                      val=True, sep=True, only_sparse=True)
         dim_choice = ht.empty((self.num_slot, ), ctx=self.ctx)
@@ -540,6 +536,7 @@ class AutoDimEmbedding(Embedding):
         return all_lookups
 
     def load_data(self, func, batch_size, val=True, sep=False):
+        assert False, 'Need re-write here.'
         assert val, 'Autodim only used when args.val is set to True.'
         return super().load_data(func, batch_size, val, sep=sep, tr_name=('train', 'alpha'), va_name=('validate', 'all_no_update'))
 
@@ -562,9 +559,6 @@ class MDEmbedding(Embedding):
                 projs.append(None)
         self.embeds = embeds
         self.projs = projs
-
-    def load_data(self, func, batch_size, val=True):
-        return super().load_data(func, batch_size, val, sep=True)
 
     def md_solver(self, num_embed_fields, alpha, num_dim=None, mem_cap=None, round_dim=True, freq=None):
         # inherited from dlrm repo

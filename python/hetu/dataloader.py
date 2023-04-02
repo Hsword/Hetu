@@ -30,6 +30,11 @@ class Dataloader(object):
         self.batch_num = None
         self.batch_index = offset
 
+    def set_batch_index(self, offset):
+        if offset >= self.batch_num:
+            offset = 0
+        self.batch_index = offset
+
     def init_states(self):
         if self.dp_nrank is not None:
             # this part is only for data parallel
@@ -182,6 +187,9 @@ class DataloaderOp(Op):
     @ property
     def desc(self):
         return self.name
+
+    def set_batch_index(self, name, offset):
+        self.dataloaders[name].set_batch_index(offset)
 
     def set_dp_rank(self, dp_rank, dp_nrank):
         for dataloader in self.dataloaders.values():
