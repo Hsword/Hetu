@@ -1,17 +1,17 @@
 #include "gpu_runtime.h"
+#include "gpu_functions.cuh"
 
-// TODO: use template instead of multiple functions
-
-__global__ void prepack_kernel_8(const float *input, uint8_t *output,
-                                 float *qparams, size_t dim, size_t rsize) {
+template <class T>
+__global__ void prepack_kernel(const float *input, T *output, float *qparams,
+                               bool stochastic, unsigned long long seed,
+                               size_t dim, size_t rsize) {
     size_t rind = blockIdx.x * blockDim.x + threadIdx.x;
     if (rind >= rsize)
         return;
-    const float kEpsilon = 1e-8f;
     size_t offset = dim * rind;
     const float *cur_input = input + offset;
     float *cur_qparam = qparams + 2 * rind;
-    uint8_t *cur_out = output + offset;
+    T *cur_out = output + offset;
     float maxele = cur_input[0];
     float minele = maxele;
     for (int i = 1; i < dim; ++i) {
@@ -20,138 +20,43 @@ __global__ void prepack_kernel_8(const float *input, uint8_t *output,
         minele = min(minele, cur_val);
     }
     float range = maxele - minele;
-    cur_qparam[0] = range / 255.0f;
+    float scale = range / __numeric_limits_on_device<T>();
+    cur_qparam[0] = scale;
     cur_qparam[1] = minele;
-    float inverse = 255.0f / (range + kEpsilon);
     for (int i = 0; i < dim; ++i) {
-        cur_out[i] = lrint((cur_input[i] - minele) * inverse);
+        float cur_value = cur_input[i];
+        T out;
+        if (stochastic) {
+            out = stochastic_rounding<T>(cur_value, scale, minele, seed, rind);
+        } else {
+            out = fixed_rounding<T>(cur_value, scale, minele);
+        }
+        cur_out[i] = out;
     }
 }
 
-__global__ void prepack_kernel_16(const float *input, uint16_t *output,
-                                  float *qparams, size_t dim, size_t rsize) {
-    size_t rind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (rind >= rsize)
-        return;
-    const float kEpsilon = 1e-8f;
-    size_t offset = dim * rind;
-    const float *cur_input = input + offset;
-    float *cur_qparam = qparams + 2 * rind;
-    uint16_t *cur_out = output + offset;
-    float maxele = cur_input[0];
-    float minele = maxele;
-    for (int i = 1; i < dim; ++i) {
-        float cur_val = cur_input[i];
-        maxele = max(maxele, cur_val);
-        minele = min(minele, cur_val);
-    }
-    float range = maxele - minele;
-    cur_qparam[0] = range / 65535.0f;
-    cur_qparam[1] = minele;
-    float inverse = 65535.0f / (range + kEpsilon);
-    for (int i = 0; i < dim; ++i) {
-        cur_out[i] = lrint((cur_input[i] - minele) * inverse);
-    }
-}
-
-__global__ void quantized_embedding_lookup_kernel_8(const uint8_t *input,
-                                                    const int *indices,
-                                                    float *output,
-                                                    float *qparams, size_t dim,
-                                                    size_t size) {
+template <class T>
+__global__ void quantized_embedding_lookup_kernel(const T *input,
+                                                  const int *indices,
+                                                  float *output, float *qparams,
+                                                  size_t dim, size_t size) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (ind >= size)
         return;
     int cur_ind = indices[ind];
-    const uint8_t *cur_input = input + dim * cur_ind;
+    const T *cur_input = input + dim * cur_ind;
     float *cur_qpar = qparams + 2 * cur_ind;
     float *cur_output = output + dim * ind;
     float scale = cur_qpar[0];
     float zero_point = cur_qpar[1];
     for (int i = 0; i < dim; ++i) {
         cur_output[i] = float(cur_input[i]) * scale + zero_point;
-    }
-}
-
-__global__ void quantized_embedding_lookup_kernel_16(const uint16_t *input,
-                                                     const int *indices,
-                                                     float *output,
-                                                     float *qparams, size_t dim,
-                                                     size_t size) {
-    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= size)
-        return;
-    int cur_ind = indices[ind];
-    const uint16_t *cur_input = input + dim * cur_ind;
-    float *cur_qpar = qparams + 2 * cur_ind;
-    float *cur_output = output + dim * ind;
-    float scale = cur_qpar[0];
-    float zero_point = cur_qpar[1];
-    for (int i = 0; i < dim; ++i) {
-        cur_output[i] = float(cur_input[i]) * scale + zero_point;
-    }
-}
-
-__global__ void update_quantized_embedding_kernel_8(const float *input,
-                                                    const int *indices,
-                                                    uint8_t *output,
-                                                    float *qparams, size_t dim,
-                                                    size_t size) {
-    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= size)
-        return;
-    int cur_ind = indices[ind];
-    const float kEpsilon = 1e-8f;
-    const float *cur_input = input + dim * ind;
-    float *cur_qparam = qparams + 2 * cur_ind;
-    uint8_t *cur_out = output + dim * cur_ind;
-    float maxele = cur_input[0];
-    float minele = maxele;
-    for (int i = 1; i < dim; ++i) {
-        float cur_val = cur_input[i];
-        maxele = max(maxele, cur_val);
-        minele = min(minele, cur_val);
-    }
-    float range = maxele - minele;
-    cur_qparam[0] = range / 255.0f;
-    cur_qparam[1] = minele;
-    float inverse = 255.0f / (range + kEpsilon);
-    for (int i = 0; i < dim; ++i) {
-        cur_out[i] = lrint((cur_input[i] - minele) * inverse);
-    }
-}
-
-__global__ void update_quantized_embedding_kernel_16(const float *input,
-                                                     const int *indices,
-                                                     uint16_t *output,
-                                                     float *qparams, size_t dim,
-                                                     size_t size) {
-    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= size)
-        return;
-    int cur_ind = indices[ind];
-    const float kEpsilon = 1e-8f;
-    const float *cur_input = input + dim * ind;
-    float *cur_qparam = qparams + 2 * cur_ind;
-    uint16_t *cur_out = output + dim * cur_ind;
-    float maxele = cur_input[0];
-    float minele = maxele;
-    for (int i = 1; i < dim; ++i) {
-        float cur_val = cur_input[i];
-        maxele = max(maxele, cur_val);
-        minele = min(minele, cur_val);
-    }
-    float range = maxele - minele;
-    cur_qparam[0] = range / 65535.0f;
-    cur_qparam[1] = minele;
-    float inverse = 65535.0f / (range + kEpsilon);
-    for (int i = 0; i < dim; ++i) {
-        cur_out[i] = lrint((cur_input[i] - minele) * inverse);
     }
 }
 
 int DLGpuPrepackEmbedding(const DLArrayHandle input, DLArrayHandle output,
                           DLArrayHandle qparams, int digit,
+                          unsigned long long seed,
                           DLStreamHandle stream_handle = NULL) {
     assert(input->ndim == 2);
     size_t rsize = input->shape[0];
@@ -165,22 +70,22 @@ int DLGpuPrepackEmbedding(const DLArrayHandle input, DLArrayHandle output,
         uint8_t *output_data = (uint8_t *)output->data;
 
         if (stream_handle)
-            prepack_kernel_8<<<blocks, threads, 0,
-                               *(cudaStream_t *)stream_handle->handle>>>(
-                input_data, output_data, qparam_data, dim, rsize);
+            prepack_kernel<uint8_t><<<blocks, threads, 0,
+                                      *(cudaStream_t *)stream_handle->handle>>>(
+                input_data, output_data, qparam_data, true, seed, dim, rsize);
         else
-            prepack_kernel_8<<<blocks, threads>>>(input_data, output_data,
-                                                  qparam_data, dim, rsize);
+            prepack_kernel<uint8_t><<<blocks, threads>>>(
+                input_data, output_data, qparam_data, true, seed, dim, rsize);
     } else if (digit == 16) {
         uint16_t *output_data = (uint16_t *)output->data;
 
         if (stream_handle)
-            prepack_kernel_16<<<blocks, threads, 0,
-                                *(cudaStream_t *)stream_handle->handle>>>(
-                input_data, output_data, qparam_data, dim, rsize);
+            prepack_kernel<uint16_t><<<
+                blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
+                input_data, output_data, qparam_data, true, seed, dim, rsize);
         else
-            prepack_kernel_16<<<blocks, threads>>>(input_data, output_data,
-                                                   qparam_data, dim, rsize);
+            prepack_kernel<uint16_t><<<blocks, threads>>>(
+                input_data, output_data, qparam_data, true, seed, dim, rsize);
     } else {
         assert(false);
     }
@@ -205,61 +110,23 @@ int DLGpuQuantizedEmbeddingLookup(const DLArrayHandle input,
         uint8_t *input_data = (uint8_t *)input->data;
 
         if (stream_handle)
-            quantized_embedding_lookup_kernel_8<<<
+            quantized_embedding_lookup_kernel<uint8_t><<<
                 blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
                 input_data, indices_data, output_data, qparam_data, dim, size);
         else
-            quantized_embedding_lookup_kernel_8<<<blocks, threads>>>(
+            quantized_embedding_lookup_kernel<uint8_t><<<blocks, threads>>>(
                 input_data, indices_data, output_data, qparam_data, dim, size);
     } else if (digit == 16) {
         uint16_t *input_data = (uint16_t *)input->data;
 
         if (stream_handle)
-            quantized_embedding_lookup_kernel_16<<<
+            quantized_embedding_lookup_kernel<uint16_t><<<
                 blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
                 input_data, indices_data, output_data, qparam_data, dim, size);
         else
-            quantized_embedding_lookup_kernel_16<<<blocks, threads>>>(
+            quantized_embedding_lookup_kernel<uint16_t><<<blocks, threads>>>(
                 input_data, indices_data, output_data, qparam_data, dim, size);
 
-    } else {
-        assert(false);
-    }
-    return 0;
-}
-
-int DLGpuUpdateQuantizedEmbedding(const DLArrayHandle grad,
-                                  const DLArrayHandle indices,
-                                  DLArrayHandle embed, DLArrayHandle qparams,
-                                  int digit,
-                                  DLStreamHandle stream_handle = NULL) {
-    assert(embed->ndim == 2);
-    size_t size = ArrSize(indices);
-    size_t dim = embed->shape[1];
-    const float *grad_data = (const float *)grad->data;
-    const int *indices_data = (const int *)indices->data;
-    float *qparam_data = (float *)qparams->data;
-    dim3 blocks;
-    dim3 threads;
-    ThreadBlock1D(threads, blocks, size);
-    if (digit == 8) {
-        uint8_t *embed_data = (uint8_t *)embed->data;
-        if (stream_handle)
-            update_quantized_embedding_kernel_8<<<
-                blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
-                grad_data, indices_data, embed_data, qparam_data, dim, size);
-        else
-            update_quantized_embedding_kernel_8<<<blocks, threads>>>(
-                grad_data, indices_data, embed_data, qparam_data, dim, size);
-    } else if (digit == 16) {
-        uint16_t *embed_data = (uint16_t *)embed->data;
-        if (stream_handle)
-            update_quantized_embedding_kernel_16<<<
-                blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
-                grad_data, indices_data, embed_data, qparam_data, dim, size);
-        else
-            update_quantized_embedding_kernel_16<<<blocks, threads>>>(
-                grad_data, indices_data, embed_data, qparam_data, dim, size);
     } else {
         assert(false);
     }

@@ -284,8 +284,11 @@ def worker(args):
             num_embed, num_dim, target_sparse, warm, initializer=initializer, ctx=ectx)
     elif args.method == 'quantize':
         digit = 16
+        scale = 0.01
+        middle = 0
+        use_qparam = False
         embed_layer = htl.QuantizedEmbedding(
-            num_embed, num_dim, digit, initializer=initializer, ctx=ectx)
+            num_embed, num_dim, digit, scale=scale, middle=middle, use_qparam=use_qparam, initializer=initializer, ctx=ectx)
     else:
         raise NotImplementedError
 
@@ -506,9 +509,10 @@ if __name__ == '__main__':
     args.save_dir = osp.join(osp.dirname(
         osp.abspath(__file__)), 'ckpts', args.fname[:-4])
     args.fname = osp.join(args.log_dir, args.fname)
-    if osp.isdir(args.save_dir):
-        print('Warning: the save dir already exists!')
-    os.makedirs(args.save_dir, exist_ok=True)
+    if args.save_topk > 0:
+        if osp.isdir(args.save_dir):
+            print('Warning: the save dir already exists!')
+        os.makedirs(args.save_dir, exist_ok=True)
     if args.load_ckpt is not None:
         if not osp.isfile(args.load_ckpt):
             args.load_ckpt = osp.join(args.save_dir, args.load_ckpt)

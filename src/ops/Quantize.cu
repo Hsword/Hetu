@@ -1,8 +1,6 @@
 #include "gpu_runtime.h"
 #include "gpu_functions.cuh"
 
-// TODO: use template instead of multiple functions
-
 template <class T>
 __global__ void rounding_kernel(const float *input, T *output, float scale,
                                 float minele, unsigned long long seed,
@@ -55,30 +53,19 @@ int DLGpuRoundingToInt(const DLArrayHandle input, DLArrayHandle output,
     return 0;
 }
 
-__global__ void dequantize_kernel_8(const int8_t *input, float *output,
-                                    float scale, int64_t zero_point,
-                                    size_t size) {
+template <class T>
+__global__ void dequantize_kernel(const T *input, float *output, float scale,
+                                  float minele, size_t size) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (ind >= size)
         return;
-    int8_t qvalue = input[ind];
-    float rvalue = (static_cast<float>(qvalue) - zero_point) * scale;
-    output[ind] = rvalue;
-}
-
-__global__ void dequantize_kernel_16(const int16_t *input, float *output,
-                                     float scale, int64_t zero_point,
-                                     size_t size) {
-    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= size)
-        return;
-    int16_t qvalue = input[ind];
-    float rvalue = (static_cast<float>(qvalue) - zero_point) * scale;
+    T qvalue = input[ind];
+    float rvalue = static_cast<float>(qvalue) * scale + minele;
     output[ind] = rvalue;
 }
 
 int DLGpuDequantize(const DLArrayHandle input, DLArrayHandle output, int digit,
-                    float scale, int64_t zero_point,
+                    float scale, float minele,
                     DLStreamHandle stream_handle = NULL) {
     size_t size = ArrSize(output);
     float *output_data = (float *)output->data;
@@ -86,23 +73,25 @@ int DLGpuDequantize(const DLArrayHandle input, DLArrayHandle output, int digit,
     dim3 threads;
     ThreadBlock1D(threads, blocks, size);
     if (digit == 8) {
-        int8_t *input_data = (int8_t *)input->data;
+        uint8_t *input_data = (uint8_t *)input->data;
         if (stream_handle)
-            dequantize_kernel_8<<<blocks, threads, 0,
-                                  *(cudaStream_t *)stream_handle->handle>>>(
-                input_data, output_data, scale, zero_point, size);
+            dequantize_kernel<uint8_t>
+                <<<blocks, threads, 0,
+                   *(cudaStream_t *)stream_handle->handle>>>(
+                    input_data, output_data, scale, minele, size);
         else
-            dequantize_kernel_8<<<blocks, threads>>>(input_data, output_data,
-                                                     scale, zero_point, size);
+            dequantize_kernel<uint8_t><<<blocks, threads>>>(
+                input_data, output_data, scale, minele, size);
     } else if (digit == 16) {
-        int16_t *input_data = (int16_t *)input->data;
+        uint16_t *input_data = (uint16_t *)input->data;
         if (stream_handle)
-            dequantize_kernel_16<<<blocks, threads, 0,
-                                   *(cudaStream_t *)stream_handle->handle>>>(
-                input_data, output_data, scale, zero_point, size);
+            dequantize_kernel<uint16_t>
+                <<<blocks, threads, 0,
+                   *(cudaStream_t *)stream_handle->handle>>>(
+                    input_data, output_data, scale, minele, size);
         else
-            dequantize_kernel_16<<<blocks, threads>>>(input_data, output_data,
-                                                      scale, zero_point, size);
+            dequantize_kernel<uint16_t><<<blocks, threads>>>(
+                input_data, output_data, scale, minele, size);
     } else {
         assert(false);
     }

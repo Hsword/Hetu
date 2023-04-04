@@ -258,7 +258,6 @@ __all__ = [
     'tensor_dequantize',
     'embedding_prepack',
     'quantized_embedding_lookup',
-    'update_quantized_embedding',
     'unified_quantized_embedding_lookup',
     'assign_embedding_with_indexedslices',
     'assign_quantized_embedding_unified',

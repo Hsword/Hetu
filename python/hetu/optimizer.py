@@ -88,8 +88,15 @@ class Optimizer(object):
                 grad.set_opt(self)
                 if param.dtype != np.float32:
                     lookup = grad.inputs[2]
-                    assign_op = assign_quantized_embedding_op(
-                        param, grad, lookup.digit, scale=lookup.scale, minele=lookup.minele)
+                    from .gpu_ops.QuantizeEmbedding import QuantizedEmbeddingLookUpOp, UnifiedQuantizedEmbeddingLookUpOp
+                    if isinstance(lookup, UnifiedQuantizedEmbeddingLookUpOp):
+                        assign_op = assign_quantized_embedding_op(
+                            param, grad, lookup.digit, scale=lookup.scale, minele=lookup.minele)
+                    elif isinstance(lookup, QuantizedEmbeddingLookUpOp):
+                        assign_op = assign_quantized_embedding_op(
+                            param, grad, lookup.digit, qparam=lookup.inputs[2])
+                    else:
+                        assert False
                 else:
                     assign_op = assign_with_indexedslices_op(param, grad)
                 opt_nodes.append(assign_op)

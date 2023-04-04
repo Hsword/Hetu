@@ -1170,12 +1170,12 @@ HETUSYS_EXTERN_C {
                          DLStreamHandle stream_handle);
 
     int DLGpuDequantize(const DLArrayHandle input, DLArrayHandle output,
-                        int digit, float scale, int64_t zero_point,
+                        int digit, float scale, float minele,
                         DLStreamHandle stream_handle);
 
-    int DLGpuPrepackEmbedding(const DLArrayHandle input, DLArrayHandle output,
-                              DLArrayHandle qparams, int digit,
-                              DLStreamHandle stream_handle);
+    int DLGpuPrepackEmbedding(
+        const DLArrayHandle input, DLArrayHandle output, DLArrayHandle qparams,
+        int digit, unsigned long long seed, DLStreamHandle stream_handle);
     int DLGpuQuantizedEmbeddingLookup(
         const DLArrayHandle input, const DLArrayHandle indices,
         DLArrayHandle output, DLArrayHandle qparams, int digit,
@@ -1183,10 +1183,6 @@ HETUSYS_EXTERN_C {
     int DLGpuUnifiedQuantizedEmbeddingLookup(
         const DLArrayHandle input, const DLArrayHandle indices,
         DLArrayHandle output, int digit, float scale, float minele,
-        DLStreamHandle stream_handle);
-    int DLGpuUpdateQuantizedEmbedding(
-        const DLArrayHandle grad, const DLArrayHandle indices,
-        DLArrayHandle embed, DLArrayHandle qparams, int digit,
         DLStreamHandle stream_handle);
     int DLGpuRoundingToInt(const DLArrayHandle input, DLArrayHandle output,
                            float scale, float minele, int digit,

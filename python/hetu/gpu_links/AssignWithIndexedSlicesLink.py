@@ -30,7 +30,7 @@ def assign_quantized_embedding(embedding, newparam, qparam, digit, seed, stream=
     assert isinstance(newparam, _nd.IndexedSlices)
     assert isinstance(newparam.indices, _nd.NDArray)
     assert isinstance(newparam.values, _nd.NDArray)
-    assert isinstance(qparam.values, _nd.NDArray)
+    assert isinstance(qparam, _nd.NDArray)
     _LIB.DLGpuAssignQuantizedEmbedding(
         embedding.handle, newparam.indices.handle, newparam.values.handle,
         qparam.handle, ctypes.c_int(digit), seed, ctypes.c_bool(True),
