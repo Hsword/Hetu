@@ -51,7 +51,7 @@ from .Transpose import transpose_op
 from .Variable import Variable, placeholder_op
 from .ZerosLike import zeroslike_op
 from .RobeLookUp import robe_lookup_op, robe_lookup_gradient_op
-from .EmbeddingLookUp import embedding_lookup_op, embedding_lookup_gradient_op
+from .EmbeddingLookUp import embedding_lookup_op, embedding_lookup_gradient_op, embedding_lookup_gradient_opt_op
 from .SparseEmbeddingLookUp import sparse_embedding_lookup_op
 from .Where import where_op, where_const_op
 from .BatchMatrixMult import batch_matmul_op
@@ -103,7 +103,8 @@ from .CompressedEmbedding import mod_hash_op, compo_hash_op, learn_hash_op, robe
 from .TrilLookup import tril_lookup_op, tril_lookup_gradient_op
 from .Prune import prune_low_magnitude_op
 from .Quantize import quantize_op, dequantize_op
-from .QuantizeEmbedding import quantized_embedding_lookup_op, quantized_embedding_gradient_op
+from .QuantizeEmbedding import quantized_embedding_lookup_op, unified_quantized_embedding_lookup_op
+from .AssignWithIndexedSlices import assign_with_indexedslices_op, assign_quantized_embedding_op
 
 __all__ = [
     'Executor',
@@ -200,6 +201,7 @@ __all__ = [
     "robe_lookup_gradient_op",
     "embedding_lookup_op",
     "embedding_lookup_gradient_op",
+    "embedding_lookup_gradient_opt_op",
     "sparse_embedding_lookup_op",
     'where_op',
     'where_const_op',
@@ -268,5 +270,7 @@ __all__ = [
     'quantize_op',
     'dequantize_op',
     'quantized_embedding_lookup_op',
-    'quantized_embedding_gradient_op',
+    'unified_quantized_embedding_lookup_op',
+    'assign_with_indexedslices_op',
+    'assign_quantized_embedding_op',
 ]

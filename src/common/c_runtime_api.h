@@ -654,6 +654,17 @@ HETUSYS_EXTERN_C {
 
     int DLGpuReduceIndexedSliceGetWorkspaceSize(size_t ind_size, size_t * size);
 
+    int DLGpuReduceIndexedSliceWithEmbedding(
+        const DLArrayHandle in_indices, const DLArrayHandle in_values,
+        const DLArrayHandle parameters, DLArrayHandle out_indices,
+        DLArrayHandle out_values, DLArrayHandle out_params,
+        DLArrayHandle workspace, size_t storage_size, int end_bit,
+        DLStreamHandle stream_handle);
+
+    int DLGpuSGDUpdateIndexedSlices(
+        const DLArrayHandle indices, const DLArrayHandle grads,
+        DLArrayHandle params, float lr, DLStreamHandle stream_handle);
+
     int DLGpuDropout(const DLArrayHandle input, const float dropout,
                      DLArrayHandle output, unsigned long long *pseed,
                      DLStreamHandle stream_handle);
@@ -805,6 +816,20 @@ HETUSYS_EXTERN_C {
     int IndexedSlices2Dense(
         const DLArrayHandle values, const DLArrayHandle indices,
         DLArrayHandle new_values, DLStreamHandle stream_handle);
+
+    int DLGpuAssignWithIndexedSlices(
+        DLArrayHandle embedding, const DLArrayHandle indices,
+        const DLArrayHandle values, DLStreamHandle stream_handle);
+
+    int DLGpuAssignQuantizedEmbeddingUnified(
+        DLArrayHandle embedding, const DLArrayHandle indices,
+        const DLArrayHandle values, float scale, float minele, int digit,
+        unsigned long long seed, bool stochastic, DLStreamHandle stream_handle);
+
+    int DLGpuAssignQuantizedEmbedding(
+        DLArrayHandle embedding, const DLArrayHandle indices,
+        const DLArrayHandle values, const DLArrayHandle qparam, int digit,
+        unsigned long long seed, bool stochastic, DLStreamHandle stream_handle);
 
     // DNNL Ops
     int DnnlMatrixMultiply(const DLArrayHandle matA, bool transposeA,
@@ -959,6 +984,19 @@ HETUSYS_EXTERN_C {
     int cpu_ReduceIndexedSlice(
         const DLArrayHandle in_indices, const DLArrayHandle in_values,
         DLArrayHandle out_indices, DLArrayHandle out_values);
+
+    int cpu_ReduceIndexedSliceWithEmbedding(
+        const DLArrayHandle in_indices, const DLArrayHandle in_values,
+        const DLArrayHandle in_params, DLArrayHandle out_indices,
+        DLArrayHandle out_values, DLArrayHandle out_params);
+
+    int cpu_AssignWithIndexedSlices(DLArrayHandle embedding,
+                                    const DLArrayHandle indices,
+                                    const DLArrayHandle values);
+
+    int cpu_SGDUpdateIndexedSlices(const DLArrayHandle indices,
+                                   const DLArrayHandle grads,
+                                   DLArrayHandle params, float lr);
 
     int cpu_NormalInit(DLArrayHandle arr, const float mean, const float stddev,
                        unsigned long long seed);
@@ -1131,9 +1169,6 @@ HETUSYS_EXTERN_C {
     int DLGpuSetLessThan(const DLArrayHandle arr, float threshold,
                          DLStreamHandle stream_handle);
 
-    int DLGpuQuantize(const DLArrayHandle input, DLArrayHandle output,
-                      int digit, float scale, int64_t zero_point,
-                      DLStreamHandle stream_handle);
     int DLGpuDequantize(const DLArrayHandle input, DLArrayHandle output,
                         int digit, float scale, int64_t zero_point,
                         DLStreamHandle stream_handle);
@@ -1145,10 +1180,18 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle input, const DLArrayHandle indices,
         DLArrayHandle output, DLArrayHandle qparams, int digit,
         DLStreamHandle stream_handle);
+    int DLGpuUnifiedQuantizedEmbeddingLookup(
+        const DLArrayHandle input, const DLArrayHandle indices,
+        DLArrayHandle output, int digit, float scale, float minele,
+        DLStreamHandle stream_handle);
     int DLGpuUpdateQuantizedEmbedding(
         const DLArrayHandle grad, const DLArrayHandle indices,
         DLArrayHandle embed, DLArrayHandle qparams, int digit,
         DLStreamHandle stream_handle);
+    int DLGpuRoundingToInt(const DLArrayHandle input, DLArrayHandle output,
+                           float scale, float minele, int digit,
+                           unsigned long long seed, bool stochastic,
+                           DLStreamHandle stream_handle);
 
 } // HETUSYS_EXTERN_C
 

@@ -1,6 +1,6 @@
 from .gpu_ops.AllReduceCommunicate import AllReduceCommunicateOp
 from .gpu_ops.RobeLookUp import RobeLookUp, RobeLookUp_Gradient
-from .gpu_ops.EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient
+from .gpu_ops.EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient, EmbeddingLookUp_Gradient_Opt
 from .gpu_ops.DataTransfer import DataD2HSparseOp, DataH2DOp
 from .gpu_ops.LayerNorm import Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp
 from .gpu_ops.BatchNorm import Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp
@@ -23,7 +23,8 @@ import numpy as np
 class HetuMemoryPool(object):
     def __init__(self):
         # here the indexed_nodes only used for flexflow
-        self.indexed_nodes = (EmbeddingLookUp_Gradient, DataD2HSparseOp)
+        self.indexed_nodes = (EmbeddingLookUp_Gradient,
+                              EmbeddingLookUp_Gradient_Opt, DataD2HSparseOp)
         self.ln_bn_grad_nodes = (Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp,
                                  Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp)
         self.no_compute_nodes = (StopGradientOp, DataloaderOp, GNNDataLoaderOp)

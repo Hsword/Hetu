@@ -101,21 +101,6 @@ class HetuOptimizerTester(HetuTester):
             self.gpu_opt.betats_update_ops = {ctx: ht.optim.betats_update_op(
                 self.gpu_opt.betatss[ctx], self.gpu_opt.beta1, self.gpu_opt.beta2, ctx)}
         self.input_shapes = input_shapes
-        ind = self.make_inputs(input_shapes)
-
-        input_vals = [self.random_float(shape) for shape in input_shapes]
-        if ind < len(input_shapes):
-            # test sparse update
-            print('Enable sparse test.')
-            input_vals.pop(ind)
-            shape = input_shapes[ind]
-            prefix = (128, 26)
-            indices = self.random_int(prefix, 0, shape[0])
-            values = self.random_float(prefix + (shape[1],))
-            input_vals.insert(ind, values)
-            input_vals.insert(ind, indices)
-        self.input_vals = input_vals
-        self.ind = ind
         ctensors = []
         cparams = []
         gtensors = []
@@ -134,6 +119,21 @@ class HetuOptimizerTester(HetuTester):
         self.gparams = gparams
         self.ctensors = ctensors
         self.gtensors = gtensors
+        ind = self.make_inputs(input_shapes)
+
+        input_vals = [self.random_float(shape) for shape in input_shapes]
+        if ind < len(input_shapes):
+            # test sparse update
+            print('Enable sparse test.')
+            input_vals.pop(ind)
+            shape = input_shapes[ind]
+            prefix = (128, 26)
+            indices = self.random_int(prefix, 0, shape[0])
+            values = self.random_float(prefix + (shape[1],))
+            input_vals.insert(ind, values)
+            input_vals.insert(ind, indices)
+        self.input_vals = input_vals
+        self.ind = ind
         self.make_ops()
         self.make_executors()
 
@@ -158,13 +158,21 @@ class HetuOptimizerTester(HetuTester):
                 cpu_ind_op = ht.Variable(
                     name='cpu_indices', ctx=ht.cpu())
                 cpu_val_op = ht.Variable(name='cpu_values', ctx=ht.cpu())
+                cpu_lookup_op = ht.embedding_lookup_op(
+                    self.cparams[ind], cpu_ind_op, ctx=ht.cpu())
                 gpu_ind_op = ht.Variable(
                     name='gpu_indices', ctx=ht.gpu(0))
                 gpu_val_op = ht.Variable(name='gpu_values', ctx=ht.gpu(0))
-                self.cpu_inputs.append(ht.embedding_lookup_gradient_op(
-                    cpu_val_op, cpu_ind_op, input_shapes[i], ctx=ht.cpu()))
-                self.gpu_inputs.append(ht.embedding_lookup_gradient_op(
-                    gpu_val_op, gpu_ind_op, input_shapes[i], ctx=ht.gpu(0)))
+                gpu_lookup_op = ht.embedding_lookup_op(
+                    self.gparams[ind], gpu_ind_op, ctx=ht.gpu(0))
+                cpu_opt_op = ht.embedding_lookup_gradient_opt_op(
+                    cpu_val_op, cpu_ind_op, cpu_lookup_op, input_shapes[i], ctx=ht.cpu())
+                gpu_opt_op = ht.embedding_lookup_gradient_opt_op(
+                    gpu_val_op, gpu_ind_op, gpu_lookup_op, input_shapes[i], ctx=ht.gpu(0))
+                cpu_opt_op.set_opt(self.cpu_opt)
+                gpu_opt_op.set_opt(self.gpu_opt)
+                self.cpu_inputs.append(cpu_opt_op)
+                self.gpu_inputs.append(gpu_opt_op)
                 self.cpu_feeds.extend([cpu_ind_op, cpu_val_op])
                 self.gpu_feeds.extend([gpu_ind_op, gpu_val_op])
             else:
@@ -177,10 +185,16 @@ class HetuOptimizerTester(HetuTester):
         return ind
 
     def make_ops(self):
-        self.cpu_op = [self.cpu_opt.opt_op_type(
-            param, grad, self.cpu_opt) for param, grad in zip(self.cparams, self.cpu_inputs)]
-        self.gpu_op = [self.gpu_opt.opt_op_type(
-            param, grad, self.gpu_opt) for param, grad in zip(self.gparams, self.gpu_inputs)]
+        self.cpu_op = [
+            self.cpu_opt.opt_op_type(param, grad, self.cpu_opt)
+            if grad.op_type == 'PlaceholderOp'
+            else ht.assign_with_indexedslices_op(param, grad)
+            for param, grad in zip(self.cparams, self.cpu_inputs)]
+        self.gpu_op = [
+            self.gpu_opt.opt_op_type(param, grad, self.gpu_opt)
+            if grad.op_type == 'PlaceholderOp'
+            else ht.assign_with_indexedslices_op(param, grad)
+            for param, grad in zip(self.gparams, self.gpu_inputs)]
 
     def test(self, iters=5, rtol=1e-7, atol=0):
         sparse_atol = 5e-5

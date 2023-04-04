@@ -4,6 +4,7 @@ import hetu as ht
 from .ndarray import NDArray, IndexedSlices, is_gpu_ctx
 from .lr_scheduler import FixedScheduler
 from .gpu_ops.Node import Op
+from .gpu_ops.AssignWithIndexedSlices import assign_with_indexedslices_op, assign_quantized_embedding_op
 from .gpu_ops.ParameterServerCommunicate import ParameterServerCommunicateOp
 from .gpu_ops.Variable import PlaceholderOp
 from .gpu_links.OptimizerLink import sgd_update, momentum_update, adagrad_update, adam_update, adamw_update, lamb_update, betats_update
@@ -83,7 +84,17 @@ class Optimizer(object):
             self.betats_update_ops = {ctx: betats_update_op(
                 betats, self.beta1, self.beta2, ctx) for ctx, betats in self.betatss.items()}
         for param, grad in zip(var_list, grads):
-            opt_nodes.append(self.opt_op_type(param, grad, self))
+            if param.is_embed:
+                grad.set_opt(self)
+                if param.dtype != np.float32:
+                    lookup = grad.inputs[2]
+                    assign_op = assign_quantized_embedding_op(
+                        param, grad, lookup.digit, scale=lookup.scale, minele=lookup.minele)
+                else:
+                    assign_op = assign_with_indexedslices_op(param, grad)
+                opt_nodes.append(assign_op)
+            else:
+                opt_nodes.append(self.opt_op_type(param, grad, self))
         return opt_nodes
 
 

@@ -653,9 +653,9 @@ class QuantizedEmbedding(Embedding):
         self.ctx = ctx
         self.embedding_table = initializer(
             shape=(self.num_embeddings, self.embedding_dim), name=self.name, ctx=ctx)
-        self.qparams = ht.init.GenEmpty()(shape=(self.num_embeddings, 2),
-                                          name='qparams', trainable=False, ctx=ctx)
+        # self.qparams = ht.init.GenEmpty()(shape=(self.num_embeddings, 2),
+        #                                   name='qparams', trainable=False, ctx=ctx)
 
     def __call__(self, x):
         with ht.context(self.ctx):
-            return ht.quantized_embedding_lookup_op(self.embedding_table, self.qparams, x, self.digit)
+            return ht.unified_quantized_embedding_lookup_op(self.embedding_table, x, 0.01, 0, self.digit)

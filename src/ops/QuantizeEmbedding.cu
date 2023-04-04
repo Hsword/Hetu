@@ -265,3 +265,70 @@ int DLGpuUpdateQuantizedEmbedding(const DLArrayHandle grad,
     }
     return 0;
 }
+
+template <class T>
+__global__ void dequantize_lookup_kernel(const T *input, const int *indices,
+                                         float *output, float scale,
+                                         float minele, size_t nrow, size_t dim,
+                                         size_t size) {
+    size_t index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= size)
+        return;
+
+    int id = indices[index];
+    float *output_ptr = output + dim * index;
+    if (id < 0 || id >= nrow) {
+        for (int i = 0; i < dim; i++)
+            output_ptr[i] = 0;
+    } else {
+        const T *input_ptr = input + dim * id;
+        for (int i = 0; i < dim; i++) {
+            output_ptr[i] = (float)input_ptr[i] * scale + minele;
+        }
+    }
+}
+
+int DLGpuUnifiedQuantizedEmbeddingLookup(const DLArrayHandle input,
+                                         const DLArrayHandle indices,
+                                         DLArrayHandle output, int digit,
+                                         float scale, float minele,
+                                         DLStreamHandle stream_handle = NULL) {
+    assert(input->ndim == 2);
+    size_t size = ArrSize(indices);
+    size_t nrow = input->shape[0];
+    size_t dim = input->shape[1];
+    const int *indices_data = (const int *)indices->data;
+    float *output_data = (float *)output->data;
+    dim3 blocks;
+    dim3 threads;
+    ThreadBlock1D(threads, blocks, size);
+    if (digit == 8) {
+        uint8_t *input_data = (uint8_t *)input->data;
+
+        if (stream_handle)
+            dequantize_lookup_kernel<<<
+                blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
+                input_data, indices_data, output_data, scale, minele, nrow, dim,
+                size);
+        else
+            dequantize_lookup_kernel<<<blocks, threads>>>(
+                input_data, indices_data, output_data, scale, minele, nrow, dim,
+                size);
+    } else if (digit == 16) {
+        uint16_t *input_data = (uint16_t *)input->data;
+
+        if (stream_handle)
+            dequantize_lookup_kernel<<<
+                blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
+                input_data, indices_data, output_data, scale, minele, nrow, dim,
+                size);
+        else
+            dequantize_lookup_kernel<<<blocks, threads>>>(
+                input_data, indices_data, output_data, scale, minele, nrow, dim,
+                size);
+
+    } else {
+        assert(false);
+    }
+    return 0;
+}

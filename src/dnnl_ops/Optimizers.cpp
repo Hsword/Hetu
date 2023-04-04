@@ -193,6 +193,7 @@ extern "C" int cpu_BetatsUpdate(DLArrayHandle betats, float beta1,
     float *betats_data = (float *)(betats->data);
     betats_data[0] *= beta1;
     betats_data[1] *= beta2;
+    return 0;
 }
 
 extern "C" int

@@ -3,8 +3,16 @@ from .Node import Op
 from .. import ndarray
 from .._base import DNNL_LIB
 import numpy as np
-from ..cpu_links import embedding_lookup as cpu_embedding_lookup, reduce_indexedslice as cpu_reduce_indexedslice
-from ..gpu_links import embedding_lookup, reduce_indexedslice_get_workspace_size, reduce_indexedslice
+from ..cpu_links import \
+    embedding_lookup as cpu_embedding_lookup, \
+    reduce_indexedslice as cpu_reduce_indexedslice,\
+    reduce_indexedslice_with_embedding as cpu_reduce_indexedslice_with_embedding, \
+    sgd_update_indexedslices as cpu_sgd_update_indexedslices
+from ..gpu_links import embedding_lookup, \
+    reduce_indexedslice_get_workspace_size, \
+    reduce_indexedslice, \
+    reduce_indexedslice_with_embedding, \
+    sgd_update_indexedslices
 
 
 class EmbeddingLookUp(Op):
@@ -41,8 +49,8 @@ class EmbeddingLookUp(Op):
         self.event.update_ts(ts)
 
     def gradient(self, output_grad):
-        self.grad_node = embedding_lookup_gradient_op(
-            output_grad, self.inputs[1], None, ctx=self.raw_ctx)
+        self.grad_node = embedding_lookup_gradient_opt_op(
+            output_grad, self.inputs[1], self, None, ctx=self.raw_ctx)
         return [self.grad_node, None]
 
     def infer_shape(self, input_shapes):
@@ -213,6 +221,58 @@ class EmbeddingLookUp_Gradient(Op):
             input_statuses[0].copy_from(input_statuses[1], deduce_order)
 
 
+class EmbeddingLookUp_Gradient_Opt(Op):
+    def __init__(self, vectors, index, lookup, embed_shape=None, ctx=None):
+        inputs = [vectors, index, lookup]
+        super().__init__(EmbeddingLookUp_Gradient_Opt,
+                         inputs, ctx)
+        self.use_indexed_slices = True
+        self.dedup_args = None
+        self.embed_shape = embed_shape
+
+    def set_opt(self, opt):
+        self.opt = opt
+
+    def compute(self, input_vals, output_val, stream_handle=None):
+        if self.on_gpu:
+            reduce_indexedslice_with_embedding(
+                input_vals[1], input_vals[0], input_vals[2],
+                output_val.indices, self.dedup_args['dgrad'],
+                output_val.values, self.dedup_args['sp'],
+                self.dedup_args['size'], self.dedup_args['eb'],
+                stream_handle)
+            sgd_update_indexedslices(
+                output_val.indices, self.dedup_args['dgrad'], output_val.values, self.opt.learning_rate, stream_handle)
+        else:
+            cpu_reduce_indexedslice_with_embedding(
+                input_vals[1], input_vals[0], input_vals[2],
+                output_val.indices, self.dedup_args['dgrad'],
+                output_val.values)
+            cpu_sgd_update_indexedslices(
+                output_val.indices, self.dedup_args['dgrad'], output_val.values, self.opt.learning_rate)
+
+    def gradient(self, output_grad):
+        raise NotImplementedError
+
+    def infer_shape(self, input_shapes):
+        assert self.embed_shape
+        if self.on_gpu:
+            ind_shape = input_shapes[1]
+            ind_size = int(np.prod(ind_shape))
+            ws_size = reduce_indexedslice_get_workspace_size(ind_size)
+            all_ws_size = 2 * ind_size + 2 + (ws_size + 3) // 4
+            self.dedup_args = {
+                'sp': ndarray.empty((all_ws_size, ), ctx=self.ctx),
+                'size': ws_size,
+                'eb': int(np.ceil(np.log2(self.embed_shape[0]))),
+                'dgrad': ndarray.empty(input_shapes[0], ctx=self.ctx),
+            }
+        else:
+            self.dedup_args = {'dgrad': ndarray.empty(
+                input_shapes[0], ctx=self.ctx)}
+        return self.embed_shape
+
+
 def embedding_lookup_op(embedding, index, ctx=None):
     """Make a new instance of EmbeddingLookUp and call the instance.
 
@@ -247,3 +307,7 @@ def embedding_lookup_gradient_op(vectors, index, embed_shape, ctx=None):
 
     """
     return EmbeddingLookUp_Gradient(vectors, index, embed_shape, ctx=ctx)
+
+
+def embedding_lookup_gradient_opt_op(vectors, index, lookup, embed_shape, ctx=None):
+    return EmbeddingLookUp_Gradient_Opt(vectors, index, lookup, embed_shape, ctx=ctx)

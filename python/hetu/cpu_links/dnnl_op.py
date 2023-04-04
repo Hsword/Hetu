@@ -401,6 +401,34 @@ def reduce_indexedslice(in_indices, in_values, out_indices, out_values):
         in_indices.handle, in_values.handle, out_indices.handle, out_values.handle)
 
 
+def reduce_indexedslice_with_embedding(in_indices, in_values, in_params, out_indices, out_values, out_params):
+    assert isinstance(in_indices, NDArray)
+    assert isinstance(in_values, NDArray)
+    assert isinstance(in_params, NDArray)
+    assert isinstance(out_indices, NDArray)
+    assert isinstance(out_values, NDArray)
+    assert isinstance(out_params, NDArray)
+    _LIB.cpu_ReduceIndexedSliceWithEmbedding(
+        in_indices.handle, in_values.handle, in_params.handle, out_indices.handle, out_values.handle, out_params.handle)
+
+
+def assign_embedding_with_indexedslices(embedding, newparam):
+    assert isinstance(embedding, NDArray)
+    assert isinstance(newparam, IndexedSlices)
+    assert isinstance(newparam.indices, NDArray)
+    assert isinstance(newparam.values, NDArray)
+    _LIB.cpu_AssignWithIndexedSlices(
+        embedding.handle, newparam.indices.handle, newparam.values.handle)
+
+
+def sgd_update_indexedslices(indices, grads, params, lr):
+    assert isinstance(indices, NDArray)
+    assert isinstance(grads, NDArray)
+    assert isinstance(params, NDArray)
+    _LIB.cpu_SGDUpdateIndexedSlices(
+        indices.handle, grads.handle, params.handle, ctypes.c_float(lr))
+
+
 def normal_init(param, mean, stddev, seed):
     assert isinstance(param, NDArray)
     _LIB.cpu_NormalInit(param.handle, ctypes.c_float(

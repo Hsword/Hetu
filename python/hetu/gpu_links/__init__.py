@@ -90,6 +90,7 @@ from .TrilLookupLink import *
 from .PruneLink import *
 from .QuantizeLink import *
 from .QuantizeEmbeddingLink import *
+from .AssignWithIndexedSlicesLink import *
 
 __all__ = [
     'matrix_elementwise_add_by_const',
@@ -204,6 +205,8 @@ __all__ = [
     'indexedslice_oneside_add',
     'reduce_indexedslice',
     'reduce_indexedslice_get_workspace_size',
+    'reduce_indexedslice_with_embedding',
+    'sgd_update_indexedslices',
     'binary_cross_entropy',
     'binary_cross_entropy_with_logits',
     'binary_cross_entropy_gradient',
@@ -256,4 +259,8 @@ __all__ = [
     'embedding_prepack',
     'quantized_embedding_lookup',
     'update_quantized_embedding',
+    'unified_quantized_embedding_lookup',
+    'assign_embedding_with_indexedslices',
+    'assign_quantized_embedding_unified',
+    'assign_quantized_embedding',
 ]

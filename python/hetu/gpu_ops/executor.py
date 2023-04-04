@@ -19,7 +19,7 @@ from .Sum import sum_op
 from .StopGradient import StopGradientOp
 from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp
 from ..communicator.mpi_nccl_comm import ncclDataType_t, GroupStart, GroupEnd
-from .EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient
+from .EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient, EmbeddingLookUp_Gradient_Opt
 from ..optimizer import OptimizerOp
 from . import OnesLike
 from ..stream import create_stream_handle, Event
@@ -980,6 +980,9 @@ class SubExecutor(object):
                 else:
                     self.indexed_slices_shape[node] = (
                         node.index.shape, self.node_to_shape_map[node.inputs[0]])
+            elif isinstance(node, EmbeddingLookUp_Gradient_Opt):
+                self.indexed_slices_shape[node] = (
+                    self.node_to_shape_map[node.inputs[1]], self.node_to_shape_map[node.inputs[0]])
             elif isinstance(node, (DataD2HSparseOp, PipelineSendOp)) and node.use_indexed_slices:
                 self.indexed_slices_shape[node] = self.indexed_slices_shape[node.inputs[0]]
             elif isinstance(node, AllReduceCommunicateOp) and node.use_indexed_slices:
