@@ -247,11 +247,11 @@ def dropout(in_arr, dropout, out_arr):
     _LIB.cpu_Dropout(in_arr.handle, ctypes.c_float(dropout), out_arr.handle)
 
 
-def dropout_gradient(in_gradient_y, dropout, out_gradient_x):
+def dropout_gradient(in_gradient_y, dropout, out_gradient_x, seed_seqnum):
     assert isinstance(in_gradient_y, NDArray)
     assert isinstance(out_gradient_x, NDArray)
-    _LIB.cpu_Dropout_Gradient(in_gradient_y.handle,
-                              ctypes.c_float(dropout), out_gradient_x.handle)
+    _LIB.cpu_Dropout_Gradient(in_gradient_y.handle, ctypes.c_float(
+        dropout), out_gradient_x.handle, seed_seqnum)
 
 
 def pad(in_arr, out_arr, paddings, mode='CONSTANT', constant_values=0):
@@ -429,22 +429,22 @@ def sgd_update_indexedslices(indices, grads, params, lr):
         indices.handle, grads.handle, params.handle, ctypes.c_float(lr))
 
 
-def normal_init(param, mean, stddev, seed):
+def normal_init(param, mean, stddev):
     assert isinstance(param, NDArray)
     _LIB.cpu_NormalInit(param.handle, ctypes.c_float(
-        mean), ctypes.c_float(stddev), ctypes.c_ulonglong(seed))
+        mean), ctypes.c_float(stddev))
 
 
-def uniform_init(param, lb, ub, seed):
+def uniform_init(param, lb, ub):
     assert isinstance(param, NDArray)
     _LIB.cpu_UniformInit(param.handle, ctypes.c_float(
-        lb), ctypes.c_float(ub), ctypes.c_ulonglong(seed))
+        lb), ctypes.c_float(ub))
 
 
-def truncated_normal_init(param, mean, stddev, seed):
+def truncated_normal_init(param, mean, stddev):
     assert isinstance(param, NDArray)
     _LIB.cpu_TruncatedNormalInit(param.handle, ctypes.c_float(
-        mean), ctypes.c_float(stddev), ctypes.c_ulonglong(seed))
+        mean), ctypes.c_float(stddev))
 
 
 def gelu(in_arr, out_arr):

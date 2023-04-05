@@ -357,6 +357,7 @@ def worker(args):
         with open(args.load_ckpt, 'rb') as fr:
             meta = pickle.load(fr)
             executor.load_dict(meta['state_dict'])
+            executor.load_seeds(meta['seed'])
             start_epoch = meta['epoch']
             start_part = meta['part'] + 1
             assert meta['npart'] == args.num_test_every_epoch

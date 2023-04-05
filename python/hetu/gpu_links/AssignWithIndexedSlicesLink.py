@@ -14,7 +14,7 @@ def assign_embedding_with_indexedslices(embedding, newparam, stream=None):
         embedding.handle, newparam.indices.handle, newparam.values.handle, stream.handle if stream else None)
 
 
-def assign_quantized_embedding_unified(embedding, newparam, scale, minele, digit, seed, stream=None):
+def assign_quantized_embedding_unified(embedding, newparam, scale, minele, digit, stream=None):
     assert isinstance(embedding, _nd.NDArray)
     assert isinstance(newparam, _nd.IndexedSlices)
     assert isinstance(newparam.indices, _nd.NDArray)
@@ -22,10 +22,10 @@ def assign_quantized_embedding_unified(embedding, newparam, scale, minele, digit
     _LIB.DLGpuAssignQuantizedEmbeddingUnified(
         embedding.handle, newparam.indices.handle, newparam.values.handle,
         ctypes.c_float(scale), ctypes.c_float(minele), ctypes.c_int(digit),
-        seed, ctypes.c_bool(True), stream.handle if stream else None)
+        ctypes.c_bool(True), stream.handle if stream else None)
 
 
-def assign_quantized_embedding(embedding, newparam, qparam, digit, seed, stream=None):
+def assign_quantized_embedding(embedding, newparam, qparam, digit, stream=None):
     assert isinstance(embedding, _nd.NDArray)
     assert isinstance(newparam, _nd.IndexedSlices)
     assert isinstance(newparam.indices, _nd.NDArray)
@@ -33,5 +33,5 @@ def assign_quantized_embedding(embedding, newparam, qparam, digit, seed, stream=
     assert isinstance(qparam, _nd.NDArray)
     _LIB.DLGpuAssignQuantizedEmbedding(
         embedding.handle, newparam.indices.handle, newparam.values.handle,
-        qparam.handle, ctypes.c_int(digit), seed, ctypes.c_bool(True),
+        qparam.handle, ctypes.c_int(digit), ctypes.c_bool(True),
         stream.handle if stream else None)

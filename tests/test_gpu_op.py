@@ -1363,24 +1363,6 @@ def test_dropout():
     np.testing.assert_allclose(y_out, y2_out, rtol=1e-6)
 
 
-def test_dropout2d():
-    ctx = ht.gpu(0)
-    shapeX = (2, 2, 2, 4)
-    x = np.random.uniform(0, 10, size=shapeX).astype(np.float32)
-    arr_x = ht.array(x, ctx=ctx)
-    arr_y = ht.empty(shapeX, ctx=ctx)
-    dropout_rate = 0.6
-    import ctypes
-    seed = ctypes.c_ulonglong(0)
-    print(x)
-    gpu_op.dropout2d(arr_x, dropout_rate, arr_y, seed)
-    print(arr_y.asnumpy())
-    print(seed)
-    gpu_op.dropout2d_gradient(arr_x, dropout_rate, arr_y, seed)
-    print(arr_y.asnumpy())
-    print(seed)
-
-
 def test_instance_norm2d():
     from hetu import ndarray
     ctx = ht.gpu(0)
@@ -1551,7 +1533,6 @@ test_reduce_sum()
 test_reduce_mean()
 test_dropout()
 test_dropout_recompute()
-test_dropout2d()
 test_instance_norm2d()
 test_instance_norm2d_gradient()
 test_onehot()

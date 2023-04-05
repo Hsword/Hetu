@@ -1,7 +1,5 @@
 from __future__ import absolute_import
 import numpy as np
-import ctypes
-from time import time
 from .Node import Op
 from ..gpu_links import tensor_quantize, \
     quantized_embedding_lookup, \
@@ -20,7 +18,6 @@ class UnifiedQuantizedEmbeddingLookUpOp(Op):
         self.scale = scale
         self.middle = zero_point
         self.minele = zero_point - 2 ** (digit - 1) * scale
-        self.seed = ctypes.c_ulonglong(0)
         self.grad_node = None
         if self.digit == 8:
             dtype = np.uint8
@@ -30,7 +27,6 @@ class UnifiedQuantizedEmbeddingLookUpOp(Op):
         embed.is_embed = True
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        self.seed.value = int(time())
         if self.on_cpu:
             raise NotImplementedError
         else:
@@ -52,7 +48,6 @@ class UnifiedQuantizedEmbeddingLookUpOp(Op):
 
     def forward_hook(self, config):
         super().forward_hook(config)
-        self.seed.value = int(time())
         embed_var = self.inputs[0]
         ori_embed = config.placeholder_to_arr_map[embed_var]
         dtype = embed_var.dtype
@@ -60,7 +55,7 @@ class UnifiedQuantizedEmbeddingLookUpOp(Op):
                           dtype=dtype, force32=False)
         config.placeholder_to_arr_map[embed_var] = new_embed
         tensor_quantize(ori_embed, new_embed, self.digit, self.scale,
-                        self.minele, self.seed, True, config.comp_stream)
+                        self.minele, True, config.comp_stream)
         config.comp_stream.sync()
 
 
@@ -73,7 +68,6 @@ class QuantizedEmbeddingLookUpOp(Op):
         super().__init__(QuantizedEmbeddingLookUpOp,
                          [embed, indices, qparams], ctx)
         self.digit = digit
-        self.seed = ctypes.c_ulonglong(0)
         self.grad_node = None
         assert self.digit in (8, 16)
         if self.digit == 8:
@@ -84,7 +78,6 @@ class QuantizedEmbeddingLookUpOp(Op):
         embed.is_embed = True
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        self.seed.value = int(time())
         if self.on_cpu:
             raise NotImplementedError
         else:
@@ -106,7 +99,6 @@ class QuantizedEmbeddingLookUpOp(Op):
 
     def forward_hook(self, config):
         super().forward_hook(config)
-        self.seed.value = int(time())
         embed_var = self.inputs[0]
         qparam_var = self.inputs[2]
         ori_embed = config.placeholder_to_arr_map[embed_var]
@@ -116,7 +108,7 @@ class QuantizedEmbeddingLookUpOp(Op):
                           dtype=dtype, force32=False)
         config.placeholder_to_arr_map[embed_var] = new_embed
         embedding_prepack(ori_embed, new_embed, qparam_arr,
-                          self.digit, self.seed, config.comp_stream)
+                          self.digit, config.comp_stream)
         config.comp_stream.sync()
 
 

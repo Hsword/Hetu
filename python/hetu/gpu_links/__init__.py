@@ -57,7 +57,6 @@ from .ReduceMulLink import *
 from .OptimizerLink import *
 from .IndexedSliceLink import *
 from .DropoutLink import *
-from .Dropout2dLink import *
 from .CudnnSoftmaxLink import *
 from .CudnnSoftmaxCrossEntropyLink import *
 from .CrossEntropyLink import *
@@ -182,8 +181,6 @@ __all__ = [
     'reduce_mul',
     'dropout',
     'dropout_gradient',
-    'dropout2d',
-    'dropout2d_gradient',
     'CuDNN_softmax',
     'CuDNN_softmax_gradient',
     'CuDNN_softmax_cross_entropy',

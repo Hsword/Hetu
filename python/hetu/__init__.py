@@ -8,6 +8,7 @@ from . import lr_scheduler as lr
 from . import initializers as init
 from . import data
 from . import layers
+from . import random
 from . import distributed_strategies as dist
 from .profiler import HetuProfiler, NCCLProfiler, HetuSimulator
 from .tokenizers import *

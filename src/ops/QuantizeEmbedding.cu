@@ -1,9 +1,10 @@
 #include "gpu_runtime.h"
 #include "gpu_functions.cuh"
+#include "random.h"
 
 template <class T>
 __global__ void prepack_kernel(const float *input, T *output, float *qparams,
-                               bool stochastic, unsigned long long seed,
+                               HetuRandomState cudars, bool stochastic,
                                size_t dim, size_t rsize) {
     size_t rind = blockIdx.x * blockDim.x + threadIdx.x;
     if (rind >= rsize)
@@ -27,7 +28,8 @@ __global__ void prepack_kernel(const float *input, T *output, float *qparams,
         float cur_value = cur_input[i];
         T out;
         if (stochastic) {
-            out = stochastic_rounding<T>(cur_value, scale, minele, seed, rind);
+            out =
+                stochastic_rounding<T>(cur_value, scale, minele, cudars, rind);
         } else {
             out = fixed_rounding<T>(cur_value, scale, minele);
         }
@@ -56,7 +58,6 @@ __global__ void quantized_embedding_lookup_kernel(const T *input,
 
 int DLGpuPrepackEmbedding(const DLArrayHandle input, DLArrayHandle output,
                           DLArrayHandle qparams, int digit,
-                          unsigned long long seed,
                           DLStreamHandle stream_handle = NULL) {
     assert(input->ndim == 2);
     size_t rsize = input->shape[0];
@@ -66,26 +67,27 @@ int DLGpuPrepackEmbedding(const DLArrayHandle input, DLArrayHandle output,
     dim3 blocks;
     dim3 threads;
     ThreadBlock1D(threads, blocks, rsize);
+    HetuRandomState &cudars = GetRandomState(dim);
     if (digit == 8) {
         uint8_t *output_data = (uint8_t *)output->data;
 
         if (stream_handle)
             prepack_kernel<uint8_t><<<blocks, threads, 0,
                                       *(cudaStream_t *)stream_handle->handle>>>(
-                input_data, output_data, qparam_data, true, seed, dim, rsize);
+                input_data, output_data, qparam_data, cudars, true, dim, rsize);
         else
             prepack_kernel<uint8_t><<<blocks, threads>>>(
-                input_data, output_data, qparam_data, true, seed, dim, rsize);
+                input_data, output_data, qparam_data, cudars, true, dim, rsize);
     } else if (digit == 16) {
         uint16_t *output_data = (uint16_t *)output->data;
 
         if (stream_handle)
             prepack_kernel<uint16_t><<<
                 blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
-                input_data, output_data, qparam_data, true, seed, dim, rsize);
+                input_data, output_data, qparam_data, cudars, true, dim, rsize);
         else
             prepack_kernel<uint16_t><<<blocks, threads>>>(
-                input_data, output_data, qparam_data, true, seed, dim, rsize);
+                input_data, output_data, qparam_data, cudars, true, dim, rsize);
     } else {
         assert(false);
     }

@@ -666,25 +666,16 @@ HETUSYS_EXTERN_C {
         DLArrayHandle params, float lr, DLStreamHandle stream_handle);
 
     int DLGpuDropout(const DLArrayHandle input, const float dropout,
-                     DLArrayHandle output, unsigned long long *pseed,
-                     DLStreamHandle stream_handle);
+                     DLArrayHandle output, DLStreamHandle stream_handle);
 
     int DLGpuDropoutGradient_recompute(
         const DLArrayHandle grad, const float dropout, DLArrayHandle output,
-        unsigned long long seed, DLStreamHandle stream_handle);
+        unsigned long long seed_seqnum, DLStreamHandle stream_handle);
 
     int DLGpuDropoutGradient(const DLArrayHandle grad,
                              const DLArrayHandle fw_output, const float dropout,
                              DLArrayHandle output,
                              DLStreamHandle stream_handle);
-
-    int DLGpuDropout2d(const DLArrayHandle input, const float dropout,
-                       DLArrayHandle output, unsigned long long *pseed,
-                       DLStreamHandle stream_handle);
-
-    int DLGpuDropout2dGradient(const DLArrayHandle grad, const float dropout,
-                               DLArrayHandle output, unsigned long long seed,
-                               DLStreamHandle stream_handle);
 
     int CuDNN_DLGpuSoftmax(const DLArrayHandle input, DLArrayHandle output,
                            DLStreamHandle stream_handle);
@@ -723,13 +714,13 @@ HETUSYS_EXTERN_C {
 
     // Initializers
     int DLGpuNormalInit(DLArrayHandle arr, const float mean, const float stddev,
-                        unsigned long long seed, DLStreamHandle stream_handle);
+                        DLStreamHandle stream_handle);
 
     int DLGpuUniformInit(DLArrayHandle arr, const float lb, const float ub,
-                         unsigned long long seed, DLStreamHandle stream_handle);
+                         DLStreamHandle stream_handle);
 
     int DLGpuTruncatedNormalInit(DLArrayHandle arr, const float mean,
-                                 const float stddev, unsigned long long seed,
+                                 const float stddev,
                                  DLStreamHandle stream_handle);
 
     // Optimizer Ops
@@ -824,12 +815,12 @@ HETUSYS_EXTERN_C {
     int DLGpuAssignQuantizedEmbeddingUnified(
         DLArrayHandle embedding, const DLArrayHandle indices,
         const DLArrayHandle values, float scale, float minele, int digit,
-        unsigned long long seed, bool stochastic, DLStreamHandle stream_handle);
+        bool stochastic, DLStreamHandle stream_handle);
 
     int DLGpuAssignQuantizedEmbedding(
         DLArrayHandle embedding, const DLArrayHandle indices,
         const DLArrayHandle values, const DLArrayHandle qparam, int digit,
-        unsigned long long seed, bool stochastic, DLStreamHandle stream_handle);
+        bool stochastic, DLStreamHandle stream_handle);
 
     // DNNL Ops
     int DnnlMatrixMultiply(const DLArrayHandle matA, bool transposeA,
@@ -936,7 +927,8 @@ HETUSYS_EXTERN_C {
     int cpu_Dropout(const DLArrayHandle input_X, float dropout,
                     DLArrayHandle output_Y);
     int cpu_Dropout_Gradient(const DLArrayHandle output_Y, float dropout,
-                             DLArrayHandle input_X);
+                             DLArrayHandle input_X,
+                             unsigned long long seed_seqnum);
 
     int cpu_Pad(const DLArrayHandle input_X, DLArrayHandle output_Y,
                 int *paddings, int pad_len, size_t mode, float constant_values);
@@ -998,12 +990,10 @@ HETUSYS_EXTERN_C {
                                    const DLArrayHandle grads,
                                    DLArrayHandle params, float lr);
 
-    int cpu_NormalInit(DLArrayHandle arr, const float mean, const float stddev,
-                       unsigned long long seed);
-    int cpu_UniformInit(DLArrayHandle arr, const float lb, const float ub,
-                        unsigned long long seed);
+    int cpu_NormalInit(DLArrayHandle arr, const float mean, const float stddev);
+    int cpu_UniformInit(DLArrayHandle arr, const float lb, const float ub);
     int cpu_TruncatedNormalInit(DLArrayHandle arr, const float mean,
-                                const float stddev, unsigned long long seed);
+                                const float stddev);
 
     int DLGpuBinaryCrossEntropy(const DLArrayHandle prediction,
                                 const DLArrayHandle label, DLArrayHandle loss,
@@ -1173,9 +1163,9 @@ HETUSYS_EXTERN_C {
                         int digit, float scale, float minele,
                         DLStreamHandle stream_handle);
 
-    int DLGpuPrepackEmbedding(
-        const DLArrayHandle input, DLArrayHandle output, DLArrayHandle qparams,
-        int digit, unsigned long long seed, DLStreamHandle stream_handle);
+    int DLGpuPrepackEmbedding(const DLArrayHandle input, DLArrayHandle output,
+                              DLArrayHandle qparams, int digit,
+                              DLStreamHandle stream_handle);
     int DLGpuQuantizedEmbeddingLookup(
         const DLArrayHandle input, const DLArrayHandle indices,
         DLArrayHandle output, DLArrayHandle qparams, int digit,
@@ -1186,8 +1176,7 @@ HETUSYS_EXTERN_C {
         DLStreamHandle stream_handle);
     int DLGpuRoundingToInt(const DLArrayHandle input, DLArrayHandle output,
                            float scale, float minele, int digit,
-                           unsigned long long seed, bool stochastic,
-                           DLStreamHandle stream_handle);
+                           bool stochastic, DLStreamHandle stream_handle);
 
 } // HETUSYS_EXTERN_C
 

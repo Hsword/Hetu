@@ -63,8 +63,7 @@ class PlaceholderOp(Op):
                 self.event = stream.PSEvent(config.ps_comm, self.id)
         else:
             if self.initializer:
-                self.initializer(self, config.seed,
-                                 config.np_rand, config.comp_stream)
+                self.initializer(self, config.comp_stream)
                 self.initializer = None
             elif self.tensor_value is not None:
                 value = self.tensor_value

@@ -1,6 +1,7 @@
 #include <nppdefs.h>
 #include "gpu_runtime.h"
 #include "gpu_functions.cuh"
+#include "random.h"
 
 __global__ void assign_with_indexedslices_kernel(float *embedding,
                                                  const int *indices,
@@ -47,7 +48,7 @@ int DLGpuAssignWithIndexedSlices(DLArrayHandle embedding,
 template <class T>
 __global__ void assign_quantized_embedding_unified_kernel(
     T *embedding, const int *indices, const float *values, float scale,
-    float minele, unsigned long long seed, bool stochastic, size_t nrow,
+    float minele, HetuRandomState cudars, bool stochastic, size_t nrow,
     size_t dim, size_t size) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (ind >= size)
@@ -60,8 +61,8 @@ __global__ void assign_quantized_embedding_unified_kernel(
             float cur_value = src_ptr[i];
             T out;
             if (stochastic) {
-                out =
-                    stochastic_rounding<T>(cur_value, scale, minele, seed, ind);
+                out = stochastic_rounding<T>(cur_value, scale, minele, cudars,
+                                             ind);
             } else {
                 out = fixed_rounding<T>(cur_value, scale, minele);
             }
@@ -74,7 +75,7 @@ template <class T>
 __global__ void
 assign_quantized_embedding_kernel(T *embedding, const int *indices,
                                   const float *values, const float *qparam,
-                                  unsigned long long seed, bool stochastic,
+                                  HetuRandomState cudars, bool stochastic,
                                   size_t nrow, size_t dim, size_t size) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (ind >= size)
@@ -90,8 +91,8 @@ assign_quantized_embedding_kernel(T *embedding, const int *indices,
             float cur_value = src_ptr[i];
             T out;
             if (stochastic) {
-                out =
-                    stochastic_rounding<T>(cur_value, scale, minele, seed, ind);
+                out = stochastic_rounding<T>(cur_value, scale, minele, cudars,
+                                             ind);
             } else {
                 out = fixed_rounding<T>(cur_value, scale, minele);
             }
@@ -104,7 +105,6 @@ int DLGpuAssignQuantizedEmbeddingUnified(DLArrayHandle embedding,
                                          const DLArrayHandle indices,
                                          const DLArrayHandle values,
                                          float scale, float minele, int digit,
-                                         unsigned long long seed,
                                          bool stochastic,
                                          DLStreamHandle stream_handle = NULL) {
     size_t size = ArrSize(indices);
@@ -116,6 +116,7 @@ int DLGpuAssignQuantizedEmbeddingUnified(DLArrayHandle embedding,
     assert(embedding->ndim == 2);
     size_t nrow = embedding->shape[0];
     size_t dim = embedding->shape[1];
+    HetuRandomState &cudars = GetRandomState(dim);
     if (digit == 16) {
         uint16_t *embed_data = (uint16_t *)embedding->data;
 
@@ -123,12 +124,12 @@ int DLGpuAssignQuantizedEmbeddingUnified(DLArrayHandle embedding,
             assign_quantized_embedding_unified_kernel<uint16_t>
                 <<<blocks, threads, 0,
                    *(cudaStream_t *)stream_handle->handle>>>(
-                    embed_data, indices_data, values_data, scale, minele, seed,
-                    stochastic, nrow, dim, size);
+                    embed_data, indices_data, values_data, scale, minele,
+                    cudars, stochastic, nrow, dim, size);
         } else {
             assign_quantized_embedding_unified_kernel<uint16_t>
                 <<<blocks, threads>>>(embed_data, indices_data, values_data,
-                                      scale, minele, seed, stochastic, nrow,
+                                      scale, minele, cudars, stochastic, nrow,
                                       dim, size);
         }
     } else {
@@ -138,12 +139,12 @@ int DLGpuAssignQuantizedEmbeddingUnified(DLArrayHandle embedding,
             assign_quantized_embedding_unified_kernel<uint8_t>
                 <<<blocks, threads, 0,
                    *(cudaStream_t *)stream_handle->handle>>>(
-                    embed_data, indices_data, values_data, scale, minele, seed,
-                    stochastic, nrow, dim, size);
+                    embed_data, indices_data, values_data, scale, minele,
+                    cudars, stochastic, nrow, dim, size);
         } else {
             assign_quantized_embedding_unified_kernel<uint8_t>
                 <<<blocks, threads>>>(embed_data, indices_data, values_data,
-                                      scale, minele, seed, stochastic, nrow,
+                                      scale, minele, cudars, stochastic, nrow,
                                       dim, size);
         }
     }
@@ -154,7 +155,7 @@ int DLGpuAssignQuantizedEmbedding(DLArrayHandle embedding,
                                   const DLArrayHandle indices,
                                   const DLArrayHandle values,
                                   const DLArrayHandle qparam, int digit,
-                                  unsigned long long seed, bool stochastic,
+                                  bool stochastic,
                                   DLStreamHandle stream_handle = NULL) {
     size_t size = ArrSize(indices);
     dim3 blocks;
@@ -166,6 +167,7 @@ int DLGpuAssignQuantizedEmbedding(DLArrayHandle embedding,
     assert(embedding->ndim == 2);
     size_t nrow = embedding->shape[0];
     size_t dim = embedding->shape[1];
+    HetuRandomState &cudars = GetRandomState(dim);
     if (digit == 16) {
         uint16_t *embed_data = (uint16_t *)embedding->data;
 
@@ -173,11 +175,11 @@ int DLGpuAssignQuantizedEmbedding(DLArrayHandle embedding,
             assign_quantized_embedding_kernel<uint16_t>
                 <<<blocks, threads, 0,
                    *(cudaStream_t *)stream_handle->handle>>>(
-                    embed_data, indices_data, values_data, qparam_data, seed,
+                    embed_data, indices_data, values_data, qparam_data, cudars,
                     stochastic, nrow, dim, size);
         } else {
             assign_quantized_embedding_kernel<uint16_t><<<blocks, threads>>>(
-                embed_data, indices_data, values_data, qparam_data, seed,
+                embed_data, indices_data, values_data, qparam_data, cudars,
                 stochastic, nrow, dim, size);
         }
     } else {
@@ -187,11 +189,11 @@ int DLGpuAssignQuantizedEmbedding(DLArrayHandle embedding,
             assign_quantized_embedding_kernel<uint8_t>
                 <<<blocks, threads, 0,
                    *(cudaStream_t *)stream_handle->handle>>>(
-                    embed_data, indices_data, values_data, qparam_data, seed,
+                    embed_data, indices_data, values_data, qparam_data, cudars,
                     stochastic, nrow, dim, size);
         } else {
             assign_quantized_embedding_kernel<uint8_t><<<blocks, threads>>>(
-                embed_data, indices_data, values_data, qparam_data, seed,
+                embed_data, indices_data, values_data, qparam_data, cudars,
                 stochastic, nrow, dim, size);
         }
     }

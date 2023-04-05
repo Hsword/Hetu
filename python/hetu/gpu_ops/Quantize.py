@@ -1,6 +1,4 @@
 from __future__ import absolute_import
-from time import time
-import ctypes
 from .Node import Op
 from ..gpu_links import tensor_quantize, tensor_dequantize
 
@@ -8,18 +6,16 @@ from ..gpu_links import tensor_quantize, tensor_dequantize
 class QuantizeOp(Op):
     def __init__(self, node, digit, scale, minele, ctx=None):
         super().__init__(QuantizeOp, [node], ctx)
-        self.seed = ctypes.c_ulonglong(0)
         self.digit = digit
         self.scale = scale
         self.minele = minele
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        self.seed.value = int(time())
         if self.on_cpu:
             raise NotImplementedError
         else:
             tensor_quantize(input_vals[0], output_val, self.digit,
-                            self.scale, self.minele, self.seed, True, stream_handle)
+                            self.scale, self.minele, True, stream_handle)
 
     def gradient(self, output_grad):
         return [dequantize_op(output_grad, self.digit, self.scale, self.minele, self.raw_ctx)]

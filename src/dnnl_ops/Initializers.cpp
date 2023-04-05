@@ -10,11 +10,11 @@
 #include <omp.h>
 #include "dnnl.hpp"
 
+#include "../common/random.h"
 #include "../common/c_runtime_api.h"
 #include "dnnl_runtime.h"
 
-int cpu_NormalInit(DLArrayHandle arr, const float mean, const float stddev,
-                   unsigned long long seed) {
+int cpu_NormalInit(DLArrayHandle arr, const float mean, const float stddev) {
     size_t size = 1;
     for (index_t i = 0; i < arr->ndim; i++) {
         size *= arr->shape[i];
@@ -25,12 +25,15 @@ int cpu_NormalInit(DLArrayHandle arr, const float mean, const float stddev,
     if (n_threads > 16)
         n_threads = 16;
 
+    HetuRandomState &heturs = GetRandomState(1);
     std::normal_distribution<float> normal_dist(mean, stddev);
 #pragma omp parallel num_threads(n_threads)
     {
         size_t rank = omp_get_thread_num();
         size_t num_threads = omp_get_num_threads();
-        std::default_random_engine generator(seed + rank);
+        unsigned long long sequence[3] = {heturs.seed, heturs.seqnum, rank};
+        std::seed_seq cur_seed_seq(sequence, sequence + 3);
+        std::default_random_engine generator(cur_seed_seq);
         size_t length = size / num_threads;
         size_t start = rank * length;
         size_t ending = start + length;
@@ -44,8 +47,7 @@ int cpu_NormalInit(DLArrayHandle arr, const float mean, const float stddev,
     return 0;
 }
 
-int cpu_UniformInit(DLArrayHandle arr, const float lb, const float ub,
-                    unsigned long long seed) {
+int cpu_UniformInit(DLArrayHandle arr, const float lb, const float ub) {
     size_t size = 1;
     for (index_t i = 0; i < arr->ndim; i++) {
         size *= arr->shape[i];
@@ -56,12 +58,15 @@ int cpu_UniformInit(DLArrayHandle arr, const float lb, const float ub,
     if (n_threads > 16)
         n_threads = 16;
 
+    HetuRandomState &heturs = GetRandomState(1);
     std::uniform_real_distribution<float> uniform_dist(lb, ub);
 #pragma omp parallel num_threads(n_threads)
     {
         size_t rank = omp_get_thread_num();
         size_t num_threads = omp_get_num_threads();
-        std::default_random_engine generator(seed + rank);
+        unsigned long long sequence[3] = {heturs.seed, heturs.seqnum, rank};
+        std::seed_seq cur_seed_seq(sequence, sequence + 3);
+        std::default_random_engine generator(cur_seed_seq);
         size_t length = size / num_threads;
         size_t start = rank * length;
         size_t ending = start + length;
@@ -76,7 +81,7 @@ int cpu_UniformInit(DLArrayHandle arr, const float lb, const float ub,
 }
 
 int cpu_TruncatedNormalInit(DLArrayHandle arr, const float mean,
-                            const float stddev, unsigned long long seed) {
+                            const float stddev) {
     size_t size = 1;
     for (index_t i = 0; i < arr->ndim; i++) {
         size *= arr->shape[i];
@@ -87,6 +92,7 @@ int cpu_TruncatedNormalInit(DLArrayHandle arr, const float mean,
     if (n_threads > 16)
         n_threads = 16;
 
+    HetuRandomState &heturs = GetRandomState(1);
     std::normal_distribution<float> truncated_normal_dist(mean, stddev);
     float upper_limit = mean + 2 * stddev;
     float lower_limit = mean - 2 * stddev;
@@ -94,7 +100,9 @@ int cpu_TruncatedNormalInit(DLArrayHandle arr, const float mean,
     {
         size_t rank = omp_get_thread_num();
         size_t num_threads = omp_get_num_threads();
-        std::default_random_engine generator(seed + rank);
+        unsigned long long sequence[3] = {heturs.seed, heturs.seqnum, rank};
+        std::seed_seq cur_seed_seq(sequence, sequence + 3);
+        std::default_random_engine generator(cur_seed_seq);
         size_t length = size / num_threads;
         size_t start = rank * length;
         size_t ending = start + length;

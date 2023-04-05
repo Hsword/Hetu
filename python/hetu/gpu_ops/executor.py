@@ -140,7 +140,6 @@ class HetuConfig(object):
         'val_name',
         'context',
         'seed',
-        'np_rand',
         'comm_mode',
         'node_strategy',
         'context_launch',
@@ -284,7 +283,8 @@ class HetuConfig(object):
 
         # variables initialization
         self.seed = seed if seed is not None else np.int64(time())
-        self.np_rand = np.random.RandomState(self.seed)
+        from ..random import set_random_seed
+        set_random_seed(self.seed)
 
         # get attribute of communication mode
         self.ps_comm = None
@@ -561,12 +561,15 @@ class Executor(object):
                         state_dic[node.name] = value.asnumpy()
             self.ps_comm.BarrierWorker()
 
+        if others is None:
+            others = {}
+        else:
+            assert 'state_dict' not in others
+        others['state_dict'] = state_dic
+        from ..random import get_seed, get_seed_seqnum
+        others['seed'] = (get_seed(), get_seed_seqnum())
         with open(os.path.join(file_path, file_name), "wb") as writer:
-            if others is None:
-                pickle.dump(state_dic, writer)
-            else:
-                others['state_dict'] = state_dic
-                pickle.dump(others, writer)
+            pickle.dump(others, writer)
 
     def load(self, file_path: str, file_name: str, consider_splits: bool = False) -> None:
         assert os.path.isdir(
@@ -574,7 +577,15 @@ class Executor(object):
 
         with open(os.path.join(file_path, file_name), 'rb') as reader:
             state_dict = pickle.load(reader)
-        self.load_dict(state_dict, file_path, consider_splits)
+        variables = state_dict['state_dict']
+        seeds = state_dict['seed']
+        self.load_seeds(seeds)
+        self.load_dict(variables, file_path, consider_splits)
+
+    def load_seeds(self, seeds):
+        from ..random import set_random_seed, get_seed_seqnum, step_seqnum
+        set_random_seed(seeds[0])
+        step_seqnum(seeds[1] - get_seed_seqnum())
 
     def load_dict(
         self,

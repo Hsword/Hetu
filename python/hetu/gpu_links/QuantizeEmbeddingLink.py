@@ -6,12 +6,12 @@ from .._base import _LIB
 from .. import ndarray as _nd
 
 
-def embedding_prepack(in_arr, out_arr, qparams, digit, seed, stream=None):
+def embedding_prepack(in_arr, out_arr, qparams, digit, stream=None):
     assert isinstance(in_arr, _nd.NDArray)
     assert isinstance(out_arr, _nd.NDArray)
     assert isinstance(qparams, _nd.NDArray)
     _LIB.DLGpuPrepackEmbedding(in_arr.handle, out_arr.handle, qparams.handle, ctypes.c_int(
-        digit), seed, stream.handle if stream else None)
+        digit), stream.handle if stream else None)
 
 
 def unified_quantized_embedding_lookup(in_arr, ind_arr, out_arr, digit, scale, minele, stream=None):
