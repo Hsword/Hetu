@@ -352,7 +352,12 @@ HETUSYS_EXTERN_C {
                              DLArrayHandle output,
                              DLStreamHandle stream_handle);
 
-    int DLGpuSparseEmbeddingLookUp(
+    int DLGpuCSREmbeddingLookUp(
+        const DLArrayHandle value, const DLArrayHandle row,
+        const DLArrayHandle col, const DLArrayHandle ids,
+        DLArrayHandle input_grad, DLStreamHandle stream_handle);
+
+    int DLGpuCOOEmbeddingLookUp(
         const DLArrayHandle value, const DLArrayHandle row,
         const DLArrayHandle col, const DLArrayHandle ids,
         DLArrayHandle input_grad, DLStreamHandle stream_handle);

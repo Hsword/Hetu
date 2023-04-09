@@ -530,6 +530,14 @@ class Executor(object):
         return self.subexecutor[name].run(eval_node_list, feed_dict, convert_to_numpy_ret_vals, **kwargs)
 
     @property
+    def ctx(self) -> DLContext:
+        return self.config.context
+
+    @property
+    def seed(self) -> int:
+        return self.config.seed
+
+    @property
     def batch_num(self) -> int:
         assert len(
             self.subexecutor) == 1, 'Batch num should be used with only 1 subexecutor.'
@@ -638,6 +646,9 @@ class Executor(object):
                         self.name).handle, self.config.ps_map[node.inputs[0]].handle)
                     node.event.update()
             self.ps_comm.BarrierWorker()
+
+    def set_dataloader_batch_index(self, name, index):
+        self.subexecutor[name].set_dataloader_batch_index(index)
 
     def recordLoads(self) -> None:
         for node in self.config.ps_map:
@@ -821,6 +832,10 @@ class SubExecutor(object):
                 batch_num) == 0 else batch_num.pop()
             self._batch_num = batch_num
         return self._batch_num
+
+    def set_dataloader_batch_index(self, index):
+        for op in self.dataloader_nodes:
+            op.set_batch_index(self.name, index)
 
     def profile(
         self,

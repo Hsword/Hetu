@@ -520,14 +520,16 @@ def numpyasdlarrayhandle(data):
 
 
 class ND_Sparse_Array(object):
-    __slots__ = ["data", "row", "col", "nrow", "ncol", "lazy", "ctx"]
+    __slots__ = ["form", "data", "row", "col", "nrow", "ncol", "lazy", "ctx"]
 
-    def __init__(self, data, row, col, nrow, ncol, ctx=None):
+    def __init__(self, nrow, ncol, data=None, row=None, col=None, form='csr', ctx=None):
+        assert form in ('csr', 'coo')
+        self.nrow = nrow
+        self.ncol = ncol
         self.data = data
         self.row = row
         self.col = col
-        self.nrow = nrow
-        self.ncol = ncol
+        self.form = form
         self.lazy = False
         if ctx is None:
             ctx = data.ctx
@@ -538,21 +540,78 @@ class ND_Sparse_Array(object):
         """Shape of this array"""
         return tuple((self.nrow, self.ncol))
 
+    def get_copy(self, value):
+        new_value = empty(value.shape, ctx=value.ctx,
+                          dtype=value.dtype, force32=False)
+        new_value[:] = value
+        return new_value
+
+    def get_copy_np(self, value, dtype):
+        new_value = empty(value.shape, self.ctx, dtype=dtype, force32=False)
+        new_value._sync_copyfrom(value, dtype=dtype)
+        return new_value
+
+    def __setitem__(self, in_slice, value):
+        """Set ndarray value"""
+        if (not isinstance(in_slice, slice) or
+                in_slice.start is not None
+                or in_slice.stop is not None):
+            raise ValueError(
+                'Sparse array only support set from entire sparse array')
+        if isinstance(value, ND_Sparse_Array):
+            self.nrow = value.nrow
+            self.ncol = value.ncol
+            self.ctx = value.ctx
+            self.data = self.get_copy(value.data)
+            self.row = self.get_copy(value.row)
+            self.col = self.get_copy(value.col)
+            self.form = value.form
+        elif isinstance(value, scipy.sparse.csr.csr_matrix):
+            self.data = self.get_copy_np(value.data, dtype=np.float32)
+            self.row = self.get_copy_np(value.indptr, dtype=np.int32)
+            self.col = self.get_copy_np(value.indices, dtype=np.int32)
+            self.nrow, self.ncol = value.shape
+            self.form = 'csr'
+        elif isinstance(value, scipy.sparse.coo.coo_matrix):
+            rec = np.rec.fromarrays([value.row, value.col, value.data])
+            rec.sort()
+            row, col, data = rec.f0, rec.f1, rec.f2
+            self.data = self.get_copy_np(
+                data.astype(np.float32), dtype=np.float32)
+            self.row = self.get_copy_np(row.astype(np.int32), dtype=np.int32)
+            self.col = self.get_copy_np(col.astype(np.int32), dtype=np.int32)
+            self.nrow, self.ncol = value.shape
+            self.form = 'coo'
+        else:
+            raise TypeError('type %s not supported' % str(type(value)))
+
+    def asnumpy(self):
+        if self.form == 'csr':
+            result = scipy.sparse.csr_matrix(
+                (self.data.asnumpy(), self.col.asnumpy(), self.row.asnumpy()),
+                shape=(self.nrow, self.ncol))
+        else:
+            result = scipy.sparse.coo_matrix(
+                (self.data.asnumpy(), (self.row.asnumpy(), self.col.asnumpy())),
+                shape=(self.nrow, self.ncol))
+        return result
+
 
 def csr_sparse_array(mat, shape, ctx=cpu(0)):
-    values = mat.data
-    rows = mat.indptr
-    cols = mat.indices
-    values_ret = empty(values.shape, ctx)
-    values_ret._sync_copyfrom(values)
-    row_ret = empty(rows.shape, ctx, dtype=np.int32)
-    row_ret._sync_copyfrom(rows, np.int32)
-    col_ret = empty(cols.shape, ctx, dtype=np.int32)
-    col_ret._sync_copyfrom(cols, np.int32)
-    return ND_Sparse_Array(values_ret, row_ret, col_ret, shape[0], shape[1])
+    assert isinstance(mat, scipy.sparse.csr.csr_matrix) and len(shape) == 2
+    new_array = ND_Sparse_Array(shape[0], shape[1], ctx=ctx)
+    new_array[:] = mat
+    return new_array
 
 
-def sparse_array(values, indices, shape, ctx=cpu(0)):
+def coo_sparse_array(mat, shape, ctx=cpu(0)):
+    assert isinstance(mat, scipy.sparse.coo.coo_matrix) and len(shape) == 2
+    new_array = ND_Sparse_Array(shape[0], shape[1], ctx=ctx)
+    new_array[:] = mat
+    return new_array
+
+
+def sparse_array(values, indices, shape, form='csr', ctx=cpu(0)):
     """Create an sparse array from source coo arrs.
     ----------
     values : numpy.ndarray
@@ -569,16 +628,26 @@ def sparse_array(values, indices, shape, ctx=cpu(0)):
     assert len(shape) == len(indices) == 2
     assert len(values) == len(indices[0]) == len(indices[1])
     assert isinstance(indices, tuple)
-    mat = scipy.sparse.csr_matrix((values, indices), shape)
-    return csr_sparse_array(mat, shape, ctx)
+    if form == 'csr':
+        mat = scipy.sparse.csr_matrix((values, indices), shape)
+        result = csr_sparse_array(mat, shape, ctx)
+    else:
+        mat = scipy.sparse.coo_matrix((values, indices), shape)
+        result = coo_sparse_array(mat, shape, ctx)
+    return result
 
 
-def dense_to_sparse(arr):
+def dense_to_sparse(arr, form='csr'):
     ctx = arr.ctx
     arr = arr.asnumpy()
     shape = arr.shape
-    mat = scipy.sparse.csr_matrix(arr, shape)
-    return csr_sparse_array(mat, shape, ctx)
+    if form == 'csr':
+        mat = scipy.sparse.csr_matrix(arr, shape)
+        result = csr_sparse_array(mat, shape, ctx)
+    else:
+        mat = scipy.sparse.coo_matrix(arr, shape)
+        result = coo_sparse_array(mat, shape, ctx)
+    return result
 
 
 class IndexedSlices(object):

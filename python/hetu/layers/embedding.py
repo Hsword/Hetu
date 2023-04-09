@@ -16,6 +16,24 @@ class Embedding(BaseLayer):
         with ht.context(self.ctx):
             return ht.embedding_lookup_op(self.embedding_table, x)
 
+    def get_eval_nodes(self, data_ops, model, opt):
+        embed_input, dense_input, y_ = data_ops
+        loss, prediction = model(self(embed_input), dense_input, y_)
+        train_op = opt.minimize(loss)
+        eval_nodes = {
+            'train': [loss, prediction, y_, train_op],
+            'validate': [loss, prediction, y_],
+        }
+        return eval_nodes
+
+    def get_eval_nodes_inference(self, data_ops, model):
+        embed_input, dense_input, y_ = data_ops
+        loss, prediction = model(self(embed_input), dense_input, y_)
+        eval_nodes = {
+            'validate': [loss, prediction, y_],
+        }
+        return eval_nodes
+
 
 class MultipleEmbedding(Embedding):
     def __init__(self, num_embed_fields, embedding_dim, initializer=ht.init.GenXavierNormal(), names='embedding', ctx=None):

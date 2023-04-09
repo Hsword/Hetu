@@ -305,10 +305,9 @@ class DPQEmbedding(Embedding):
 
             return outputs_final
 
-    def make_inference(self):
-        x = self.sparse_op
+    def make_inference(self, embed_input):
         with ht.context(self.ctx):
-            codes = ht.embedding_lookup_op(self.codebooks, x)
+            codes = ht.embedding_lookup_op(self.codebooks, embed_input)
             # (bs, slot, npart)
             if not self.share_weights:
                 codes = ht.add_op(codes, ht.array_reshape_op(
@@ -318,6 +317,31 @@ class DPQEmbedding(Embedding):
             outputs = ht.array_reshape_op(outputs, (-1, self.embedding_dim))
             # (bs * slot, dim)
             return outputs
+
+    def get_eval_nodes(self, data_ops, model, opt):
+        embed_input, dense_input, y_ = data_ops
+        loss, prediction = model(self(embed_input), dense_input, y_)
+        if self.mode == 'vq':
+            loss = ht.add_op(loss, self.reg)
+        train_op = opt.minimize(loss)
+        eval_nodes = {
+            'train': [loss, prediction, y_, train_op, self.codebook_update],
+        }
+        test_embed_input = self.make_inference(embed_input)
+        test_loss, test_prediction = model(
+            test_embed_input, dense_input, y_)
+        eval_nodes['validate'] = [test_loss, test_prediction, y_]
+        return eval_nodes
+
+    def get_eval_nodes_inference(self, data_ops, model):
+        embed_input, dense_input, y_ = data_ops
+        test_embed_input = self.make_inference(embed_input)
+        test_loss, test_prediction = model(
+            test_embed_input, dense_input, y_)
+        eval_nodes = {
+            'validate': [test_loss, test_prediction, y_],
+        }
+        return eval_nodes
 
 
 class AutoDimEmbedding(Embedding):
@@ -607,6 +631,15 @@ class DeepLightEmbedding(Embedding):
             shape=(self.num_embeddings, self.embedding_dim), name=self.name, ctx=ctx)
         self.target_sparse = target_sparse
         self.warm = warm
+        real_dim = self.target_sparse * embedding_dim
+        if real_dim >= 3:
+            self.form = 'csr'
+            self.real_target_sparse = (real_dim - 1) / 2 / embedding_dim
+        else:
+            self.form = 'coo'
+            self.real_target_sparse = self.target_sparse / 3
+        self.prune_rate = 1 - self.real_target_sparse
+        print(f'Use {self.form} for sparse storage; final prune rate {self.prune_rate}, given target sparse rate {target_sparse}.')
 
     def __call__(self, x):
         with ht.context(self.ctx):
@@ -621,26 +654,51 @@ class DeepLightEmbedding(Embedding):
             else:
                 real_niter = n_iter - ignore_iter
                 if real_niter % 10 == 0 or real_niter % batch_num == 0:
-                    adaptive_sparse = self.target_sparse * \
+                    adaptive_sparse = self.prune_rate * \
                         (1 - 0.99**(real_niter / 100.))
                 else:
                     adaptive_sparse = 0
             return adaptive_sparse
         return updater
 
-    def make_prune_op(self):
-        batch_num = self.y_op.get_batch_num('train')
+    def make_prune_op(self, y_):
+        batch_num = y_.get_batch_num('train')
         rate_updater = self.make_adaptive_rate(batch_num)
         return ht.prune_low_magnitude_op(self.embedding_table, rate_updater)
 
-    def make_inference(self, executor):
-        # not for validate; convert to csr format for inference
-        from ..ndarray import dense_to_sparse
-        executor.config.comp_stream.sync()
-        embeddings = executor.config.placeholder_to_arr_map[self.embedding_table]
-        self.sparse_embedding_table = ht.Variable(
-            'sparse_embedding', value=dense_to_sparse(embeddings), ctx=embeddings.ctx)
-        return ht.sparse_embedding_lookup_op(self.sparse_embedding_table, self.sparse_op)
+    def make_inference(self, embed_input, load_value=True):
+        with ht.context(self.ctx):
+            # not for validate; convert to csr format for inference
+            if load_value:
+                from ..ndarray import dense_to_sparse
+                embeddings = dense_to_sparse(
+                    self.embedding_table.tensor_value, form=self.form)
+            else:
+                from ..ndarray import ND_Sparse_Array
+                embeddings = ND_Sparse_Array(
+                    self.num_embeddings, self.embedding_dim, ctx=self.ctx)
+            self.sparse_embedding_table = ht.Variable(
+                'sparse_embedding', value=embeddings)
+            return ht.sparse_embedding_lookup_op(self.sparse_embedding_table, embed_input)
+
+    def get_eval_nodes(self, data_ops, model, opt):
+        embed_input, dense_input, y_ = data_ops
+        loss, prediction = model(self(embed_input), dense_input, y_)
+        train_op = opt.minimize(loss)
+        eval_nodes = {
+            'train': [loss, prediction, y_, train_op, self.make_prune_op(y_)],
+            'validate': [loss, prediction, y_],
+        }
+        return eval_nodes
+
+    def get_eval_nodes_inference(self, data_ops, model, load_value=True):
+        # check inference; use sparse embedding
+        embed_input, dense_input, y_ = data_ops
+        test_embed_input = self.make_inference(embed_input, load_value)
+        test_loss, test_prediction = model(
+            test_embed_input, dense_input, y_)
+        eval_nodes = {'validate': [test_loss, test_prediction, y_]}
+        return eval_nodes
 
 
 class QuantizedEmbedding(Embedding):
