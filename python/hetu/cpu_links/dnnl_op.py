@@ -430,6 +430,24 @@ def sgd_update_indexedslices(indices, grads, params, output, lr):
         indices.handle, grads.handle, params.handle, output.handle, ctypes.c_float(lr))
 
 
+def adam_update_indexedslices(indices, grads, params, output, lr,
+                              m, v, maxv, beta1, beta2, betats, epsilon):
+    assert isinstance(indices, NDArray)
+    assert isinstance(grads, NDArray)
+    assert isinstance(params, NDArray)
+    assert isinstance(output, NDArray)
+    assert isinstance(m, NDArray)
+    assert isinstance(v, NDArray)
+    assert maxv is None or isinstance(maxv, NDArray)
+    assert isinstance(betats, NDArray)
+    _LIB.cpu_AdamUpdateIndexedSlices(
+        indices.handle, grads.handle, params.handle,
+        output.handle, ctypes.c_float(lr),
+        m.handle, v.handle, maxv.handle if maxv else None,
+        ctypes.c_float(beta1), ctypes.c_float(beta2),
+        betats.handle, ctypes.c_float(epsilon))
+
+
 def normal_init(param, mean, stddev):
     assert isinstance(param, NDArray)
     _LIB.cpu_NormalInit(param.handle, ctypes.c_float(

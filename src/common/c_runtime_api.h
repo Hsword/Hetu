@@ -671,6 +671,13 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle params, DLArrayHandle output, float lr,
         DLStreamHandle stream_handle);
 
+    int DLGpuAdamUpdateIndexedSlices(
+        const DLArrayHandle indices, const DLArrayHandle grads,
+        const DLArrayHandle params, DLArrayHandle output, float lr,
+        DLArrayHandle m, DLArrayHandle v, DLArrayHandle maxv, float beta1,
+        float beta2, DLArrayHandle betats, float epsilon,
+        DLStreamHandle stream_handle);
+
     int DLGpuDropout(const DLArrayHandle input, const float dropout,
                      DLArrayHandle output, DLStreamHandle stream_handle);
 
@@ -1003,6 +1010,12 @@ HETUSYS_EXTERN_C {
     int cpu_SGDUpdateIndexedSlices(
         const DLArrayHandle indices, const DLArrayHandle grads,
         const DLArrayHandle params, DLArrayHandle output, float lr);
+
+    int cpu_AdamUpdateIndexedSlices(
+        const DLArrayHandle indices, const DLArrayHandle grads,
+        const DLArrayHandle params, DLArrayHandle output, float lr,
+        DLArrayHandle m, DLArrayHandle v, DLArrayHandle maxv, float beta1,
+        float beta2, DLArrayHandle betats, float epsilon);
 
     int cpu_NormalInit(DLArrayHandle arr, const float mean, const float stddev);
     int cpu_UniformInit(DLArrayHandle arr, const float lb, const float ub);

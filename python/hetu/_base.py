@@ -55,12 +55,14 @@ DNNL_LIB = {
     'cpu_IndexedSlices2Dense': False,
     'cpu_SGDOptimizerUpdate': False,  # c++
     'cpu_SGDOptimizerSparseUpdate': False,  # c++
+    'cpu_SGDUpdateIndexedSlices': False,
     'cpu_MomentumOptimizerUpdate': False,  # c++
     'cpu_AdaGradOptimizerUpdate': False,  # c++
     'cpu_AdaGradOptimizerSparseUpdate': False,  # c++
     'cpu_BetatsUpdate': False,  # c++
     'cpu_AdamOptimizerUpdate': False,  # c++
     'cpu_AdamOptimizerSparseUpdate': False,
+    'cpu_AdamUpdateIndexedSlices': False,
     'cpu_UniformInit': False,  # c++
     'cpu_NormalInit': False,  # c++
     'cpu_TruncatedNormalInit': False,  # c++

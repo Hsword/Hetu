@@ -94,6 +94,25 @@ def adam_update(param, grad, expavg, expavgsq, maxv, lr, beta1, beta2, betats, e
                                        betats.handle, ctypes.c_float(eps),  stream.handle if stream else None)
 
 
+def adam_update_indexedslices(indices, grads, params, output, lr,
+                              m, v, maxv, beta1, beta2, betats, epsilon, stream=None):
+    assert isinstance(indices, NDArray)
+    assert isinstance(grads, NDArray)
+    assert isinstance(params, NDArray)
+    assert isinstance(output, NDArray)
+    assert isinstance(m, NDArray)
+    assert isinstance(v, NDArray)
+    assert maxv is None or isinstance(maxv, NDArray)
+    assert isinstance(betats, NDArray)
+    _LIB.DLGpuAdamUpdateIndexedSlices(
+        indices.handle, grads.handle, params.handle,
+        output.handle, ctypes.c_float(lr),
+        m.handle, v.handle, maxv.handle if maxv else None,
+        ctypes.c_float(beta1), ctypes.c_float(beta2),
+        betats.handle, ctypes.c_float(epsilon),
+        stream.handle if stream else None)
+
+
 def adamw_update(param, grad, expavg, expavgsq, lr, beta1, beta2, betats, eps, weight_decay, stream=None):
     assert isinstance(param, NDArray)
     assert isinstance(grad, (NDArray, IndexedSlices))

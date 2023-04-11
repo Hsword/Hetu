@@ -165,14 +165,16 @@ class HetuOptimizerTester(HetuTester):
                 gpu_val_op = ht.Variable(name='gpu_values', ctx=ht.gpu(0))
                 gpu_lookup_op = ht.embedding_lookup_op(
                     self.gparams[ind], gpu_ind_op, ctx=ht.gpu(0))
-                cpu_opt_op = ht.embedding_lookup_gradient_opt_op(
+                cpu_grad_wlookup = ht.embedding_lookup_gradient_with_lookup_op(
                     cpu_val_op, cpu_ind_op, cpu_lookup_op, input_shapes[i], ctx=ht.cpu())
-                gpu_opt_op = ht.embedding_lookup_gradient_opt_op(
+                cpu_grad_dgrad = ht.embedding_lookup_gradient_dedupgrad_op(
+                    cpu_grad_wlookup, cpu_val_op, ctx=ht.cpu())
+                gpu_grad_wlookup = ht.embedding_lookup_gradient_with_lookup_op(
                     gpu_val_op, gpu_ind_op, gpu_lookup_op, input_shapes[i], ctx=ht.gpu(0))
-                cpu_opt_op.set_opt(self.cpu_opt)
-                gpu_opt_op.set_opt(self.gpu_opt)
-                self.cpu_inputs.append(cpu_opt_op)
-                self.gpu_inputs.append(gpu_opt_op)
+                gpu_grad_dgrad = ht.embedding_lookup_gradient_dedupgrad_op(
+                    gpu_grad_wlookup, gpu_val_op, ctx=ht.gpu(0))
+                self.cpu_inputs.append(cpu_grad_dgrad)
+                self.gpu_inputs.append(gpu_grad_dgrad)
                 self.cpu_feeds.extend([cpu_ind_op, cpu_val_op])
                 self.gpu_feeds.extend([gpu_ind_op, gpu_val_op])
             else:
@@ -188,12 +190,14 @@ class HetuOptimizerTester(HetuTester):
         self.cpu_op = [
             self.cpu_opt.opt_op_type(param, grad, self.cpu_opt)
             if grad.op_type == 'PlaceholderOp'
-            else ht.assign_with_indexedslices_op(param, grad)
+            else ht.assign_with_indexedslices_op(param, self.cpu_opt.sparse_opt_op_type(
+                param, grad.inputs[0], grad, self.cpu_opt))
             for param, grad in zip(self.cparams, self.cpu_inputs)]
         self.gpu_op = [
             self.gpu_opt.opt_op_type(param, grad, self.gpu_opt)
             if grad.op_type == 'PlaceholderOp'
-            else ht.assign_with_indexedslices_op(param, grad)
+            else ht.assign_with_indexedslices_op(param, self.gpu_opt.sparse_opt_op_type(
+                param, grad.inputs[0], grad, self.gpu_opt))
             for param, grad in zip(self.gparams, self.gpu_inputs)]
 
     def test(self, iters=5, rtol=1e-7, atol=0):

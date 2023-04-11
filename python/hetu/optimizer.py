@@ -1,19 +1,21 @@
 import numpy as np
 import ctypes
 import hetu as ht
-from .ndarray import NDArray, IndexedSlices, is_gpu_ctx
+from .ndarray import NDArray, IndexedSlices
 from .lr_scheduler import FixedScheduler
 from .gpu_ops.Node import Op
 from .gpu_ops.AssignWithIndexedSlices import assign_with_indexedslices_op, assign_quantized_embedding_op
 from .gpu_ops.ParameterServerCommunicate import ParameterServerCommunicateOp
 from .gpu_ops.Variable import PlaceholderOp
 from .gpu_links.OptimizerLink import sgd_update, sgd_update_indexedslices, \
-    momentum_update, adagrad_update, adam_update, adamw_update, lamb_update, betats_update
+    momentum_update, adagrad_update, adam_update, adam_update_indexedslices, \
+    adamw_update, lamb_update, betats_update
 from .cpu_links.dnnl_op import sgd_update as cpu_sgd_update, \
     sgd_update_indexedslices as cpu_sgd_update_indexedslices, \
     momentum_update as cpu_momentum_update, \
     adagrad_update as cpu_adagrad_update, \
     adam_update as cpu_adam_update, \
+    adam_update_indexedslices as cpu_adam_update_indexedslices, \
     betats_update as cpu_betats_update
 from ._base import DNNL_LIB
 
@@ -499,6 +501,60 @@ class AdamUpdateOp(OptimizerOp):
                             (np.sqrt(vc) + self.epsilon)
 
 
+class AdamSparseUpdateOp(OptimizerSparseOp):
+    def __init__(self, param, dedup_lookup, dedup_grad, optimizer):
+        from .initializers import zeros
+        m = _init_states(param, 'adam_m', zeros)
+        v = _init_states(param, 'adam_v', zeros)
+        pctx = param.ctx
+        states = [m, v, optimizer.betatss[pctx],
+                  optimizer.betats_update_ops[pctx]]
+        if optimizer.amsgrad:
+            maxv = _init_states(param, 'adam_maxv', zeros)
+            states.append(maxv)
+        self.amsgrad = optimizer.amsgrad
+        self.beta1 = optimizer.beta1
+        self.beta2 = optimizer.beta2
+        self.epsilon = optimizer.epsilon
+        super().__init__(param, dedup_lookup, dedup_grad, optimizer, *states)
+
+    def compute(self, input_vals, output_val, stream_handle=None):
+        _, dedup_lookup, dedup_grad = input_vals[:3]
+        m, v, betats = input_vals[3:6]
+        if self.amsgrad:
+            maxv = input_vals[-1]
+        else:
+            maxv = None
+        assert output_val.indices is dedup_lookup.indices
+        if self.on_gpu:
+            adam_update_indexedslices(
+                dedup_lookup.indices, dedup_grad,
+                dedup_lookup.values, output_val.values,
+                self.learning_rate, m, v, maxv, self.beta1,
+                self.beta2, betats, self.epsilon, stream_handle)
+        else:
+            if DNNL_LIB['cpu_AdamUpdateIndexedSlices']:
+                cpu_adam_update_indexedslices(
+                    dedup_lookup.indices, dedup_grad,
+                    dedup_lookup.values, output_val.values,
+                    self.learning_rate, m, v, maxv, self.beta1,
+                    self.beta2, betats, self.epsilon)
+            else:
+                grad = dedup_grad.values.asnumpy()
+                m[:] = self.beta1 * \
+                    m.asnumpy() + (1 - self.beta1) * grad
+                v[:] = self.beta2 * v.asnumpy() + \
+                    (1 - self.beta2) * grad * grad
+                cur_betats = betats.asnumpy()
+                mc = m.asnumpy() / (1 - cur_betats[0])
+                vc = v.asnumpy() / (1 - cur_betats[1])
+                if self.amsgrad:
+                    raise NotImplementedError
+                else:
+                    output_val[:] = dedup_lookup.values.asnumpy() - \
+                        self.learning_rate * mc / (np.sqrt(vc) + self.epsilon)
+
+
 class AdamOptimizer(Optimizer):
     def __init__(self, learning_rate=0.01, beta1=0.9, beta2=0.999, epsilon=1e-7, l2reg=0, amsgrad=False):
         super(AdamOptimizer, self).__init__(learning_rate, l2reg)
@@ -507,6 +563,7 @@ class AdamOptimizer(Optimizer):
         self.epsilon = epsilon
         self.amsgrad = amsgrad
         self.opt_op_type = AdamUpdateOp
+        self.sparse_opt_op_type = AdamSparseUpdateOp
 
     def get_config(self):
         return (ctypes.c_int(4), (ctypes.c_float * 4)(self.learning_rate, self.beta1, self.beta2, self.epsilon), ctypes.c_int(4))

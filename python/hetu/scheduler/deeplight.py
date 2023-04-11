@@ -15,6 +15,8 @@ class DeepLightTrainer(BaseTrainer):
             self.data_ops, self.model)
         infer_executor = Executor(infer_eval_nodes, ctx=self.ctx,
                                   seed=self.seed, log_path=self.log_dir)
+        del self.executor
+        self.executor = infer_executor
         with self.timing():
             test_loss, test_metric, _ = self.validate_once(
                 infer_executor.get_batch_num('validate'))
