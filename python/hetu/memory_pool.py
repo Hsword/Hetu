@@ -1,6 +1,6 @@
 from .gpu_ops.AllReduceCommunicate import AllReduceCommunicateOp
 from .gpu_ops.RobeLookUp import RobeLookUp, RobeLookUp_Gradient
-from .gpu_ops.EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient, EmbeddingLookUp_Gradient_Opt
+from .gpu_ops.EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient, EmbeddingLookUp_Gradient_With_Lookup, EmbeddingLookUp_Gradient_DedupGrad
 from .gpu_ops.DataTransfer import DataD2HSparseOp, DataH2DOp
 from .gpu_ops.LayerNorm import Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp
 from .gpu_ops.BatchNorm import Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp
@@ -12,7 +12,7 @@ from .gpu_ops.PipelineReceive import PipelineReceiveOp
 from .gpu_ops.PipelineSend import PipelineSendOp
 from .gpu_ops.StopGradient import StopGradientOp
 from .dataloader import DataloaderOp, GNNDataLoaderOp
-from .optimizer import OptimizerOp
+from .optimizer import OptimizerOp, OptimizerSparseOp
 from . import ndarray
 
 from collections import defaultdict
@@ -24,9 +24,10 @@ class HetuMemoryPool(object):
     def __init__(self):
         # here the indexed_nodes only used for flexflow
         self.indexed_nodes = (EmbeddingLookUp_Gradient,
-                              EmbeddingLookUp_Gradient_Opt, DataD2HSparseOp)
+                              EmbeddingLookUp_Gradient_With_Lookup, DataD2HSparseOp)
         self.ln_bn_grad_nodes = (Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp,
-                                 Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp)
+                                 Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp,
+                                 EmbeddingLookUp_Gradient_DedupGrad)
         self.no_compute_nodes = (StopGradientOp, DataloaderOp, GNNDataLoaderOp)
 
     def compute_memory_reuse_plan(self, computing_nodes, node_to_shape, eval_node_list):
@@ -105,8 +106,15 @@ class HetuMemoryPool(object):
                         dense_shape=shape)
                 elif node in indexed_slices_shape:
                     ind_shape, val_shape = indexed_slices_shape[node]
-                    indices = ndarray.empty(ind_shape, node.ctx)
+                    indices = ndarray.empty(
+                        ind_shape, node.ctx, dtype=np.int32)
                     values = ndarray.empty(val_shape, node.ctx)
+                    node_to_arr_map[node] = ndarray.IndexedSlices(
+                        indices=indices, values=values, dense_shape=shape)
+                elif isinstance(node, OptimizerSparseOp):
+                    values = ndarray.empty(
+                        node_to_arr_map[node.inputs[2]].shape, node.ctx)
+                    indices = node_to_arr_map[node.inputs[1]].indices
                     node_to_arr_map[node] = ndarray.IndexedSlices(
                         indices=indices, values=values, dense_shape=shape)
                 elif isinstance(node, EmbeddingLookUp) and (config.use_sparse_pull or config.cstable_policy) and config.prefetch:

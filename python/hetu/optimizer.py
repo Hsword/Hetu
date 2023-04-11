@@ -7,8 +7,14 @@ from .gpu_ops.Node import Op
 from .gpu_ops.AssignWithIndexedSlices import assign_with_indexedslices_op, assign_quantized_embedding_op
 from .gpu_ops.ParameterServerCommunicate import ParameterServerCommunicateOp
 from .gpu_ops.Variable import PlaceholderOp
-from .gpu_links.OptimizerLink import sgd_update, momentum_update, adagrad_update, adam_update, adamw_update, lamb_update, betats_update
-from .cpu_links.dnnl_op import sgd_update as cpu_sgd_update, momentum_update as cpu_momentum_update, adagrad_update as cpu_adagrad_update, adam_update as cpu_adam_update, betats_update as cpu_betats_update
+from .gpu_links.OptimizerLink import sgd_update, sgd_update_indexedslices, \
+    momentum_update, adagrad_update, adam_update, adamw_update, lamb_update, betats_update
+from .cpu_links.dnnl_op import sgd_update as cpu_sgd_update, \
+    sgd_update_indexedslices as cpu_sgd_update_indexedslices, \
+    momentum_update as cpu_momentum_update, \
+    adagrad_update as cpu_adagrad_update, \
+    adam_update as cpu_adam_update, \
+    betats_update as cpu_betats_update
 from ._base import DNNL_LIB
 
 
@@ -27,6 +33,7 @@ class Optimizer(object):
         assert l2reg >= 0, 'L2 regularizer should be positive or 0.'
         self.l2reg = l2reg
         self.opt_op_type = None
+        self.sparse_opt_op_type = None
 
     @property
     def learning_rate(self):
@@ -85,20 +92,22 @@ class Optimizer(object):
                 betats, self.beta1, self.beta2, ctx) for ctx, betats in self.betatss.items()}
         for param, grad in zip(var_list, grads):
             if param.is_embed:
-                grad.set_opt(self)
+                dedup_lookup_op = grad.inputs[0]
+                opt_op = self.sparse_opt_op_type(
+                    param, dedup_lookup_op, grad, self)
                 if param.dtype != np.float32:
-                    lookup = grad.inputs[2]
+                    lookup = dedup_lookup_op.inputs[2]
                     from .gpu_ops.QuantizeEmbedding import QuantizedEmbeddingLookUpOp, UnifiedQuantizedEmbeddingLookUpOp
                     if isinstance(lookup, UnifiedQuantizedEmbeddingLookUpOp):
                         assign_op = assign_quantized_embedding_op(
-                            param, grad, lookup.digit, scale=lookup.scale, minele=lookup.minele)
+                            param, opt_op, lookup.digit, scale=lookup.scale, minele=lookup.minele)
                     elif isinstance(lookup, QuantizedEmbeddingLookUpOp):
                         assign_op = assign_quantized_embedding_op(
-                            param, grad, lookup.digit, qparam=lookup.inputs[2])
+                            param, opt_op, lookup.digit, qparam=lookup.inputs[2])
                     else:
                         assert False
                 else:
-                    assign_op = assign_with_indexedslices_op(param, grad)
+                    assign_op = assign_with_indexedslices_op(param, opt_op)
                 opt_nodes.append(assign_op)
             else:
                 opt_nodes.append(self.opt_op_type(param, grad, self))
@@ -163,6 +172,15 @@ class OptimizerOp(Op):
             self.inputs[1] = cur_node
 
 
+class OptimizerSparseOp(OptimizerOp):
+    def __init__(self, param, dedup_grad, dedup_lookup, optimizer, *states):
+        super().__init__(param, dedup_grad, optimizer, dedup_lookup, *states)
+        self.use_indexed_slices = True
+
+    def infer_shape(self, input_shapes):
+        return input_shapes[0]
+
+
 class SGDUpdateOp(OptimizerOp):
     def __init__(self, param, grad, optimizer):
         super().__init__(param, grad, optimizer)
@@ -196,10 +214,31 @@ class SGDUpdateOp(OptimizerOp):
                         self.learning_rate * grad
 
 
+class SGDSparseUpdateOp(OptimizerSparseOp):
+    def __init__(self, param, dedup_lookup, dedup_grad, optimizer):
+        super().__init__(param, dedup_lookup, dedup_grad, optimizer)
+
+    def compute(self, input_vals, output_val, stream_handle=None):
+        _, dedup_lookup, dedup_grad = input_vals
+        assert output_val.indices is dedup_lookup.indices
+        if self.on_gpu:
+            sgd_update_indexedslices(
+                dedup_lookup.indices, dedup_grad, dedup_lookup.values, output_val.values, self.learning_rate, stream_handle)
+        else:
+            if DNNL_LIB['cpu_SGDUpdateIndexedSlices']:
+                cpu_sgd_update_indexedslices(
+                    dedup_lookup.indices, dedup_grad, dedup_lookup.values, output_val.values, self.learning_rate)
+            else:
+                # not implement regularization
+                output_val.values[:] = dedup_lookup.values.asnumpy(
+                ) - self.learning_rate * dedup_grad.values.asnumpy()
+
+
 class SGDOptimizer(Optimizer):
     def __init__(self, learning_rate=0.01, l2reg=0):
         super(SGDOptimizer, self).__init__(learning_rate, l2reg)
         self.opt_op_type = SGDUpdateOp
+        self.sparse_opt_op_type = SGDSparseUpdateOp
 
     def get_config(self):
         return (ctypes.c_int(0), (ctypes.c_float * 1)(self.learning_rate), ctypes.c_int(1))

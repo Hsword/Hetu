@@ -49,9 +49,15 @@ class EmbeddingLookUp(Op):
         self.event.update_ts(ts)
 
     def gradient(self, output_grad):
-        self.grad_node = embedding_lookup_gradient_opt_op(
+        # both is acceptable for normal embeddings;
+        # opt op for quantize and autodim
+        self.grad_node = embedding_lookup_gradient_with_lookup_op(
             output_grad, self.inputs[1], self, None, ctx=self.raw_ctx)
-        return [self.grad_node, None]
+        grad_node = embedding_lookup_gradient_dedupgrad_op(
+            self.grad_node, output_grad, ctx=self.raw_ctx)
+        # self.grad_node = embedding_lookup_gradient_op(
+        #     output_grad, self.inputs[1], None, ctx=self.raw_ctx)
+        return [grad_node, None]
 
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 2
@@ -221,35 +227,29 @@ class EmbeddingLookUp_Gradient(Op):
             input_statuses[0].copy_from(input_statuses[1], deduce_order)
 
 
-class EmbeddingLookUp_Gradient_Opt(Op):
+class EmbeddingLookUp_Gradient_With_Lookup(Op):
     def __init__(self, vectors, index, lookup, embed_shape=None, ctx=None):
         inputs = [vectors, index, lookup]
-        super().__init__(EmbeddingLookUp_Gradient_Opt,
+        super().__init__(EmbeddingLookUp_Gradient_With_Lookup,
                          inputs, ctx)
         self.use_indexed_slices = True
         self.dedup_args = None
         self.embed_shape = embed_shape
-
-    def set_opt(self, opt):
-        self.opt = opt
+        self.tmp_dedup_grad = None
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_gpu:
             reduce_indexedslice_with_embedding(
                 input_vals[1], input_vals[0], input_vals[2],
-                output_val.indices, self.dedup_args['dgrad'],
+                output_val.indices, self.tmp_dedup_grad,
                 output_val.values, self.dedup_args['sp'],
                 self.dedup_args['size'], self.dedup_args['eb'],
                 stream_handle)
-            sgd_update_indexedslices(
-                output_val.indices, self.dedup_args['dgrad'], output_val.values, self.opt.learning_rate, stream_handle)
         else:
             cpu_reduce_indexedslice_with_embedding(
                 input_vals[1], input_vals[0], input_vals[2],
-                output_val.indices, self.dedup_args['dgrad'],
+                output_val.indices, self.tmp_dedup_grad,
                 output_val.values)
-            cpu_sgd_update_indexedslices(
-                output_val.indices, self.dedup_args['dgrad'], output_val.values, self.opt.learning_rate)
 
     def gradient(self, output_grad):
         raise NotImplementedError
@@ -265,12 +265,28 @@ class EmbeddingLookUp_Gradient_Opt(Op):
                 'sp': ndarray.empty((all_ws_size, ), ctx=self.ctx),
                 'size': ws_size,
                 'eb': int(np.ceil(np.log2(self.embed_shape[0]))),
-                'dgrad': ndarray.empty(input_shapes[0], ctx=self.ctx),
             }
         else:
-            self.dedup_args = {'dgrad': ndarray.empty(
-                input_shapes[0], ctx=self.ctx)}
+            self.dedup_args = {}
         return self.embed_shape
+
+
+class EmbeddingLookUp_Gradient_DedupGrad(Op):
+    def __init__(self, emb_grad_opt, grad, ctx=None):
+        super().__init__(EmbeddingLookUp_Gradient_DedupGrad,
+                         [emb_grad_opt, grad], ctx)
+
+    def compute(self, input_vals, output_val, stream_handle=None):
+        assert False, 'In memory plan we already set the result array; should not call the compute.'
+
+    def gradient(self, output_grad):
+        raise NotImplementedError
+
+    def infer_shape(self, input_shapes):
+        return input_shapes[1]
+
+    def pass_grad_array(self, array):
+        self.inputs[0].tmp_dedup_grad = array
 
 
 def embedding_lookup_op(embedding, index, ctx=None):
@@ -309,5 +325,9 @@ def embedding_lookup_gradient_op(vectors, index, embed_shape, ctx=None):
     return EmbeddingLookUp_Gradient(vectors, index, embed_shape, ctx=ctx)
 
 
-def embedding_lookup_gradient_opt_op(vectors, index, lookup, embed_shape, ctx=None):
-    return EmbeddingLookUp_Gradient_Opt(vectors, index, lookup, embed_shape, ctx=ctx)
+def embedding_lookup_gradient_with_lookup_op(vectors, index, lookup, embed_shape, ctx=None):
+    return EmbeddingLookUp_Gradient_With_Lookup(vectors, index, lookup, embed_shape, ctx=ctx)
+
+
+def embedding_lookup_gradient_dedupgrad_op(emb_grad_opt, grad, ctx):
+    return EmbeddingLookUp_Gradient_DedupGrad(emb_grad_opt, grad, ctx=ctx)

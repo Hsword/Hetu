@@ -7,46 +7,6 @@ import numpy as np
 import argparse
 
 
-def get_data(args):
-    batch_size = args.bs
-
-    from models.load_data import process_all_criteo_data_by_day
-    dense, sparse, labels = process_all_criteo_data_by_day(
-        return_val=True, separate_fields=args.use_multi)
-
-    tr_name = 'train'
-    va_name = 'validate'
-
-    def make_dataloader_op(tr_data, va_data, dtype=np.float32):
-        train_dataloader = ht.Dataloader(
-            tr_data, batch_size, tr_name, dtype=dtype)
-        valid_dataloader = ht.Dataloader(
-            va_data, batch_size, va_name, dtype=dtype)
-        data_op = ht.dataloader_op(
-            [train_dataloader, valid_dataloader], dtype=dtype)
-        return data_op
-
-    # define models for criteo
-    tr_dense, va_dense = dense
-    tr_sparse, va_sparse = sparse
-    tr_labels, va_labels = labels
-    tr_labels = tr_labels.reshape((-1, 1))
-    va_labels = va_labels.reshape((-1, 1))
-    dense_input = make_dataloader_op(tr_dense, va_dense)
-    y_ = make_dataloader_op(tr_labels, va_labels)
-    if args.use_multi:
-        new_sparse_ops = []
-        for i in range(tr_sparse.shape[1]):
-            cur_data = make_dataloader_op(
-                tr_sparse[:, i], None if va_sparse is None else va_sparse[:, i], dtype=np.int32)
-            new_sparse_ops.append(cur_data)
-        embed_input = new_sparse_ops
-    else:
-        embed_input = make_dataloader_op(tr_sparse, va_sparse, dtype=np.int32)
-    print("Data loaded.")
-    return embed_input, dense_input, y_
-
-
 def get_ctx(idx):
     if idx < 0:
         ctx = ht.cpu(0)
@@ -124,9 +84,8 @@ def worker(args):
         candidates = [2, num_dim // 4, num_dim // 2, num_dim]
         num_slot = 26
         alpha_lr = 0.001
-        use_log_alpha = True
         embed_layer = htl.AutoDimEmbedding(
-            num_embed, candidates, num_slot, batch_size, initializer=initializer, log_alpha=use_log_alpha, ctx=ectx)
+            num_embed_fields, candidates, num_slot, batch_size, alpha_lr, initializer=initializer, ctx=ectx)
     elif args.method == 'md':
         alpha = 0.3
         round_dim = True
@@ -154,7 +113,6 @@ def worker(args):
     else:
         raise NotImplementedError
 
-    data_ops = get_data(args)
     model = args.model(num_dim, num_sparse, num_dense)
 
     if args.opt == 'sgd':
@@ -167,20 +125,11 @@ def worker(args):
         optimizer = ht.optim.AMSGradOptimizer
     opt = optimizer(learning_rate=learning_rate)
 
-    # if args.method == 'autodim':
-    #     eval_nodes = embed_layer.make_subexecutors(
-    #         model, dense_input, y_, prediction, loss, opt)
+    from models.load_data import process_all_criteo_data_by_day
     trainer = ht.sched.get_trainer(embed_layer)(
-        embed_layer, data_ops, model, opt, args)
+        embed_layer, process_all_criteo_data_by_day, model, opt, args)
 
     if args.phase == 'train':
-        check_auc = False
-        if args.method == 'autodim':
-            executor.subexecutor['alpha'].inference = False
-            executor.subexecutor['all_no_update'].inference = False
-            embed_layer.get_arch_params(executor.config.placeholder_to_arr_map)
-            prev_auc = None
-            check_auc = True
         if dataset == 'criteo':
             trainer.fit()
         else:
@@ -242,10 +191,11 @@ if __name__ == '__main__':
     if args.ectx is None:
         args.ectx = args.ctx
 
-    if args.method in ('robe', 'compo', 'learn', 'dpq', 'prune', 'quantize'):
+    if args.method in ('robe', 'compo', 'learn', 'dpq', 'prune', 'quantize', 'autodim'):
         # TODO: improve in future
+        # autodim not use multi in the first stage, use multi in the second stage.
         args.use_multi = 0
-    elif args.method in ('md', 'autodim'):
+    elif args.method in ('md'):
         args.use_multi = 1
 
     infos = [

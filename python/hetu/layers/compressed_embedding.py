@@ -345,9 +345,10 @@ class DPQEmbedding(Embedding):
 
 
 class AutoDimEmbedding(Embedding):
-    def __init__(self, num_embeddings, dim_candidates, num_slot, batch_size, log_alpha=False, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+    def __init__(self, separate_num_embeds, dim_candidates, num_slot, batch_size, alpha_lr, r=1e-2, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         from .normalization import BatchNorm
-        self.num_embeddings = num_embeddings
+        self.num_embeddings = sum(separate_num_embeds)
+        self.separate_num_embeds = separate_num_embeds
         self.num_slot = num_slot
         self.batch_size = batch_size
         self.dim_candidates = dim_candidates
@@ -356,22 +357,18 @@ class AutoDimEmbedding(Embedding):
         self.max_dim = self.dim_candidates[-1]
         self.name = name
         self.ctx = ctx
+        self.alpha_lr = alpha_lr
+        self.r = r
         self.bn_layers = {dim: BatchNorm(self.max_dim, scale=False, bias=False, name='bn{}'.format(
             dim)) for dim in self.dim_candidates}
-        self.embedding_tables = {dim: initializer(shape=(num_embeddings, dim), name='{}{}'.format(
+        self.embedding_tables = {dim: initializer(shape=(self.num_embeddings, dim), name='{}{}'.format(
             name, dim), ctx=self.ctx) for dim in dim_candidates}
         self.weights = {dim: initializer(shape=(num_slot, dim, self.max_dim), name='weight{}'.format(
-            dim), ctx=self.ctx)for dim in dim_candidates}
+            dim), ctx=self.ctx) for dim in dim_candidates}
         self.biases = {dim: initializer(shape=(num_slot, 1, self.max_dim,), name='bias{}'.format(
-            dim), ctx=self.ctx)for dim in dim_candidates}
+            dim), ctx=self.ctx) for dim in dim_candidates}
         self.alpha = initializer(
-            shape=(num_slot, self.num_cands), name='alphas', trainable=False, ctx=self.ctx)
-        self.use_log_alpha = log_alpha
-        if log_alpha:
-            uniform_noise = np.random.uniform(0, 1, size=(self.num_cands,))
-            gnoise = -np.log(-np.log(uniform_noise))
-            self.gnoise = ht.Variable(
-                'gumbel_noises', value=gnoise, trainable=False, ctx=self.ctx)
+            shape=(num_slot, self.num_cands), name='alphas', ctx=self.ctx)
 
     def __call__(self, x):
         lookups = {}
@@ -402,12 +399,8 @@ class AutoDimEmbedding(Embedding):
                 cur_x, (-1, self.num_slot, self.max_dim, 1))
             # (bs, nslot, dim, 1)
             middle_results.append(cur_x)
-        if self.use_log_alpha:
-            log_alpha = ht.log_op(self.alpha)
-            w_noise = ht.add_op(
-                log_alpha, ht.broadcastto_op(self.gnoise, log_alpha))
-        else:
-            w_noise = self.alpha
+        log_alpha = ht.log_softmax_op(self.alpha)
+        w_noise = ht.add_op(log_alpha, ht.gumbel_sample_op(self.alpha.shape))
         w_noise = ht.mul_byconst_op(
             w_noise, 1, const_updater=lambda t: (1 / max(0.01, 1-0.00005*t)))
         p_weight = ht.softmax_op(w_noise)
@@ -421,104 +414,54 @@ class AutoDimEmbedding(Embedding):
         # (bs, nslot, dim, ncands)
         final_embedding = ht.batch_matmul_op(sparse_inputs, p_weight)
         # (bs, nslot, dim, 1)
+        final_embedding = ht.array_reshape_op(
+            final_embedding, (self.batch_size, self.num_slot, self.max_dim))
+        # (bs, nslot, dim)
         return final_embedding
 
-    def get_arch_params(self, var2arr):
-        copy_params = {}
-        ori_params = {}
-        for node, arr in var2arr.items():
-            if node.trainable and not node.is_embed:
-                copy_params[node] = ht.empty(arr.shape, ctx=arr.ctx)
-                ori_params[node] = arr
-        for dim, lookup in self.lookups.items():
-            copy_params[lookup] = ht.empty(
-                (self.batch_size, self.num_slot, dim), ctx=self.ctx)
-        self.copy_params = copy_params
-        self.ori_params = ori_params
-        self.workspace = ht.empty((len(self.copy_params),), ctx=self.ctx)
-        self.norm = ht.empty((1,), ctx=self.ctx)
-        self.dalpha_values = [ht.empty(
-            (self.num_slot, self.num_cands), ctx=self.ctx) for _ in range(2)]
+    def get_eval_nodes(self, data_ops, model, opt):
+        from ..gpu_ops.AssignWithIndexedSlices import AssignWithIndexedSlicesOp
+        embed_input, dense_input, y_ = data_ops
+        loss, prediction = model(self(embed_input), dense_input, y_)
+        train_op = opt.minimize(loss)
+        lookups = []
+        dedup_lookups = []
+        dparam_ops = []
+        dalpha_op = None
+        param_opts = []
+        for op in train_op:
+            if op.inputs[0] is self.alpha:
+                dalpha_op = op.inputs[1]
+            else:
+                param_opts.append(op)
+                if isinstance(op, AssignWithIndexedSlicesOp):
+                    deduplookup = op.inputs[1].inputs[1]
+                    lookups.append(deduplookup.inputs[2])
+                    dedup_lookups.append(deduplookup)
+                    dparam_ops.append(op.inputs[1].inputs[2])
+                else:
+                    dparam_ops.append(op.inputs[1])
+        assert dalpha_op is not None
 
-    def make_subexecutors(self, model, dense_input, y_, prediction, loss, opt):
-        from ..optimizer import OptimizerOp
-        new_subexe = {'validate': [loss, prediction, y_]}
-
-        # explicitly minimize
-        opt.loss = loss
-        var_list = opt.get_var_list(loss)
-        opt.params = var_list
-        all_var_list = [self.alpha] + var_list
-        grads, opt.backward2forward, opt.forward2backward = ht.gradients(
-            loss, all_var_list, return_all=True)
-        optimizer_node = OptimizerOp(grads[1:], opt)
-        new_subexe['train'] = [loss, prediction, y_, optimizer_node]
-        new_subexe['all_no_update'] = grads + list(self.lookups.values())
-
-        self.var_lookups = {dim: ht.placeholder_op(
-            'lookups', value=np.zeros((self.batch_size, self.num_slot, dim)), trainable=False, ctx=self.ctx) for dim in self.dim_candidates}
+        self.var_lookups = {dim: ht.init.GenEmpty()(
+            (self.batch_size, self.num_slot, dim), f'lookups{dim}', False, self.ctx) for dim in self.dim_candidates}
         new_loss, new_pred = model(self.make_embed(
             self.var_lookups), dense_input, y_)
         alpha_grad = ht.gradients(new_loss, [self.alpha])
-        new_subexe['alpha'] = alpha_grad
 
-        return new_subexe
+        eval_nodes = {
+            'train': [loss, prediction, y_, param_opts],
+            'lookups': lookups + dedup_lookups + param_opts,
+            'validate': [loss, prediction, y_],
+            'all_grads': [dalpha_op] + dparam_ops,
+            'alpha': [alpha_grad],
+        }
 
-    def copy_from(self, stream):
-        for node, arr in self.ori_params.items():
-            self.copy_params[node]._async_copyfrom(arr, stream)
+        return eval_nodes
 
-    def copy_from_lookups(self, lookups, stream):
-        for node, value in zip(self.lookups.values(), lookups):
-            self.copy_params[node]._async_copyfrom(value, stream)
-
-    def copy_to(self, var2arr, stream):
-        for node, arr in self.ori_params.items():
-            arr._async_copyfrom(self.copy_params[node], stream)
-        for dim, node in self.lookups.items():
-            var2arr[self.var_lookups[dim]]._async_copyfrom(
-                self.copy_params[node], stream)
-
-    def train(self, executor, lr, r=1e-2):
-        from ..gpu_links import all_fro_norm, matrix_elementwise_divide_const, all_add_, div_n_mul_, matrix_elementwise_minus, matrix_elementwise_add_simple, sgd_update
-        var2arr = executor.config.placeholder_to_arr_map
-        stream = executor.config.comp_stream
-        self.copy_from(stream)
-        executor.run('train', dataloader_step=False)  # train data
-        all_grads = executor.run('all_no_update')  # valid data
-        dalpha = all_grads[0]
-        self.dalpha_values[0]._async_copyfrom(dalpha, stream)
-        others = all_grads[1:-self.num_cands]
-        self.copy_from_lookups(all_grads[-self.num_cands:], stream)
-        all_fro_norm(others, self.workspace, self.norm, stream)
-        self.copy_to(var2arr, stream)
-        matrix_elementwise_divide_const(r, self.norm, self.norm, stream)
-        # for embedding, only add for train embedding
-        tensors = [var2arr[x] for x in self.var_lookups.values()] + \
-            list(self.ori_params.values())
-        all_add_(tensors, others, self.norm, stream=stream)
-        gradp = executor.run('alpha', dataloader_step=False)  # train data
-        self.dalpha_values[1]._async_copyfrom(gradp[0], stream)
-        # for embedding, only add for train embedding
-        all_add_(tensors, others, self.norm, -2, stream=stream)
-        gradn = executor.run('alpha', dataloader_step=False)  # train data
-        # for embedding, only add for train embedding
-        all_add_(tensors, others, self.norm, stream=stream)
-        matrix_elementwise_minus(
-            self.dalpha_values[1], gradn[0], self.dalpha_values[1], stream)
-        div_n_mul_(self.dalpha_values[1], self.norm, -lr / 2, stream)
-        matrix_elementwise_add_simple(
-            self.dalpha_values[0], self.dalpha_values[1], self.dalpha_values[0], stream)
-        sgd_update(var2arr[self.alpha], self.dalpha_values[0], lr, 0, stream)
-        results = executor.run(
-            'train', convert_to_numpy_ret_vals=True)  # train data
-        return results
-
-    def make_retrain(self, func, separate_num_embeds, stream):
+    def make_retrain(self, xs, stream):
+        separate_num_embeds = self.separate_num_embeds
         from ..gpu_links import argmax
-        assert False, 'need re-write here'
-        _, xs, _ = super().load_data(func, self.batch_size,
-                                     val=True, sep=True, only_sparse=True)
         dim_choice = ht.empty((self.num_slot, ), ctx=self.ctx)
         argmax(self.alpha.tensor_value, dim_choice, 1, stream=stream)
         stream.sync()
@@ -559,10 +502,16 @@ class AutoDimEmbedding(Embedding):
         all_lookups = ht.concatenate_op(all_lookups, 1)
         return all_lookups
 
-    def load_data(self, func, batch_size, val=True, sep=False):
-        assert False, 'Need re-write here.'
-        assert val, 'Autodim only used when args.val is set to True.'
-        return super().load_data(func, batch_size, val, sep=sep, tr_name=('train', 'alpha'), va_name=('validate', 'all_no_update'))
+    def get_eval_nodes_retrain(self, data_ops, model, opt, stream):
+        embed_input, dense_input, y_ = data_ops
+        loss, prediction = model(
+            self.make_retrain(embed_input, stream), dense_input, y_)
+        train_op = opt.minimize(loss)
+        eval_nodes = {
+            'train': [loss, prediction, y_, train_op],
+            'validate': [loss, prediction, y_],
+        }
+        return eval_nodes
 
 
 class MDEmbedding(Embedding):

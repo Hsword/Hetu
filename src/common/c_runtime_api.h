@@ -668,7 +668,8 @@ HETUSYS_EXTERN_C {
 
     int DLGpuSGDUpdateIndexedSlices(
         const DLArrayHandle indices, const DLArrayHandle grads,
-        DLArrayHandle params, float lr, DLStreamHandle stream_handle);
+        const DLArrayHandle params, DLArrayHandle output, float lr,
+        DLStreamHandle stream_handle);
 
     int DLGpuDropout(const DLArrayHandle input, const float dropout,
                      DLArrayHandle output, DLStreamHandle stream_handle);
@@ -688,6 +689,12 @@ HETUSYS_EXTERN_C {
     int CuDNN_DLGpuSoftmaxGradient(const DLArrayHandle y_arr,
                                    const DLArrayHandle dy, DLArrayHandle dx,
                                    DLStreamHandle stream_handle);
+
+    int CuDNN_DLGpuLogSoftmax(const DLArrayHandle input, DLArrayHandle output,
+                              DLStreamHandle stream_handle);
+    int CuDNN_DLGpuLogSoftmaxGradient(const DLArrayHandle y_arr,
+                                      const DLArrayHandle dy, DLArrayHandle dx,
+                                      DLStreamHandle stream_handle);
 
     int CuDNN_DLGpuSoftmaxEntropy(
         const DLArrayHandle input_y, const DLArrayHandle label,
@@ -727,6 +734,8 @@ HETUSYS_EXTERN_C {
     int DLGpuTruncatedNormalInit(DLArrayHandle arr, const float mean,
                                  const float stddev,
                                  DLStreamHandle stream_handle);
+
+    int DLGpuGumbelInit(DLArrayHandle arr, DLStreamHandle stream_handle);
 
     // Optimizer Ops
     int DLGpuSparseSet(DLArrayHandle table, const DLArrayHandle indices,
@@ -991,9 +1000,9 @@ HETUSYS_EXTERN_C {
                                     const DLArrayHandle indices,
                                     const DLArrayHandle values);
 
-    int cpu_SGDUpdateIndexedSlices(const DLArrayHandle indices,
-                                   const DLArrayHandle grads,
-                                   DLArrayHandle params, float lr);
+    int cpu_SGDUpdateIndexedSlices(
+        const DLArrayHandle indices, const DLArrayHandle grads,
+        const DLArrayHandle params, DLArrayHandle output, float lr);
 
     int cpu_NormalInit(DLArrayHandle arr, const float mean, const float stddev);
     int cpu_UniformInit(DLArrayHandle arr, const float lb, const float ub);

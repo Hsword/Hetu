@@ -334,6 +334,24 @@ def test_argmax():
     tester.test([(89, 93, 71, 13, 1, 2)])
 
 
+def test_log_softmax():
+    tester = HetuTester(ht.log_softmax_op, 1)
+    tester.test([(3, 4)], rtol=1e-6)
+    tester.test([(89, 93, 71)], rtol=1e-6)
+    tester = HetuTester(ht.log_softmax_gradient_op, 2)
+    tester.test([(3, 4), (3, 4)], rtol=1e-6)
+    tester.test([(8, 9, 7), (8, 9, 7)], atol=1e-5)
+
+
+def test_softmax():
+    tester = HetuTester(ht.softmax_op, 1)
+    tester.test([(3, 4)], rtol=2e-6)
+    tester.test([(89, 71)], rtol=2e-6)
+    tester = HetuTester(ht.softmax_gradient_op, 2)
+    tester.test([(3, 4), (3, 4)], rtol=2e-6)
+    tester.test([(8, 7), (8, 7)], rtol=1e-5)
+
+
 def test_optimizers():
     test_shapes = [
         (1000, 8),
@@ -417,4 +435,6 @@ test_tril_lookup()
 test_tril_gradient_lookup()
 test_transpose()
 test_argmax()
+test_log_softmax()
+test_softmax()
 test_optimizers()

@@ -10,9 +10,8 @@ import pickle
 
 
 class BaseTrainer(object):
-    def __init__(self, embed_layer, data_ops, model, opt, args, **kargs):
+    def __init__(self, embed_layer, data_func, model, opt, args, **kargs):
         self.embed_layer = embed_layer
-        self.data_ops = data_ops
         self.model = model
         self.opt = opt
 
@@ -32,6 +31,10 @@ class BaseTrainer(object):
         self.proj_name = self.args.get('project_name', 'embedmem')
         self.logger = self.args.get('logger', 'hetu')
         self.run_id = self.args.get('run_id', None)
+        self.batch_size = self.args.get('batch_size', None)
+        if self.batch_size is None:
+            self.batch_size = self.args['bs']
+        self.use_multi = self.args.get('use_multi', 0)
 
         self.nepoch = self.args.get('nepoch', 0.1)
         self.tqdm_enabled = self.args.get('tqdm_enabled', True)
@@ -69,6 +72,51 @@ class BaseTrainer(object):
         self.temp_time = [None]
 
         self.start_ep = 0
+        self.data_func = data_func
+        self.data_ops = self.get_data(data_func)
+
+    @property
+    def all_train_names(self):
+        return self.train_name
+
+    @property
+    def all_validate_names(self):
+        return self.validate_name
+
+    def make_dataloader_op(self, tr_data, va_data, dtype=np.float32):
+        from ..dataloader import Dataloader, dataloader_op
+        train_dataloader = Dataloader(
+            tr_data, self.batch_size, self.all_train_names, dtype=dtype)
+        valid_dataloader = Dataloader(
+            va_data, self.batch_size, self.all_validate_names, dtype=dtype)
+        data_op = dataloader_op(
+            [train_dataloader, valid_dataloader], dtype=dtype)
+        return data_op
+
+    def get_data(self, func):
+        dense, sparse, labels = func(
+            return_val=True, separate_fields=self.use_multi)
+
+        # define models for criteo
+        tr_dense, va_dense = dense
+        tr_sparse, va_sparse = sparse
+        tr_labels, va_labels = labels
+        tr_labels = tr_labels.reshape((-1, 1))
+        va_labels = va_labels.reshape((-1, 1))
+        dense_input = self.make_dataloader_op(tr_dense, va_dense)
+        y_ = self.make_dataloader_op(tr_labels, va_labels)
+        if self.use_multi:
+            new_sparse_ops = []
+            for i in range(tr_sparse.shape[1]):
+                cur_data = self.make_dataloader_op(
+                    tr_sparse[:, i], None if va_sparse is None else va_sparse[:, i], dtype=np.int32)
+                new_sparse_ops.append(cur_data)
+            embed_input = new_sparse_ops
+        else:
+            embed_input = self.make_dataloader_op(
+                tr_sparse, va_sparse, dtype=np.int32)
+        self.log_func("Data loaded.")
+        return embed_input, dense_input, y_
 
     def run_epoch(self, train_batch_num, epoch, part, log_file=None):
         with self.timing():
@@ -99,6 +147,11 @@ class BaseTrainer(object):
             print(printstr, file=log_file, flush=True)
         return results, early_stop
 
+    def train_step(self):
+        loss_val, predict_y, y_val = self.executor.run(
+            self.train_name, convert_to_numpy_ret_vals=True)[:3]
+        return loss_val, predict_y, y_val
+
     def train_once(self, step_num, epoch, part):
         localiter = range(step_num)
         if self.tqdm_enabled:
@@ -110,8 +163,7 @@ class BaseTrainer(object):
         elif self.check_acc:
             train_acc = []
         for it in localiter:
-            loss_val, predict_y, y_val = self.executor.run(
-                self.train_name, convert_to_numpy_ret_vals=True)[:3]
+            loss_val, predict_y, y_val = self.train_step()
             self.executor.multi_log(
                 {'epoch': epoch, 'part': part, 'train_loss': loss_val})
             self.executor.step_logger()

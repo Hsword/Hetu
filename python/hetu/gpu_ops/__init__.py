@@ -35,7 +35,8 @@ from .Reshape import array_reshape_op, array_reshape_gradient_op
 from .ReshapeTo import reshape_to_op
 from .Sigmoid import sigmoid_op
 from .Slice import slice_op, slice_gradient_op
-from .Softmax import softmax_func, softmax_op
+from .Softmax import softmax_func, softmax_op, softmax_gradient_op
+from .LogSoftmax import log_softmax_op, log_softmax_gradient_op
 from .SoftmaxCrossEntropy import softmaxcrossentropy_op
 from .SoftmaxCrossEntropySparse import softmaxcrossentropy_sparse_op
 from .SparseSet import sparse_set_op
@@ -50,7 +51,7 @@ from .Transpose import transpose_op
 from .Variable import Variable, placeholder_op
 from .ZerosLike import zeroslike_op
 from .RobeLookUp import robe_lookup_op, robe_lookup_gradient_op
-from .EmbeddingLookUp import embedding_lookup_op, embedding_lookup_gradient_op, embedding_lookup_gradient_opt_op
+from .EmbeddingLookUp import embedding_lookup_op, embedding_lookup_gradient_op, embedding_lookup_gradient_with_lookup_op, embedding_lookup_gradient_dedupgrad_op
 from .SparseEmbeddingLookUp import sparse_embedding_lookup_op
 from .Where import where_op, where_const_op
 from .BatchMatrixMult import batch_matmul_op
@@ -104,6 +105,7 @@ from .Prune import prune_low_magnitude_op
 from .Quantize import quantize_op, dequantize_op
 from .QuantizeEmbedding import quantized_embedding_lookup_op, unified_quantized_embedding_lookup_op
 from .AssignWithIndexedSlices import assign_with_indexedslices_op, assign_quantized_embedding_op
+from .Sample import uniform_sample_op, normal_sample_op, truncated_normal_sample_op, gumbel_sample_op
 
 __all__ = [
     'Executor',
@@ -171,6 +173,9 @@ __all__ = [
     'slice_gradient_op',
     'softmax_func',
     'softmax_op',
+    'softmax_gradient_op',
+    'log_softmax_op',
+    'log_softmax_gradient_op',
     'softmaxcrossentropy_op',
     'softmaxcrossentropy_sparse_op',
     'sparse_set_op',
@@ -198,7 +203,8 @@ __all__ = [
     "robe_lookup_gradient_op",
     "embedding_lookup_op",
     "embedding_lookup_gradient_op",
-    "embedding_lookup_gradient_opt_op",
+    "embedding_lookup_gradient_with_lookup_op",
+    "embedding_lookup_gradient_dedupgrad_op",
     "sparse_embedding_lookup_op",
     'where_op',
     'where_const_op',
@@ -270,4 +276,8 @@ __all__ = [
     'unified_quantized_embedding_lookup_op',
     'assign_with_indexedslices_op',
     'assign_quantized_embedding_op',
+    'uniform_sample_op',
+    'normal_sample_op',
+    'truncated_normal_sample_op',
+    'gumbel_sample_op',
 ]

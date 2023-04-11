@@ -22,3 +22,8 @@ def truncated_normal_init(arr, mean, stddev, stream=None):
     assert isinstance(arr, _nd.NDArray)
     _LIB.DLGpuTruncatedNormalInit(arr.handle, ctypes.c_float(mean), ctypes.c_float(
         stddev), stream.handle if stream else None)
+
+
+def gumbel_init(arr, stream=None):
+    assert isinstance(arr, _nd.NDArray)
+    _LIB.DLGpuGumbelInit(arr.handle, stream.handle if stream else None)

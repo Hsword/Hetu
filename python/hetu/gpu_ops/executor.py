@@ -19,7 +19,7 @@ from .Sum import sum_op
 from .StopGradient import StopGradientOp
 from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp
 from ..communicator.mpi_nccl_comm import ncclDataType_t, GroupStart, GroupEnd
-from .EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient, EmbeddingLookUp_Gradient_Opt
+from .EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient, EmbeddingLookUp_Gradient_With_Lookup, EmbeddingLookUp_Gradient_DedupGrad
 from ..optimizer import OptimizerOp
 from . import OnesLike
 from ..stream import create_stream_handle, Event
@@ -789,7 +789,8 @@ class SubExecutor(object):
         self.computing_nodes: OP_LIST = []
 
         ln_bn_grad_nodes = (Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp,
-                            Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp)
+                            Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp,
+                            EmbeddingLookUp_Gradient_DedupGrad)
         no_compute_nodes = ln_bn_grad_nodes + (StopGradientOp,)
 
         for node in self.topo_order:
@@ -1006,7 +1007,7 @@ class SubExecutor(object):
                 else:
                     self.indexed_slices_shape[node] = (
                         node.index.shape, self.node_to_shape_map[node.inputs[0]])
-            elif isinstance(node, EmbeddingLookUp_Gradient_Opt):
+            elif isinstance(node, EmbeddingLookUp_Gradient_With_Lookup):
                 self.indexed_slices_shape[node] = (
                     self.node_to_shape_map[node.inputs[1]], self.node_to_shape_map[node.inputs[0]])
             elif isinstance(node, (DataD2HSparseOp, PipelineSendOp)) and node.use_indexed_slices:

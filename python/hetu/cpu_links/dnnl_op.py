@@ -421,12 +421,13 @@ def assign_embedding_with_indexedslices(embedding, newparam):
         embedding.handle, newparam.indices.handle, newparam.values.handle)
 
 
-def sgd_update_indexedslices(indices, grads, params, lr):
+def sgd_update_indexedslices(indices, grads, params, output, lr):
     assert isinstance(indices, NDArray)
     assert isinstance(grads, NDArray)
     assert isinstance(params, NDArray)
+    assert isinstance(output, NDArray)
     _LIB.cpu_SGDUpdateIndexedSlices(
-        indices.handle, grads.handle, params.handle, ctypes.c_float(lr))
+        indices.handle, grads.handle, params.handle, output.handle, ctypes.c_float(lr))
 
 
 def normal_init(param, mean, stddev):

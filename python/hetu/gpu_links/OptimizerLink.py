@@ -34,6 +34,15 @@ def sgd_update(param, grad, lr, l2reg, stream=None):
             lr), stream.handle if stream else None)
 
 
+def sgd_update_indexedslices(indices, grads, params, output, lr, stream=None):
+    assert isinstance(indices, NDArray)
+    assert isinstance(grads, NDArray)
+    assert isinstance(params, NDArray)
+    assert isinstance(output, NDArray)
+    _LIB.DLGpuSGDUpdateIndexedSlices(indices.handle, grads.handle, params.handle,
+                                     output.handle, ctypes.c_float(lr), stream.handle if stream else None)
+
+
 def momentum_update(param, grad, velocity, lr, momentum, nesterov, l2reg, stream=None):
     assert isinstance(param, NDArray)
     assert isinstance(grad, (NDArray, IndexedSlices))

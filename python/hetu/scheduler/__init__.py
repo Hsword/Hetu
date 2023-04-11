@@ -2,6 +2,7 @@
 
 from .base import BaseTrainer
 from .deeplight import DeepLightTrainer
+from .autodim import AutoDimTrainer
 
 
 def get_trainer(layer):
@@ -21,7 +22,7 @@ def get_trainer(layer):
         # MDEmbedding: BaseTrainer,
         # QuantizedEmbedding: BaseTrainer,
         DeepLightEmbedding: DeepLightTrainer,
-        # AutoDimEmbedding: AutoDimTrainer,
+        AutoDimEmbedding: AutoDimTrainer,
     }
 
     return trainer_mapping.get(type(layer), BaseTrainer)

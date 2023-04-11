@@ -122,3 +122,32 @@ int DLGpuTruncatedNormalInit(DLArrayHandle arr, const float mean,
 
     return 0;
 }
+
+__global__ void gumbel_sample_kernel(float *arr, HetuRandomState cudars,
+                                     size_t size) {
+    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
+    if (ind >= size)
+        return;
+    curandStatePhilox4_32_10_t state;
+    curand_init(cudars.seed, cudars.seqnum, ind, &state);
+    arr[ind] = -log(-log(curand_uniform(&state)));
+}
+
+int DLGpuGumbelInit(DLArrayHandle arr, DLStreamHandle stream_handle = NULL) {
+    size_t size = ArrSize(arr);
+    float *arr_data = (float *)arr->data;
+
+    dim3 blocks;
+    dim3 threads;
+    ThreadBlock1D(threads, blocks, size);
+    HetuRandomState &cudars = GetRandomState(1);
+    if (stream_handle) {
+        gumbel_sample_kernel<<<blocks, threads, 0,
+                               *(cudaStream_t *)stream_handle->handle>>>(
+            arr_data, cudars, size);
+    } else {
+        gumbel_sample_kernel<<<blocks, threads>>>(arr_data, cudars, size);
+    }
+
+    return 0;
+}

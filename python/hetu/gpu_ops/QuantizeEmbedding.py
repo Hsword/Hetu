@@ -6,7 +6,7 @@ from ..gpu_links import tensor_quantize, \
     unified_quantized_embedding_lookup, \
     embedding_prepack
 from ..ndarray import empty
-from .EmbeddingLookUp import embedding_lookup_gradient_opt_op
+from .EmbeddingLookUp import embedding_lookup_gradient_with_lookup_op, embedding_lookup_gradient_dedupgrad_op
 
 
 class UnifiedQuantizedEmbeddingLookUpOp(Op):
@@ -34,9 +34,11 @@ class UnifiedQuantizedEmbeddingLookUpOp(Op):
                 input_vals[0], input_vals[1], output_val, self.digit, self.scale, self.minele, stream_handle)
 
     def gradient(self, output_grad):
-        self.grad_node = embedding_lookup_gradient_opt_op(
+        self.grad_node = embedding_lookup_gradient_with_lookup_op(
             output_grad, self.inputs[1], self, None, ctx=self.raw_ctx)
-        return [self.grad_node, None]
+        grad_node = embedding_lookup_gradient_dedupgrad_op(
+            self.grad_node, output_grad, ctx=self.raw_ctx)
+        return [grad_node, None]
 
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 2
@@ -85,9 +87,11 @@ class QuantizedEmbeddingLookUpOp(Op):
                 input_vals[0], input_vals[1], output_val, input_vals[2], self.digit, stream_handle)
 
     def gradient(self, output_grad):
-        self.grad_node = embedding_lookup_gradient_opt_op(
+        self.grad_node = embedding_lookup_gradient_with_lookup_op(
             output_grad, self.inputs[1], self, None, ctx=self.raw_ctx)
-        return [self.grad_node, None, None]
+        grad_node = embedding_lookup_gradient_dedupgrad_op(
+            self.grad_node, output_grad, ctx=self.raw_ctx)
+        return [grad_node, None]
 
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 3

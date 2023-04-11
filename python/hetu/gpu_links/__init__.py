@@ -183,6 +183,8 @@ __all__ = [
     'dropout_gradient',
     'CuDNN_softmax',
     'CuDNN_softmax_gradient',
+    'CuDNN_log_softmax',
+    'CuDNN_log_softmax_gradient',
     'CuDNN_softmax_cross_entropy',
     'CuDNN_softmax_cross_entropy_gradient',
     'one_hot',
@@ -194,6 +196,7 @@ __all__ = [
     'normal_init',
     'uniform_init',
     'truncated_normal_init',
+    'gumbel_init',
 
     'sgd_update',
     'momentum_update',

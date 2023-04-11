@@ -19,15 +19,17 @@ __global__ void reduce_indexedslices_kernel(const float *in_value,
     size_t wid = ind % width;
     ind /= width;
     int unique_size = *punique_size;
-    if (ind >= unique_size)
-        return;
-    int l = id_length[ind], r = id_length[ind + 1];
-    float sum = 0;
-    for (int i = l; i < r; ++i) {
-        int offset = id_offset[i];
-        sum += in_value[offset * width + wid];
+    if (ind < unique_size) {
+        int l = id_length[ind], r = id_length[ind + 1];
+        float sum = 0;
+        for (int i = l; i < r; ++i) {
+            int offset = id_offset[i];
+            sum += in_value[offset * width + wid];
+        }
+        out_value[ind * width + wid] = sum;
+    } else {
+        out_value[ind * width + wid] = 0;
     }
-    out_value[ind * width + wid] = sum;
 }
 
 __global__ void unique_indexedslices_kernel(const float *in_value,
@@ -38,10 +40,12 @@ __global__ void unique_indexedslices_kernel(const float *in_value,
     size_t wid = ind % width;
     ind /= width;
     int unique_size = *punique_size;
-    if (ind >= unique_size)
-        return;
-    int l = id_length[ind];
-    out_value[ind * width + wid] = in_value[id_offset[l] * width + wid];
+    if (ind < unique_size) {
+        int l = id_length[ind];
+        out_value[ind * width + wid] = in_value[id_offset[l] * width + wid];
+    } else {
+        out_value[ind * width + wid] = 0;
+    }
 }
 
 __global__ void set_invalid_kernel(int *indices, int *punique_size,
@@ -193,7 +197,8 @@ int DLGpuReduceIndexedSliceWithEmbedding(
 
 __global__ void sgd_update_indexedslices_kernel(const int *indices,
                                                 const float *grads,
-                                                float *params, float lr,
+                                                const float *params,
+                                                float *output, float lr,
                                                 size_t dim, size_t size) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (ind >= size)
@@ -201,26 +206,29 @@ __global__ void sgd_update_indexedslices_kernel(const int *indices,
     int index = indices[ind / dim];
     if (index < 0)
         return;
-    params[ind] -= lr * grads[ind];
+    output[ind] = params[ind] - lr * grads[ind];
 }
 
 int DLGpuSGDUpdateIndexedSlices(const DLArrayHandle indices,
-                                const DLArrayHandle grads, DLArrayHandle params,
-                                float lr, DLStreamHandle stream_handle = NULL) {
+                                const DLArrayHandle grads,
+                                const DLArrayHandle params,
+                                DLArrayHandle output, float lr,
+                                DLStreamHandle stream_handle = NULL) {
     size_t size = ArrSize(grads);
     size_t dim = grads->shape[grads->ndim - 1];
     const int *indices_data = (const int *)indices->data;
     const float *grads_data = (const float *)grads->data;
-    float *params_data = (float *)params->data;
+    const float *params_data = (const float *)params->data;
+    float *output_data = (float *)output->data;
     dim3 threads, blocks;
     ThreadBlock1D(threads, blocks, size);
     if (stream_handle) {
         sgd_update_indexedslices_kernel<<<
             blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
-            indices_data, grads_data, params_data, lr, dim, size);
+            indices_data, grads_data, params_data, output_data, lr, dim, size);
     } else {
         sgd_update_indexedslices_kernel<<<blocks, threads>>>(
-            indices_data, grads_data, params_data, lr, dim, size);
+            indices_data, grads_data, params_data, output_data, lr, dim, size);
     }
     return 0;
 }

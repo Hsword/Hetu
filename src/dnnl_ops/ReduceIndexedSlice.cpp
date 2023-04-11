@@ -38,7 +38,7 @@ extern "C" int cpu_ReduceIndexedSlice(const DLArrayHandle in_indices,
     }
 
     size_t index_size = idx2map.size();
-    size_t num_all = index_size * width;
+    size_t num_all = dup_index_size * width;
 
     vector<pair<int, vector<size_t>>> idx2vector(idx2map.begin(),
                                                  idx2map.end());
@@ -85,14 +85,16 @@ extern "C" int cpu_ReduceIndexedSliceWithEmbedding(
     }
 
     size_t index_size = idx2map.size();
-    size_t num_all = index_size * width;
+    size_t num_all = dup_index_size * width;
 
     vector<pair<int, vector<size_t>>> idx2vector(idx2map.begin(),
                                                  idx2map.end());
 
 #pragma omp parallel for
-    for (size_t i = 0; i < num_all; ++i)
+    for (size_t i = 0; i < num_all; ++i) {
         out_val[i] = 0;
+        out_par[i] = 0;
+    }
 
 #pragma omp parallel for
     for (size_t i = 0; i < index_size; ++i) {
@@ -143,7 +145,8 @@ int cpu_AssignWithIndexedSlices(DLArrayHandle embedding,
 }
 
 int cpu_SGDUpdateIndexedSlices(const DLArrayHandle indices,
-                               const DLArrayHandle grads, DLArrayHandle params,
+                               const DLArrayHandle grads,
+                               const DLArrayHandle params, DLArrayHandle output,
                                float lr) {
     size_t index_size = 1;
     for (int i = 0; i < indices->ndim; ++i) {
@@ -152,7 +155,8 @@ int cpu_SGDUpdateIndexedSlices(const DLArrayHandle indices,
     size_t width = grads->shape[grads->ndim - 1];
     const int *ind_data = (const int *)indices->data;
     const float *grad_data = (const float *)grads->data;
-    float *param_data = (float *)params->data;
+    const float *param_data = (const float *)params->data;
+    float *output_data = (float *)output->data;
 
 #pragma omp parallel for
     for (size_t i = 0; i < index_size; ++i) {
@@ -160,7 +164,8 @@ int cpu_SGDUpdateIndexedSlices(const DLArrayHandle indices,
             continue;
         size_t offset = i * width;
         for (size_t k = 0; k < width; ++k) {
-            param_data[offset + k] -= lr * grad_data[offset + k];
+            output_data[offset + k] =
+                param_data[offset + k] - lr * grad_data[offset + k];
         }
     }
     return 0;
