@@ -204,7 +204,7 @@ def get_separate_fields(path, sparse, num_embed_fields=None):
 
 def process_all_criteo_data_by_day(path=default_criteo_path, return_val=True, separate_fields=False):
     days = 7
-    in_path = osp.join(path, 'train.txt')
+    in_path = osp.join(path, 'train.csv')
     phases = ['train', 'val', 'test']
     keys = ['dense', 'sparse', 'label']
     dtypes = [np.float32, np.int32, np.int32]
@@ -462,6 +462,107 @@ def process_avazu(path=default_avazu_path):
     # sum: 9449445
 
     np.save(osp.join(path, 'sparse.npy'), sparse_feats)
+
+
+def read_avazu_from_raw(path=osp.join(default_avazu_path, 'train.csv'), return_counts=False, nrows=-1):
+    spa_fea = 22
+    if nrows > 0:
+        df = pd.read_csv(path,header=None, nrows=nrows)
+    else:
+        df = pd.read_csv(path,header=None)
+    df.columns = ['id'] + ['click'] + ['hour'] + ['C1'] + ['banner_pos'] + ['site_id'] + ['site_domain'] + ['site_category'] + ['app_id'] + ['app_domain'] + ['app_category'] + ['device_id'] + ['device_ip'] + ['device_model'] + ['device_type'] + ['device_conn_type '] + ["C"+str(i) for i in range(14,22)]
+    sparse_feats = [col for col in df.columns if col!='click' and col!='id']
+    labels = df['click']
+    dense=[]
+    if return_counts:
+        sparse, counts = process_sparse_feats(
+            df, sparse_feats, return_counts=True)
+        return dense, sparse, labels, counts
+    else:
+        sparse = process_sparse_feats(df, sparse_feats)
+        return dense, sparse, labels
+    
+def process_all_avazu_data_by_day(path=default_avazu_path, return_val=True, separate_fields=False):
+    days = 10
+    in_path = osp.join(path, 'train.csv')
+    train_path = osp.join(path, 'kaggle_processed_train_hetu.npz')
+    val_path = osp.join(path, 'kaggle_processed_val_hetu.npz')
+    test_path = osp.join(path, 'kaggle_processed_test_hetu.npz')
+
+    data_ready = osp.exists(train_path)
+    if return_val:
+        data_ready = data_ready and osp.exists(test_path)
+
+    if not data_ready:
+        pro_path = osp.join(path, 'kaggle_processed_hetu.npz')
+        pro_data_ready = osp.exists(pro_path)
+
+        if not pro_data_ready:
+            print("Reading raw data={}".format(in_path))
+            dense, sparse, labels, counts = read_avazu_from_raw(
+                in_path, return_counts=True)
+            np.savez_compressed(
+                pro_path,
+                sparse=sparse,
+                dense=dense,
+                label=labels,
+                count=counts,
+            )
+        print("Reading pre-processed data={}".format(pro_path))
+        data = np.load(pro_path,allow_pickle=True)
+        dense, sparse, label, count = data['dense'], data['sparse'], data['label'], data['count']
+        counts = []
+        for i in range(len(count) - 1):
+            counts.append(count[i+1] - count[i])
+        print("Count of each feature: {}".format(counts))
+        num_samples = sparse.shape[0]
+        total_per_file = []
+        num_data_per_split, extras = divmod(num_samples, days)
+        total_per_file = [num_data_per_split] * days
+        for j in range(extras):
+            total_per_file[j] += 1
+        offset_per_file = np.array([0] + [x for x in total_per_file])
+        for i in range(days):
+            offset_per_file[i + 1] += offset_per_file[i]
+        print("File offsets: {}".format(offset_per_file))
+
+        # create reordering
+        indices = np.arange(sparse.shape[0])
+        indices = np.array_split(indices, offset_per_file[1:-1])
+        train_indices = np.concatenate(indices[:-1])
+        test_indices = indices[-1]
+        test_indices, val_indices = np.array_split(test_indices, 2)
+        # randomize
+        train_indices = np.random.permutation(train_indices)
+        print("Randomized indices across days ...")
+
+        # create training, validation, and test sets
+        for ind, cur_path in zip([train_indices, val_indices, test_indices], [train_path, val_path, test_path]):
+            cur_dense = []
+            cur_sparse = sparse[ind]
+            cur_label = label[ind]
+            np.savez_compressed(
+                cur_path,
+                sparse=cur_sparse,
+                dense=cur_dense,
+                label=cur_label,
+                count=counts,
+            )
+
+    train_data = np.load(train_path,allow_pickle=True)
+    train_dense, train_sparse, train_label = train_data['dense'], train_data['sparse'], train_data['label']
+    if separate_fields:
+        train_sparse = get_separate_fields(
+            train_sparse, osp.join(path, 'train_sep_sparse.npy'))
+    if return_val:
+        test_data = np.load(test_path,allow_pickle=True)
+        test_dense, test_sparse, test_label = test_data['dense'], test_data['sparse'], test_data['label']
+        if separate_fields:
+            test_sparse = get_separate_fields(
+                test_sparse, osp.join(path, 'test_sep_sparse.npy'))
+        return (train_dense, test_dense), (train_sparse, test_sparse), (train_label, test_label)
+    else:
+        return train_dense, train_sparse, train_label
 
 
 if __name__ == '__main__':
