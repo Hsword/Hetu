@@ -72,6 +72,7 @@ class DLRM_Head(object):
         sparse_input = ht.array_reshape_op(
             sparse_input, (-1, self.sparse_slot, self.embed_dim))
         if self.dense_slot > 0:
+            assert dense_input is not None
             x = self.bot_mlp(dense_input)
             self.bot = x
             x = self.interact_features(sparse_input, x)

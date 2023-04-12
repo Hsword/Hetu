@@ -49,7 +49,7 @@ class AutoDimTrainer(BaseTrainer):
                 break
 
         self.use_multi = 1
-        self.data_ops = self.get_data(self.data_func)
+        self.data_ops = self.get_data()
         self.embed_layer.get_eval_nodes_retrain(
             self.data_ops, self.model, self.opt, stream=self.executor.config.comp_stream)
 

@@ -10,7 +10,7 @@ import pickle
 
 
 class BaseTrainer(object):
-    def __init__(self, embed_layer, data_func, model, opt, args, **kargs):
+    def __init__(self, embed_layer, dataset, model, opt, args, **kargs):
         self.embed_layer = embed_layer
         self.model = model
         self.opt = opt
@@ -72,8 +72,8 @@ class BaseTrainer(object):
         self.temp_time = [None]
 
         self.start_ep = 0
-        self.data_func = data_func
-        self.data_ops = self.get_data(data_func)
+        self.dataset = dataset
+        self.data_ops = self.get_data()
 
     @property
     def all_train_names(self):
@@ -93,17 +93,20 @@ class BaseTrainer(object):
             [train_dataloader, valid_dataloader], dtype=dtype)
         return data_op
 
-    def get_data(self, func):
-        dense, sparse, labels = func(
-            return_val=True, separate_fields=self.use_multi)
+    def get_data(self):
+        all_data = self.dataset.process_all_data_by_day(
+            use_test=True, separate_fields=self.use_multi)
 
         # define models for criteo
-        tr_dense, va_dense = dense
-        tr_sparse, va_sparse = sparse
-        tr_labels, va_labels = labels
+        tr_sparse, va_sparse = all_data[-2]
+        tr_labels, va_labels = all_data[-1]
         tr_labels = tr_labels.reshape((-1, 1))
         va_labels = va_labels.reshape((-1, 1))
-        dense_input = self.make_dataloader_op(tr_dense, va_dense)
+        if len(all_data) == 3:
+            tr_dense, va_dense = all_data[0]
+            dense_input = self.make_dataloader_op(tr_dense, va_dense)
+        else:
+            dense_input = None
         y_ = self.make_dataloader_op(tr_labels, va_labels)
         if self.use_multi:
             new_sparse_ops = []

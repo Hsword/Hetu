@@ -21,16 +21,12 @@ def worker(args):
     batch_size = args.bs
     num_dim = args.dim
     learning_rate = args.lr
-    dataset = args.dataset
-    if args.dataset == 'criteo':
-        num_embed = 33762577
-        num_embed_fields = [1460, 583, 10131227, 2202608, 305, 24, 12517, 633, 3, 93145, 5683,
-                            8351593, 3194, 27, 14992, 5461306, 10, 5652, 2173, 4, 7046547, 18, 15, 286181, 105, 142572]
-    elif args.dataset == 'avazu':
-        num_embed = 9449445
-        num_embed_fields = [240, 7, 7, 4737, 7745, 26, 8552, 559, 36, 2686408, 6729486, 8251, 5, 4, 2626, 8, 9, 435, 4, 68, 172, 60]
-    else:
-        raise NotImplementedError
+    from models.load_data import get_dataset
+    dataset = get_dataset(args.dataset)()
+    num_embed = dataset.num_embed
+    num_embed_fields = dataset.num_embed_separate
+    num_dense = dataset.num_dense
+    num_sparse = dataset.num_sparse
 
     if args.debug:
         print('Use zero initializer for debug.')
@@ -80,12 +76,12 @@ def worker(args):
         num_parts = 8
         share_weights = True
         mode = 'vq'
-        num_slot = 26
+        num_slot = num_sparse
         embed_layer = htl.DPQEmbedding(num_embed, num_dim, num_choices, num_parts,
                                        num_slot, batch_size, share_weights, mode, initializer=initializer, ctx=ectx)
     elif args.method == 'autodim':
         candidates = [2, num_dim // 4, num_dim // 2, num_dim]
-        num_slot = 26
+        num_slot = num_sparse
         alpha_lr = 0.001
         embed_layer = htl.AutoDimEmbedding(
             num_embed_fields, candidates, num_slot, batch_size, alpha_lr, initializer=initializer, ctx=ectx)
@@ -110,14 +106,6 @@ def worker(args):
         raise NotImplementedError
 
     # define models
-    if args.dataset == 'criteo':
-        num_sparse = 26
-        num_dense = 13
-    elif args.dataset == 'avazu':
-        num_sparse = 22
-        num_dense = 0
-    else:
-        raise NotImplementedError
 
     model = args.model(num_dim, num_sparse, num_dense)
 
@@ -131,19 +119,11 @@ def worker(args):
         optimizer = ht.optim.AMSGradOptimizer
     opt = optimizer(learning_rate=learning_rate)
 
-    from models.load_data import process_all_criteo_data_by_day,process_all_avazu_data_by_day
-    if args.dataset=='criteo':
-        trainer = ht.sched.get_trainer(embed_layer)(embed_layer, process_all_criteo_data_by_day, model, opt, args)
-    elif args.dataset == 'avazu':
-        trainer = ht.sched.get_trainer(embed_layer)(embed_layer, process_all_avazu_data_by_day, model, opt, args)
+    trainer = ht.sched.get_trainer(embed_layer)(
+        embed_layer, dataset, model, opt, args)
 
     if args.phase == 'train':
-        if dataset == 'criteo':
-            trainer.fit()
-        elif dataset == 'avazu':
-            trainer.fit()
-        else:
-            raise NotImplementedError
+        trainer.fit()
     else:
         trainer.test()
 
@@ -174,7 +154,7 @@ if __name__ == '__main__':
     parser.add_argument("--lr", type=float, default=1e-3,
                         help="learning rate to be used")
     parser.add_argument("--dataset", type=str, default='criteo',
-                        help="dataset to be used")
+                        help="dataset to be used", choices=['criteo', 'avazu'])
     parser.add_argument("--nepoch", type=float, default=0.1,
                         help="num of epochs")
     parser.add_argument("--num_test_every_epoch", type=int, default=100,
