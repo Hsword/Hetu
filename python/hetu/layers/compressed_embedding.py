@@ -527,7 +527,8 @@ class MDEmbedding(Embedding):
             embeds.append(initializer(
                 shape=(n, d), name=f'{name}_fields_{i}', ctx=ctx))
             if dims[i] < base_dim:
-                projs.append(initializer(shape=(dims[i], base_dim)))
+                projs.append(initializer(
+                    shape=(dims[i], base_dim), name=f'{name}_proj_{i}'))
             else:
                 projs.append(None)
         self.embeds = embeds

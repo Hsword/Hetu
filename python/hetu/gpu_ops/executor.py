@@ -20,7 +20,7 @@ from .StopGradient import StopGradientOp
 from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp
 from ..communicator.mpi_nccl_comm import ncclDataType_t, GroupStart, GroupEnd
 from .EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient, EmbeddingLookUp_Gradient_With_Lookup, EmbeddingLookUp_Gradient_DedupGrad
-from ..optimizer import OptimizerOp
+from ..optimizer import OptimizerOp, OptimizerSparseOp
 from . import OnesLike
 from ..stream import create_stream_handle, Event
 from ..context import get_current_context, get_launch_config_by_traverse_nodes, DeviceGroup, GraphStatus
@@ -1000,6 +1000,8 @@ class SubExecutor(object):
         grouping_nodes = []
         cur_ind = -1
         for node in self.topo_order:
+            if isinstance(node, OptimizerSparseOp):
+                self.indexed_slices_shape[node] = self.indexed_slices_shape[node.inputs[1]]
             if isinstance(node, EmbeddingLookUp_Gradient):
                 if len(node.inputs) == 2:
                     self.indexed_slices_shape[node] = (

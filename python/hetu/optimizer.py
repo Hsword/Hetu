@@ -175,8 +175,8 @@ class OptimizerOp(Op):
 
 
 class OptimizerSparseOp(OptimizerOp):
-    def __init__(self, param, dedup_grad, dedup_lookup, optimizer, *states):
-        super().__init__(param, dedup_grad, optimizer, dedup_lookup, *states)
+    def __init__(self, param, dedup_lookup, dedup_grad, optimizer, *states):
+        super().__init__(param, dedup_lookup, optimizer, dedup_grad, *states)
         self.use_indexed_slices = True
 
     def infer_shape(self, input_shapes):

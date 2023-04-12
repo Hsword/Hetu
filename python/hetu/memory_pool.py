@@ -23,8 +23,8 @@ import numpy as np
 class HetuMemoryPool(object):
     def __init__(self):
         # here the indexed_nodes only used for flexflow
-        self.indexed_nodes = (EmbeddingLookUp_Gradient,
-                              EmbeddingLookUp_Gradient_With_Lookup, DataD2HSparseOp)
+        self.indexed_nodes = (EmbeddingLookUp_Gradient, EmbeddingLookUp_Gradient_With_Lookup,
+                              OptimizerSparseOp, DataD2HSparseOp)
         self.ln_bn_grad_nodes = (Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp,
                                  Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp,
                                  EmbeddingLookUp_Gradient_DedupGrad)
@@ -54,6 +54,7 @@ class HetuMemoryPool(object):
                 for n in node.inputs:
                     release_node(n)
             else:
+                assert not node.use_indexed_slices, node.name
                 memory_pool[(node_to_shape[node], node.ctx,
                              node.dtype)].append(node)
 
@@ -104,17 +105,17 @@ class HetuMemoryPool(object):
                 elif isinstance(node, RobeLookUp_Gradient):
                     node_to_arr_map[node] = ndarray.RobeSlices(
                         dense_shape=shape)
+                elif isinstance(node, OptimizerSparseOp):
+                    ind_shape, val_shape = indexed_slices_shape[node]
+                    values = ndarray.empty(val_shape, node.ctx)
+                    indices = node_to_arr_map[node.inputs[1]].indices
+                    node_to_arr_map[node] = ndarray.IndexedSlices(
+                        indices=indices, values=values, dense_shape=shape)
                 elif node in indexed_slices_shape:
                     ind_shape, val_shape = indexed_slices_shape[node]
                     indices = ndarray.empty(
                         ind_shape, node.ctx, dtype=np.int32)
                     values = ndarray.empty(val_shape, node.ctx)
-                    node_to_arr_map[node] = ndarray.IndexedSlices(
-                        indices=indices, values=values, dense_shape=shape)
-                elif isinstance(node, OptimizerSparseOp):
-                    values = ndarray.empty(
-                        node_to_arr_map[node.inputs[2]].shape, node.ctx)
-                    indices = node_to_arr_map[node.inputs[1]].indices
                     node_to_arr_map[node] = ndarray.IndexedSlices(
                         indices=indices, values=values, dense_shape=shape)
                 elif isinstance(node, EmbeddingLookUp) and (config.use_sparse_pull or config.cstable_policy) and config.prefetch:
