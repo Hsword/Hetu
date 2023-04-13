@@ -196,6 +196,7 @@ __all__ = [
     'normal_init',
     'uniform_init',
     'truncated_normal_init',
+    'reversed_truncated_normal_init',
     'gumbel_init',
 
     'sgd_update',

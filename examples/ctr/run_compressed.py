@@ -100,20 +100,10 @@ def worker(args):
         embed_layer = htl.QuantizedEmbedding(
             num_embed, num_dim, digit, scale=scale, middle=middle, use_qparam=use_qparam, initializer=initializer, ctx=ectx)
     elif args.method == 'tt':
-        # TODO: make it field-wise
-        ranks = [1, 8, 8, 1]
-        if args.dataset == 'criteo':
-            decomp_nemb = [300, 325, 350]
-        elif args.dataset == 'avazu':
-            decomp_nemb = [200, 215, 220]
-        else:
-            raise NotImplementedError
-        if args.dim == 16:
-            decomp_ndim = [2, 2, 4]
-        else:
-            raise NotImplementedError
+        stddev = 1 / ((np.sqrt(1 / 3 * max(num_embed_fields))) ** (1/3))
+        ttcore_initializer = ht.init.GenReversedTruncatedNormal(stddev=stddev)
         embed_layer = htl.TensorTrainEmbedding(
-            decomp_nemb, decomp_ndim, ranks, num_sparse, initializer=initializer, ctx=ectx)
+            num_embed_fields, args.dim, compress_rate, ttcore_initializer=ttcore_initializer, initializer=initializer, ctx=ectx)
     else:
         raise NotImplementedError
 
@@ -193,11 +183,11 @@ if __name__ == '__main__':
     if args.ectx is None:
         args.ectx = args.ctx
 
-    if args.method in ('robe',  'learn', 'dpq', 'prune', 'quantize', 'autodim'):
+    if args.method in ('robe', 'learn', 'dpq', 'prune', 'quantize', 'autodim'):
         # TODO: improve in future
         # autodim not use multi in the first stage, use multi in the second stage.
         args.use_multi = 0
-    elif args.method in ('compo', 'md'):
+    elif args.method in ('compo', 'md', 'tt'):
         args.use_multi = 1
 
     infos = [

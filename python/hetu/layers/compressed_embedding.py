@@ -746,47 +746,99 @@ class QuantizedEmbedding(Embedding):
 
 
 class TensorTrainEmbedding(Embedding):
-    def __init__(self, decomp_nemb, decomp_ndim, ranks, num_slot, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
-        assert len(decomp_nemb) == len(decomp_ndim) == len(ranks) - 1
-        assert ranks[0] == ranks[-1] == 1
-        self.decomp_nemb = decomp_nemb
-        self.decomp_ndim = decomp_ndim
-        self.ranks = ranks
-        self.num_tables = len(decomp_nemb)
-        self.num_slot = num_slot
+    def __init__(self, num_embed_fields, embedding_dim, compress_rate, ttcore_initializer, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+        self.num_tables = 3
+        self.num_embeddings = sum(num_embed_fields)
+        self.decomp_nembs = [self.get_decomp_emb(
+            nemb) for nemb in num_embed_fields]
+        self.decomp_ndim = self.get_decomp_dim(embedding_dim)
+        rank = self.get_rank(
+            self.num_embeddings, self.decomp_nembs, self.decomp_ndim, compress_rate)
+        self.ranks = [1, rank, rank, 1]
         self.name = name
         self.ctx = ctx
         self.embedding_tables = []
-        for i in range(self.num_tables):
-            nemb = decomp_nemb[i]
-            ndim = decomp_ndim[i]
-            pre_rank = ranks[i]
-            post_rank = ranks[i+1]
-            emb_table = initializer(
-                shape=(nemb, pre_rank * ndim * post_rank), name=f'{name}_emb{i}')
-            self.embedding_tables.append(emb_table)
+        for j, (nemb, dn) in enumerate(zip(num_embed_fields, self.decomp_nembs)):
+            cur_shapes = []
+            size = 0
+            for i in range(self.num_tables):
+                nrow = dn[i]
+                ndim = self.decomp_ndim[i]
+                prerank = self.ranks[i]
+                postrank = self.ranks[i+1]
+                ncol = prerank * ndim * postrank
+                cur_shapes.append((nrow, ncol))
+                size += nrow * ncol
+            if size < nemb * embedding_dim:
+                cur_tables = tuple(ttcore_initializer(
+                    shape=sh, name=f'{name}_field{j}_{i}') for i, sh in enumerate(cur_shapes))
+            else:
+                cur_tables = initializer(
+                    shape=(nemb, embedding_dim), name=f'{name}_field{j}')
+            self.embedding_tables.append(cur_tables)
 
-    def __call__(self, x):
-        indices = ht.array_reshape_op(x, (-1,))
-        accum_embed = None
-        accum_dim = 1
-        for i in range(self.num_tables):
-            if i == self.num_tables - 1:
-                cur_ind = indices
-            else:
-                cur_ind = ht.mod_hash_op(indices, self.decomp_nemb[i])
-                indices = ht.div_hash_op(indices, self.decomp_nemb[i])
-            partial_embed = ht.embedding_lookup_op(
-                self.embedding_tables[i], cur_ind)
-            if i == 0:
-                accum_embed = partial_embed
-            else:
+    def get_decomp_dim(self, embedding_dim):
+        assert embedding_dim >= 8 and embedding_dim & (embedding_dim - 1) == 0
+        decomp_ndim = [2, 2, 2]
+        idx = 2
+        embedding_dim //= 8
+        while embedding_dim != 1:
+            decomp_ndim[idx] *= 2
+            embedding_dim //= 2
+            idx = (idx - 1) % 3
+        return decomp_ndim
+
+    def get_decomp_emb(self, nemb):
+        n1 = math.ceil(nemb ** (1/3))
+        n2 = math.ceil((nemb / n1) ** (1/2))
+        n3 = math.ceil(nemb / n1 / n2)
+        return [n3, n2, n1]
+
+    def get_rank(self, num_embeddings, decomp_nembs, decomp_ndim, compress_rate):
+        linear_coef = 0
+        quadra_coef = 0
+        for dn in decomp_nembs:
+            linear_coef += (dn[0] * decomp_ndim[0] + dn[2] * decomp_ndim[2])
+            quadra_coef += (dn[1] * decomp_ndim[1])
+        from sympy.solvers import solve
+        from sympy import Symbol
+        x = Symbol('x')
+        results = solve(quadra_coef * x * x + linear_coef *
+                        x - compress_rate * num_embeddings)
+        results = filter(lambda x: x > 0, results)
+        res = int(round(min(results)))
+        print(f'Rank {res} given compression rate {compress_rate}.')
+        return res
+
+    def __call__(self, xs):
+        results = []
+        for j, (emb, x) in enumerate(zip(self.embedding_tables, xs)):
+            if isinstance(emb, tuple):
+                indices = x
+                accum_embed = None
+                accum_dim = 1
+                nemb = self.decomp_nembs[j]
+                for i in range(self.num_tables):
+                    if i == self.num_tables - 1:
+                        cur_ind = indices
+                    else:
+                        cur_ind = ht.mod_hash_op(indices, nemb[i])
+                        indices = ht.div_hash_op(indices, nemb[i])
+                    partial_embed = ht.embedding_lookup_op(emb[i], cur_ind)
+                    if i == 0:
+                        accum_embed = partial_embed
+                    else:
+                        accum_embed = ht.array_reshape_op(
+                            accum_embed, (-1, accum_dim, self.ranks[i]))
+                        partial_embed = ht.array_reshape_op(
+                            partial_embed, (-1, self.ranks[i], self.decomp_ndim[i] * self.ranks[i+1]))
+                        accum_embed = ht.batch_matmul_op(
+                            accum_embed, partial_embed)
+                    accum_dim *= self.decomp_ndim[i]
                 accum_embed = ht.array_reshape_op(
-                    accum_embed, (-1, accum_dim, self.ranks[i]))
-                partial_embed = ht.array_reshape_op(
-                    partial_embed, (-1, self.ranks[i], self.decomp_ndim[i] * self.ranks[i+1]))
-                accum_embed = ht.batch_matmul_op(accum_embed, partial_embed)
-            accum_dim *= self.decomp_ndim[i]
-        accum_embed = ht.array_reshape_op(
-            accum_embed, (-1, self.num_slot, accum_dim))
-        return accum_embed
+                    accum_embed, (-1, accum_dim))
+                results.append(accum_embed)
+            else:
+                results.append(ht.embedding_lookup_op(emb, x))
+        result = ht.concatenate_op(results, axis=1)
+        return result

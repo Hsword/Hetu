@@ -742,6 +742,10 @@ HETUSYS_EXTERN_C {
                                  const float stddev,
                                  DLStreamHandle stream_handle);
 
+    int DLGpuReversedTruncatedNormalInit(DLArrayHandle arr, const float mean,
+                                         const float stddev,
+                                         DLStreamHandle stream_handle);
+
     int DLGpuGumbelInit(DLArrayHandle arr, DLStreamHandle stream_handle);
 
     // Optimizer Ops
@@ -1021,6 +1025,8 @@ HETUSYS_EXTERN_C {
     int cpu_UniformInit(DLArrayHandle arr, const float lb, const float ub);
     int cpu_TruncatedNormalInit(DLArrayHandle arr, const float mean,
                                 const float stddev);
+    int cpu_ReversedTruncatedNormalInit(DLArrayHandle arr, const float mean,
+                                        const float stddev);
 
     int DLGpuBinaryCrossEntropy(const DLArrayHandle prediction,
                                 const DLArrayHandle label, DLArrayHandle loss,

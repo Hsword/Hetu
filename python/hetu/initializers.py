@@ -218,13 +218,32 @@ class TruncatedNormalInit(BaseInit):
             cpu_op.truncated_normal_init(
                 self.node.tensor_value, self.mean, self.stddev)
         else:
-            get_np_rand(1)
+            get_np_rand(np.prod(self.shape))
             from scipy.stats import truncnorm
             self.node.tensor_value[:] = truncnorm(
                 -2.0, 2.0, loc=self.mean, scale=self.stddev).rvs(self.shape).astype(np.float32)
 
     def init_on_ps(self, comm, nid, param_type, opt):
         super().init_on_ps(comm, nid, param_type, 3, self.mean, self.stddev, opt)
+
+
+class ReversedTruncatedNormalInit(BaseInit):
+    def __init__(self, mean, stddev, shape):
+        super().__init__(shape)
+        self.mean = mean
+        self.stddev = stddev
+
+    def init_on_gpu(self, stream):
+        gpu_op.reversed_truncated_normal_init(
+            self.node.tensor_value, self.mean, self.stddev, stream)
+
+    def init_on_cpu(self):
+        from ._base import DNNL_LIB
+        if DNNL_LIB['cpu_ReversedTruncatedNormalInit']:
+            cpu_op.reversed_truncated_normal_init(
+                self.node.tensor_value, self.mean, self.stddev)
+        else:
+            raise NotImplementedError
 
 
 # here we provide easy APIs
@@ -261,6 +280,13 @@ def truncated_normal(shape, mean=0.0, stddev=1.0, name=None, trainable=True, ctx
     if name is None:
         name = 'truncated_normal_initializer'
     init = TruncatedNormalInit(mean, stddev, shape)
+    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+
+
+def reversed_truncated_normal(shape, mean=0.0, stddev=1.0, name=None, trainable=True, ctx=None):
+    if name is None:
+        name = 'reversed_truncated_normal_initializer'
+    init = ReversedTruncatedNormalInit(mean, stddev, shape)
     return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
 
 
@@ -360,6 +386,10 @@ def GenConstant(fill_value=0.0):
 
 def GenTruncatedNormal(mean=0.0, stddev=1.0):
     return _generate(truncated_normal, mean=mean, stddev=stddev)
+
+
+def GenReversedTruncatedNormal(mean=0.0, stddev=1.0):
+    return _generate(reversed_truncated_normal, mean=mean, stddev=stddev)
 
 
 def GenNormal(mean=0.0, stddev=1.0):

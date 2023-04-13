@@ -66,6 +66,7 @@ DNNL_LIB = {
     'cpu_UniformInit': False,  # c++
     'cpu_NormalInit': False,  # c++
     'cpu_TruncatedNormalInit': False,  # c++
+    'cpu_ReversedTruncatedNormalInit': False,  # c++
 }
 
 

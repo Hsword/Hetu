@@ -83,7 +83,7 @@ __global__ void truncated_normal_kernel(float *arr, const float mean,
     bool not_found = true;
     // here we use different sequences instead of offsets
     // to avoid using the same random number
-    curand_init(cudars.seed, cudars.seqnum, ind, &state);
+    curand_init(cudars.seed, cudars.seqnum + ind, 0, &state);
     float temp;
     while (not_found) {
         temp = curand_normal(&state);
@@ -95,22 +95,13 @@ __global__ void truncated_normal_kernel(float *arr, const float mean,
 int DLGpuTruncatedNormalInit(DLArrayHandle arr, const float mean,
                              const float stddev,
                              DLStreamHandle stream_handle = NULL) {
-    size_t size = 1;
-    for (index_t i = 0; i < arr->ndim; i++) {
-        size *= arr->shape[i];
-    }
+    size_t size = ArrSize(arr);
     float *arr_data = (float *)arr->data;
 
     dim3 blocks;
     dim3 threads;
-    if (size <= 1024) {
-        threads.x = size;
-        blocks.x = 1;
-    } else {
-        threads.x = 1024;
-        blocks.x = (size + 1023) / 1024;
-    }
-    HetuRandomState &cudars = GetRandomState(1);
+    ThreadBlock1D(threads, blocks, size);
+    HetuRandomState &cudars = GetRandomState(size);
     if (stream_handle) {
         truncated_normal_kernel<<<blocks, threads, 0,
                                   *(cudaStream_t *)stream_handle->handle>>>(
@@ -118,6 +109,48 @@ int DLGpuTruncatedNormalInit(DLArrayHandle arr, const float mean,
     } else {
         truncated_normal_kernel<<<blocks, threads>>>(arr_data, mean, stddev,
                                                      cudars, size);
+    }
+
+    return 0;
+}
+
+__global__ void reversed_truncated_normal_kernel(float *arr, const float mean,
+                                                 const float stddev,
+                                                 HetuRandomState cudars,
+                                                 size_t size) {
+    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
+    if (ind >= size)
+        return;
+    curandStatePhilox4_32_10_t state;
+    bool not_found = true;
+    // here we use different sequences instead of offsets
+    // to avoid using the same random number
+    curand_init(cudars.seed, cudars.seqnum + ind, 0, &state);
+    float temp;
+    while (not_found) {
+        temp = curand_normal(&state);
+        not_found = (temp > -2 && temp < 2);
+    }
+    arr[ind] = temp * stddev + mean;
+}
+
+int DLGpuReversedTruncatedNormalInit(DLArrayHandle arr, const float mean,
+                                     const float stddev,
+                                     DLStreamHandle stream_handle = NULL) {
+    size_t size = ArrSize(arr);
+    float *arr_data = (float *)arr->data;
+
+    dim3 blocks;
+    dim3 threads;
+    ThreadBlock1D(threads, blocks, size);
+    HetuRandomState &cudars = GetRandomState(size);
+    if (stream_handle) {
+        reversed_truncated_normal_kernel<<<
+            blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
+            arr_data, mean, stddev, cudars, size);
+    } else {
+        reversed_truncated_normal_kernel<<<blocks, threads>>>(
+            arr_data, mean, stddev, cudars, size);
     }
 
     return 0;
