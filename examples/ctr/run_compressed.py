@@ -37,6 +37,7 @@ def worker(args):
     ctx = get_ctx(args.ctx)
     ectx = get_ctx(args.ectx)
 
+    compress_rate = args.compress_rate
     if args.method == 'full':
         if args.use_multi:
             embed_layer = htl.MultipleEmbedding(
@@ -45,13 +46,11 @@ def worker(args):
             embed_layer = htl.Embedding(
                 num_embed, num_dim, initializer=initializer, ctx=ectx)
     elif args.method == 'robe':
-        compress_rate = args.compress_rate
         size_limit = None
         Z = 1
         embed_layer = htl.RobeEmbedding(
             num_embed, num_dim, compress_rate=compress_rate, size_limit=size_limit, Z=Z, initializer=initializer, ctx=ectx)
     elif args.method == 'hash':
-        compress_rate = args.compress_rate
         size_limit = None
         if args.use_multi:
             embed_layer = htl.MultipleHashEmbedding(
@@ -60,10 +59,9 @@ def worker(args):
             embed_layer = htl.HashEmbedding(
                 num_embed, num_dim, compress_rate=compress_rate, size_limit=size_limit, initializer=initializer, ctx=ectx)
     elif args.method == 'compo':
-        num_tables = 2
         aggregator = 'mul'
         embed_layer = htl.CompositionalEmbedding(
-            num_embed, num_dim, num_tables, aggregator, initializer=initializer, ctx=ectx)
+            num_embed_fields, num_dim, compress_rate=compress_rate, aggregator=aggregator, initializer=initializer, ctx=ectx)
     elif args.method == 'learn':
         num_buckets = 1000000
         num_hash = 1024
@@ -91,10 +89,9 @@ def worker(args):
         embed_layer = htl.MDEmbedding(
             num_embed_fields, num_dim, alpha, round_dim, initializer=initializer, ctx=ectx)
     elif args.method == 'prune':
-        target_sparse = args.compress_rate
         warm = 2
         embed_layer = htl.DeepLightEmbedding(
-            num_embed, num_dim, target_sparse, warm, initializer=initializer, ctx=ectx)
+            num_embed, num_dim, compress_rate, warm, initializer=initializer, ctx=ectx)
     elif args.method == 'quantize':
         digit = 16
         scale = 0.01
@@ -196,11 +193,11 @@ if __name__ == '__main__':
     if args.ectx is None:
         args.ectx = args.ctx
 
-    if args.method in ('robe', 'compo', 'learn', 'dpq', 'prune', 'quantize', 'autodim'):
+    if args.method in ('robe',  'learn', 'dpq', 'prune', 'quantize', 'autodim'):
         # TODO: improve in future
         # autodim not use multi in the first stage, use multi in the second stage.
         args.use_multi = 0
-    elif args.method in ('md'):
+    elif args.method in ('compo', 'md'):
         args.use_multi = 1
 
     infos = [

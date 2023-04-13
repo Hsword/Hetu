@@ -98,41 +98,84 @@ class MultipleHashEmbedding(Embedding):
 
 class CompositionalEmbedding(Embedding):
     # compositional embedding
-    def __init__(self, num_embeddings, embedding_dim, num_tables, aggregator, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
-        aggregator = aggregator[:3]
-        assert aggregator in ('sum', 'mul', 'con')
-        self.aggregator = aggregator
-        self.num_embeddings = num_embeddings
-        self.embedding_dim = embedding_dim
-        self.num_tables = num_tables
-        self.name = name
-        self.ctx = ctx
-        self.table_num_embedding = math.ceil(pow(num_embeddings, 1/num_tables))
-        shape = (num_tables * self.table_num_embedding, self.embedding_dim)
-        self.embedding_table = initializer(
-            shape=shape, name=self.name)
-
-    def __call__(self, x):
+    def __init__(self, num_embed_fields, embedding_dim, compress_rate, aggregator='mul', initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         # KDD20, CompositionalHash
         # CIKM21, BinaryCodeHash
-        # x's shape: (batch_size, slot)
+        # adapted from DLRM QREmbeddingBag
+        aggregator = aggregator[:3]
+        assert aggregator in ('sum', 'mul')
+        self.aggregator = aggregator
+        self.num_slot = len(num_embed_fields)
+        self.num_embed_fields = num_embed_fields
+        self.num_embeddings = sum(num_embed_fields)
+        self.embedding_dim = embedding_dim
+        self.compress_rate = compress_rate
+        self.name = name
+        self.ctx = ctx
+        self.collision = self.get_collision(
+            self.num_embeddings, self.num_slot, compress_rate)
+        self.embedding_tables = []
+        for i, nemb in enumerate(self.num_embed_fields):
+            cur_compo = self.decompo(nemb, self.collision)
+            if isinstance(cur_compo, tuple):
+                nqemb, nremb = cur_compo
+                qemb = initializer(
+                    shape=(nqemb, self.embedding_dim),
+                    name=f'{name}_{i}_q',
+                    ctx=ctx,
+                )
+                remb = initializer(
+                    shape=(nremb, self.embedding_dim),
+                    name=f'{name}_{i}_r',
+                    ctx=ctx,
+                )
+                self.embedding_tables.append((qemb, remb))
+            else:
+                cur_embed = initializer(
+                    shape=(nemb, self.embedding_dim),
+                    name=f'{name}_{i}',
+                    ctx=ctx,
+                )
+                self.embedding_tables.append(cur_embed)
+
+    def get_collision(self, num_embeddings, num_slot, compress_rate):
+        from sympy.solvers import solve
+        from sympy import Symbol
+        x = Symbol('x')
+        results = solve(num_embeddings / x + num_slot *
+                        x - compress_rate * num_embeddings)
+        results = filter(lambda x: x > 0, results)
+        res = int(round(min(results)))
+        print(f'Collision {res} given compression rate {compress_rate}.')
+        return res
+
+    def decompo(self, num, collision):
+        if num <= collision:
+            return num
+        another = math.ceil(num / collision)
+        if num <= another + collision:
+            return num
+        return (another, collision)
+
+    def __call__(self, xs):
         with ht.context(self.ctx):
-            sparse_input = ht.compo_hash_op(
-                x, self.num_tables, self.table_num_embedding)
-            # (batch_size, slot, ntable)
-            sparse_data = ht.embedding_lookup_op(
-                self.embedding_table, sparse_input)
-        # (batch_size, slot, ntable, dim)
-        if self.aggregator == 'sum':
-            # sum
-            return ht.reduce_sum_op(sparse_data, axes=[2], keepdims=False)
-        elif self.aggregator == 'mul':
-            # multiply
-            return ht.reduce_mul_op(sparse_data, axes=[2], keepdims=False)
-        elif self.aggregator == 'con':
-            # concatenate
-            # (batch_size, num_tables, ...), need_reshape
-            return ht.transpose_op(sparse_data, [0, 2, 1, 3])
+            results = []
+            for emb, x in zip(self.embedding_tables, xs):
+                if not isinstance(emb, tuple):
+                    results.append(ht.embedding_lookup_op(emb, x))
+                else:
+                    qemb, remb = emb
+                    qind = ht.div_hash_op(x, self.collision)
+                    rind = ht.mod_hash_op(x, self.collision)
+                    q = ht.embedding_lookup_op(qemb, qind)
+                    r = ht.embedding_lookup_op(remb, rind)
+                    if self.aggregator == 'sum':
+                        cur_embedding = ht.add_op(q, r)
+                    elif self.aggregator == 'mul':
+                        cur_embedding = ht.mul_op(q, r)
+                    results.append(cur_embedding)
+            result = ht.concatenate_op(results, axis=1)
+            return result
 
 
 class LearningEmbedding(Embedding):
