@@ -251,6 +251,7 @@ __all__ = [
     'sammax_link',
     'sammax_grad_link',
     'mod_hash',
+    'div_hash',
     'compo_hash',
     'learn_hash',
     'num_less_than',

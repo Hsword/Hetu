@@ -99,7 +99,7 @@ from .HAllToAll import halltoall_op
 from .SamGroupSum import sam_group_sum_op
 from .GroupTopKIdx import group_topk_idx_op
 from .SamMax import sam_max_op
-from .CompressedEmbedding import mod_hash_op, compo_hash_op, learn_hash_op, robe_hash_op
+from .CompressedEmbedding import mod_hash_op, div_hash_op, compo_hash_op, learn_hash_op, robe_hash_op
 from .TrilLookup import tril_lookup_op, tril_lookup_gradient_op
 from .Prune import prune_low_magnitude_op
 from .Quantize import quantize_op, dequantize_op
@@ -265,6 +265,7 @@ __all__ = [
     'sam_max_op',
     'robe_hash_op',
     'mod_hash_op',
+    'div_hash_op',
     'compo_hash_op',
     'learn_hash_op',
     'tril_lookup_op',

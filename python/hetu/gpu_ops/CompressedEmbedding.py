@@ -2,16 +2,17 @@ from __future__ import absolute_import
 from .Node import Op
 from .._base import DNNL_LIB
 import numpy as np
-from ..gpu_links import robe_hash, mod_hash, compo_hash, learn_hash
+from ..gpu_links import robe_hash, mod_hash, div_hash, compo_hash, learn_hash
 from random import randrange
+
 
 class RobeHashOp(Op):
     def __init__(self, node, roarsz, len, Z, MO, ctx=None):
         super().__init__(RobeHashOp, [node], ctx)
-        self.roarsz = roarsz #roarsz means ROBE array size
-        self.Bh=623987128#randrange(998244353)
-        self.Ch=423878919#randrange(998244353)
-        self.Dh=123129899
+        self.roarsz = roarsz  # roarsz means ROBE array size
+        self.Bh = 623987128  # randrange(998244353)
+        self.Ch = 423878919  # randrange(998244353)
+        self.Dh = 123129899
         self.Z = Z
         self.len = len
         self.MO = MO
@@ -19,19 +20,21 @@ class RobeHashOp(Op):
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
-            output_val[:] = ( ( np.array(
+            output_val[:] = ((np.array(
                 input_vals[0].asnumpy(), dtype=np.int32) * self.Bh + self.Ch) % self.MO + self.MO) % self.MO % self.roarsz
         else:
-            robe_hash(input_vals[0], output_val, self.roarsz, self.Bh, self.Ch, self.Dh, self.Z, self.MO, stream_handle)
+            robe_hash(input_vals[0], output_val, self.roarsz, self.Bh,
+                      self.Ch, self.Dh, self.Z, self.MO, stream_handle)
 
     def gradient(self, output_grad):
         return [None]
-    
+
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 1
         t = list(input_shapes[0])
         t.append((self.len-1)//self.Z+1)
         return tuple(t)
+
 
 class ModHashOp(Op):
     def __init__(self, node, nembed, ctx=None):
@@ -45,6 +48,27 @@ class ModHashOp(Op):
                 input_vals[0].asnumpy(), dtype=np.int32) % self.nembed
         else:
             mod_hash(input_vals[0], output_val, self.nembed, stream_handle)
+
+    def gradient(self, output_grad):
+        return [None]
+
+    def infer_shape(self, input_shapes):
+        assert len(input_shapes) == 1
+        return input_shapes[0]
+
+
+class DivHashOp(Op):
+    def __init__(self, node, nembed, ctx=None):
+        super().__init__(DivHashOp, [node], ctx)
+        self.nembed = nembed
+        self.dtype = np.int32
+
+    def compute(self, input_vals, output_val, stream_handle=None):
+        if self.on_cpu:
+            output_val[:] = np.array(
+                input_vals[0].asnumpy(), dtype=np.int32) // self.nembed
+        else:
+            div_hash(input_vals[0], output_val, self.nembed, stream_handle)
 
     def gradient(self, output_grad):
         return [None]
@@ -127,12 +151,17 @@ class LearnHashOp(Op):
         output_shape.append(input_shapes[1][0])
         return tuple(output_shape)
 
+
 def robe_hash_op(node, roarsz, len, Z, MO, ctx=None):
     return RobeHashOp(node, roarsz, len, Z, MO, ctx=ctx)
 
 
 def mod_hash_op(node, nembed, ctx=None):
     return ModHashOp(node, nembed, ctx=ctx)
+
+
+def div_hash_op(node, nembed, ctx=None):
+    return DivHashOp(node, nembed, ctx=ctx)
 
 
 def compo_hash_op(node, ntable, nembed, ctx=None):

@@ -678,3 +678,50 @@ class QuantizedEmbedding(Embedding):
                 lookup = ht.unified_quantized_embedding_lookup_op(
                     self.embedding_table, x, self.scale, self.middle, self.digit)
             return lookup
+
+
+class TensorTrainEmbedding(Embedding):
+    def __init__(self, decomp_nemb, decomp_ndim, ranks, num_slot, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+        assert len(decomp_nemb) == len(decomp_ndim) == len(ranks) - 1
+        assert ranks[0] == ranks[-1] == 1
+        self.decomp_nemb = decomp_nemb
+        self.decomp_ndim = decomp_ndim
+        self.ranks = ranks
+        self.num_tables = len(decomp_nemb)
+        self.num_slot = num_slot
+        self.name = name
+        self.ctx = ctx
+        self.embedding_tables = []
+        for i in range(self.num_tables):
+            nemb = decomp_nemb[i]
+            ndim = decomp_ndim[i]
+            pre_rank = ranks[i]
+            post_rank = ranks[i+1]
+            emb_table = initializer(
+                shape=(nemb, pre_rank * ndim * post_rank), name=f'{name}_emb{i}')
+            self.embedding_tables.append(emb_table)
+
+    def __call__(self, x):
+        indices = ht.array_reshape_op(x, (-1,))
+        accum_embed = None
+        accum_dim = 1
+        for i in range(self.num_tables):
+            if i == self.num_tables - 1:
+                cur_ind = indices
+            else:
+                cur_ind = ht.mod_hash_op(indices, self.decomp_nemb[i])
+                indices = ht.div_hash_op(indices, self.decomp_nemb[i])
+            partial_embed = ht.embedding_lookup_op(
+                self.embedding_tables[i], cur_ind)
+            if i == 0:
+                accum_embed = partial_embed
+            else:
+                accum_embed = ht.array_reshape_op(
+                    accum_embed, (-1, accum_dim, self.ranks[i]))
+                partial_embed = ht.array_reshape_op(
+                    partial_embed, (-1, self.ranks[i], self.decomp_ndim[i] * self.ranks[i+1]))
+                accum_embed = ht.batch_matmul_op(accum_embed, partial_embed)
+            accum_dim *= self.decomp_ndim[i]
+        accum_embed = ht.array_reshape_op(
+            accum_embed, (-1, self.num_slot, accum_dim))
+        return accum_embed

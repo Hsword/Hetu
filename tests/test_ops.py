@@ -235,6 +235,8 @@ def test_tile():
 def test_hash():
     tester = HetuTester(ht.mod_hash_op, 1, 97, in_dtype='ui')
     tester.test([(2, 3, 4)])
+    tester = HetuTester(ht.div_hash_op, 1, 97, in_dtype='ui')
+    tester.test([(2, 3, 4)])
     tester = HetuTester(ht.compo_hash_op, 1, 3, 97, in_dtype='ui')
     tester.test([(2, 3, 4)])
     tester = HetuTester(ht.learn_hash_op, 4, 1000, 'uniform', in_dtype='ui')

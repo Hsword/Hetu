@@ -102,6 +102,21 @@ def worker(args):
         use_qparam = False
         embed_layer = htl.QuantizedEmbedding(
             num_embed, num_dim, digit, scale=scale, middle=middle, use_qparam=use_qparam, initializer=initializer, ctx=ectx)
+    elif args.method == 'tt':
+        # TODO: make it field-wise
+        ranks = [1, 8, 8, 1]
+        if args.dataset == 'criteo':
+            decomp_nemb = [300, 325, 350]
+        elif args.dataset == 'avazu':
+            decomp_nemb = [200, 215, 220]
+        else:
+            raise NotImplementedError
+        if args.dim == 16:
+            decomp_ndim = [2, 2, 4]
+        else:
+            raise NotImplementedError
+        embed_layer = htl.TensorTrainEmbedding(
+            decomp_nemb, decomp_ndim, ranks, num_sparse, initializer=initializer, ctx=ectx)
     else:
         raise NotImplementedError
 
@@ -136,7 +151,7 @@ if __name__ == '__main__':
                         help="method to be used",
                         choices=['full', 'robe', 'hash', 'compo',
                                  'learn', 'dpq', 'autodim', 'md',
-                                 'prune', 'quantize'])
+                                 'prune', 'quantize', 'tt'])
     parser.add_argument("--phase", type=str, default='train',
                         help='train or test',
                         choices=['train', 'test'])
