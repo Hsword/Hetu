@@ -1,6 +1,7 @@
 from __future__ import absolute_import, annotations
 from .BatchNorm import Batch_NormalizationOp, Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp
 from .LayerNorm import Layer_NormalizationOp, Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp
+from .MultiplyConst import MulByConstOp
 import numpy as np
 from scipy.sparse import spmatrix, coo_matrix
 from .. import ndarray
@@ -525,9 +526,10 @@ class Executor(object):
         eval_node_list: OP_LIST = [],
         feed_dict: Dict[Op, FEEDINS] = {},
         convert_to_numpy_ret_vals: bool = False,
+        inference: Optional[bool] = None,
         **kwargs
     ) -> List[Union[None, np.ndarray, NDArray]]:
-        return self.subexecutor[name].run(eval_node_list, feed_dict, convert_to_numpy_ret_vals, **kwargs)
+        return self.subexecutor[name].run(eval_node_list, feed_dict, convert_to_numpy_ret_vals, inference=inference, **kwargs)
 
     @property
     def ctx(self) -> DLContext:
@@ -1102,6 +1104,7 @@ class SubExecutor(object):
         feed_dict: Dict[Op, FEEDINS] = {},
         convert_to_numpy_ret_vals: bool = False,
         dataloader_step=True,
+        inference=None,
     ) -> List[Union[None, np.ndarray, NDArray]]:
         """
         Parameters
@@ -1156,7 +1159,7 @@ class SubExecutor(object):
             self.memory_plan()
 
         self.compute(self.computing_nodes,
-                     self.node_to_arr_map)
+                     self.node_to_arr_map, inference=inference)
 
         for n in self.eval_node_list:
             # every node in eval_node_list should have an event (except dataloader/optimizer...)
@@ -1183,7 +1186,7 @@ class SubExecutor(object):
 
         return results
 
-    def compute(self, computing_nodes: OP_LIST, arr_map: ARR_MAP) -> None:
+    def compute(self, computing_nodes: OP_LIST, arr_map: ARR_MAP, inference: Optional[bool] = None) -> None:
         # computing
         grouping_nodes = []
         cur_ind = -1
@@ -1198,6 +1201,8 @@ class SubExecutor(object):
             for node in grouping_nodes:
                 node.event.record(p2p_stream)
             grouping_nodes.clear()
+        if inference is None:
+            inference = self.inference
         for node in computing_nodes:
             if node.on_cpu and isinstance(arr_map[node], ndarray.NDArray):
                 if DNNL_LIB['cpu_ArraySet'] and not isinstance(node, DataD2HOp):
@@ -1231,9 +1236,9 @@ class SubExecutor(object):
                 cur_stream = self.node_type_to_stream_map.get(
                     node_type, self.comp_stream)
 
-                if node_type in (DropoutOp, Batch_NormalizationOp):
+                if node_type in (DropoutOp, Batch_NormalizationOp, MulByConstOp):
                     node.compute(input_vals, node_val, cur_stream,
-                                 inference=self.inference)
+                                 inference=inference)
                 else:
                     node.compute(input_vals, node_val, cur_stream)
 

@@ -1,3 +1,4 @@
+import os
 import os.path as osp
 import numpy as np
 
@@ -24,7 +25,7 @@ class AutoDimTrainer(BaseTrainer):
 
         self.executor.subexecutor['alpha'].inference = False
         self.executor.subexecutor['lookups'].inference = False
-        self.executor.subexecutor['all_grads'].inference = False
+        self.executor.subexecutor['allgrads'].inference = False
         self.get_arch_params(self.executor.config.placeholder_to_arr_map)
 
         self.total_epoch = int(self.nepoch * self.num_test_every_epoch)
@@ -33,6 +34,7 @@ class AutoDimTrainer(BaseTrainer):
         self.base_batch_num = train_batch_num // npart
         self.residual = train_batch_num % npart
         self.try_load_ckpt()
+        self.train_step = self.first_stage_train_step
 
         log_file = open(self.result_file,
                         'w') if self.result_file is not None else None
@@ -48,9 +50,21 @@ class AutoDimTrainer(BaseTrainer):
                 self.log_func('Early stop!')
                 break
 
+        self.log_func('Switch to re-training stage!!!')
+        # re-init save topk
+        if self.save_topk > 0:
+            self.save_dir = self.save_dir + '_retrain'
+            os.makedirs(self.save_dir)
+        real_save_topk = max(1, self.save_topk)
+        init_value = float('-inf')
+        self.best_results = [init_value for _ in range(real_save_topk)]
+        self.best_ckpts = [None for _ in range(real_save_topk)]
+
+        # re-init executor
+        self.executor.return_tensor_values()
         self.use_multi = 1
         self.data_ops = self.get_data()
-        self.embed_layer.get_eval_nodes_retrain(
+        eval_nodes = self.embed_layer.get_eval_nodes_retrain(
             self.data_ops, self.model, self.opt, stream=self.executor.config.comp_stream)
 
         del self.executor
@@ -62,7 +76,7 @@ class AutoDimTrainer(BaseTrainer):
         executor = Executor(
             eval_nodes,
             ctx=self.ctx,
-            seed=self.seed,
+            seed=self.seed + 1,  # use a different seed
             log_path=self.log_dir,
             logger=self.logger,
             project=self.proj_name,
@@ -71,7 +85,9 @@ class AutoDimTrainer(BaseTrainer):
         )
         executor.set_config(self.args)
         self.executor = executor
+        self.train_step = super().train_step
 
+        # re-run
         self.total_epoch = int(self.nepoch * self.num_test_every_epoch)
         train_batch_num = self.executor.get_batch_num('train')
         npart = self.num_test_every_epoch
@@ -98,7 +114,7 @@ class AutoDimTrainer(BaseTrainer):
 
     @property
     def all_validate_names(self):
-        return (self.validate_name, 'all_grads')
+        return (self.validate_name, 'allgrads')
 
     def get_arch_params(self, var2arr):
         copy_params = {}
@@ -148,43 +164,51 @@ class AutoDimTrainer(BaseTrainer):
             assign_embedding_with_indexedslices(
                 var2arr[node.inputs[0]], self.copy_dedup_lookups[node], stream)
 
-    def train_step(self):
+    def first_stage_train_step(self):
         var2arr = self.executor.config.placeholder_to_arr_map
         stream = self.executor.config.comp_stream
         # copy original parameters (if embedding, copy lookuped ones) and update using train data to get temp model
         self.copy_from(stream)
         lookups = self.executor.run(
-            'lookups', dataloader_step=False)  # train data
+            'lookups', dataloader_step=False, inference=False)  # train data
         self.copy_from_lookups(
             lookups[:self.num_cands], lookups[self.num_cands:self.num_cands * 2], stream)
 
         # get all gradients using validation data; memorize dalpha
-        all_grads = self.executor.run('all_grads')  # valid data
-        dalpha = all_grads[0]
-        self.dalpha_values[0]._async_copyfrom(dalpha, stream)
-
-        # get real r with gradients
-        others = all_grads[1:]
-        all_fro_norm(others, self.workspace, self.norm, stream)
-        matrix_elementwise_divide_const(self.r, self.norm, self.norm, stream)
+        allgrads = self.executor.run('allgrads', inference=True)  # valid data
 
         # return to the original model parameters
         self.copy_to(var2arr, stream)
 
+        dalpha = allgrads[0]
+        dup_demb = allgrads[1:1+self.num_cands]
+        demb = allgrads[1+self.num_cands:1+self.num_cands*2]
+        dparams = allgrads[1+self.num_cands*2:]
+        self.dalpha_values[0]._async_copyfrom(dalpha, stream)
+
+        # get real r with gradients
+        grads_for_norm = demb + dparams
+        all_fro_norm(grads_for_norm, self.workspace, self.norm, stream)
+        matrix_elementwise_divide_const(self.r, self.norm, self.norm, stream)
+
         # add r to parameters; embedding only lookups; get gradp
+        # WARNING: if the topology changes, need to carefully align tensors and others
         tensors = [var2arr[x] for x in self.var_lookups.values()] + \
             list(self.ori_params.values())
-        all_add_(tensors, others, self.norm, stream=stream)
-        gradp = self.executor.run('alpha', dataloader_step=False)  # train data
+        grads_for_tensors = dup_demb + dparams
+
+        all_add_(tensors, grads_for_tensors, self.norm, stream=stream)
+        gradp = self.executor.run(
+            'alpha', dataloader_step=False, inference=False)  # train data
         self.dalpha_values[1]._async_copyfrom(gradp[0], stream)
 
         # minus 2r from parameters; embedding only lookups; get gradn
-        all_add_(tensors, others, self.norm, -2, stream=stream)
-        gradn = self.executor.run('alpha', dataloader_step=False)  # train data
+        all_add_(tensors, grads_for_tensors, self.norm, -2, stream=stream)
+        gradn = self.executor.run(
+            'alpha', dataloader_step=False, inference=True)  # train data
 
         # add r for parameters to recover; no need for lookups
-        all_add_(list(self.ori_params.values()),
-                 others, self.norm, stream=stream)
+        all_add_(tensors[self.num_cands:], dparams, self.norm, stream=stream)
 
         # compute real dalpha and update
         matrix_elementwise_minus(
@@ -197,7 +221,7 @@ class AutoDimTrainer(BaseTrainer):
                    self.alpha_lr, 0, stream)
 
         results = self.executor.run(
-            self.train_name, convert_to_numpy_ret_vals=True)  # train data
+            self.train_name, convert_to_numpy_ret_vals=True, inference=True)  # train data
         return results[:3]
 
     def test(self):

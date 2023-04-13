@@ -130,7 +130,12 @@ __global__ void gumbel_sample_kernel(float *arr, HetuRandomState cudars,
         return;
     curandStatePhilox4_32_10_t state;
     curand_init(cudars.seed, cudars.seqnum, ind, &state);
-    arr[ind] = -log(-log(curand_uniform(&state)));
+    float value = curand_uniform(&state);
+    float epsilon = 1e-12;
+    value = max(value, epsilon);
+    value = -log(value);
+    value = max(value, epsilon);
+    arr[ind] = -log(value);
 }
 
 int DLGpuGumbelInit(DLArrayHandle arr, DLStreamHandle stream_handle = NULL) {

@@ -394,6 +394,9 @@ class AutoDimEmbedding(Embedding):
         self.separate_num_embeds = separate_num_embeds
         self.num_slot = num_slot
         self.batch_size = batch_size
+        temperature_decay = 0.00005 / 2000 * batch_size
+        self.temperature_updater = lambda t: (
+            1 / max(0.01, 1-temperature_decay*t))
         self.dim_candidates = dim_candidates
         self.dim_candidates.sort()
         self.num_cands = len(dim_candidates)
@@ -402,13 +405,14 @@ class AutoDimEmbedding(Embedding):
         self.ctx = ctx
         self.alpha_lr = alpha_lr
         self.r = r
+        self.initializer = initializer
         self.bn_layers = {dim: BatchNorm(self.max_dim, scale=False, bias=False, name='bn{}'.format(
             dim)) for dim in self.dim_candidates}
         self.embedding_tables = {dim: initializer(shape=(self.num_embeddings, dim), name='{}{}'.format(
             name, dim), ctx=self.ctx) for dim in dim_candidates}
         self.weights = {dim: initializer(shape=(num_slot, dim, self.max_dim), name='weight{}'.format(
             dim), ctx=self.ctx) for dim in dim_candidates}
-        self.biases = {dim: initializer(shape=(num_slot, 1, self.max_dim,), name='bias{}'.format(
+        self.biases = {dim: ht.init.zeros(shape=(num_slot, 1, self.max_dim,), name='bias{}'.format(
             dim), ctx=self.ctx) for dim in dim_candidates}
         self.alpha = initializer(
             shape=(num_slot, self.num_cands), name='alphas', ctx=self.ctx)
@@ -445,7 +449,7 @@ class AutoDimEmbedding(Embedding):
         log_alpha = ht.log_softmax_op(self.alpha)
         w_noise = ht.add_op(log_alpha, ht.gumbel_sample_op(self.alpha.shape))
         w_noise = ht.mul_byconst_op(
-            w_noise, 1, const_updater=lambda t: (1 / max(0.01, 1-0.00005*t)))
+            w_noise, 1, const_updater=self.temperature_updater)
         p_weight = ht.softmax_op(w_noise)
         # (nslot, ncands)
         p_weight = ht.array_reshape_op(
@@ -469,6 +473,8 @@ class AutoDimEmbedding(Embedding):
         train_op = opt.minimize(loss)
         lookups = []
         dedup_lookups = []
+        dembed_ops = []
+        dup_dembed_ops = []
         dparam_ops = []
         dalpha_op = None
         param_opts = []
@@ -478,10 +484,14 @@ class AutoDimEmbedding(Embedding):
             else:
                 param_opts.append(op)
                 if isinstance(op, AssignWithIndexedSlicesOp):
-                    deduplookup = op.inputs[1].inputs[1]
+                    sparse_opt = op.inputs[1]
+                    deduplookup = sparse_opt.inputs[1]
                     lookups.append(deduplookup.inputs[2])
                     dedup_lookups.append(deduplookup)
-                    dparam_ops.append(op.inputs[1].inputs[2])
+                    dedupgrad = sparse_opt.inputs[2]
+                    dembed_ops.append(dedupgrad)
+                    dup_dembed_ops.append(deduplookup.inputs[0])
+                    assert deduplookup.inputs[0] is dedupgrad.inputs[1]
                 else:
                     dparam_ops.append(op.inputs[1])
         assert dalpha_op is not None
@@ -496,7 +506,7 @@ class AutoDimEmbedding(Embedding):
             'train': [loss, prediction, y_, param_opts],
             'lookups': lookups + dedup_lookups + param_opts,
             'validate': [loss, prediction, y_],
-            'all_grads': [dalpha_op] + dparam_ops,
+            'allgrads': [dalpha_op] + dup_dembed_ops + dembed_ops + dparam_ops,
             'alpha': [alpha_grad],
         }
 
@@ -505,33 +515,45 @@ class AutoDimEmbedding(Embedding):
     def make_retrain(self, xs, stream):
         separate_num_embeds = self.separate_num_embeds
         from ..gpu_links import argmax
-        dim_choice = ht.empty((self.num_slot, ), ctx=self.ctx)
+        dim_choice = ht.empty((self.num_slot, ), ctx=self.ctx, dtype=np.int32)
         argmax(self.alpha.tensor_value, dim_choice, 1, stream=stream)
         stream.sync()
         dim_choice = [self.dim_candidates[int(ind)]
                       for ind in dim_choice.asnumpy()]
+        print('Dimension choices:', dim_choice)
         new_embedding_tables = []
         new_weights = []
         new_biases = []
-        cur_offset = 0
+        # ## previous code, copy parameters from the first stage; actually no need?
+        # cur_offset = 0
+        # for i, (nembed, dim) in enumerate(zip(separate_num_embeds, dim_choice)):
+        #     cur_embed_table = ht.empty((nembed, dim), ctx=self.ctx)
+        #     cur_embed_table._async_copyfrom_offset(
+        #         self.embedding_tables[dim].tensor_value, stream, cur_offset * dim, 0, nembed * dim)
+        #     new_embedding_tables.append(ht.placeholder_op(
+        #         'new_embed_{}'.format(i), value=cur_embed_table, ctx=self.ctx))
+        #     cur_weight = ht.empty((dim, self.max_dim), ctx=self.ctx)
+        #     cur_weight._async_copyfrom_offset(
+        #         self.weights[dim].tensor_value, stream, i * dim * self.max_dim, 0, dim * self.max_dim)
+        #     new_weights.append(ht.placeholder_op(
+        #         'new_weight_{}'.format(i), value=cur_weight))
+        #     cur_bias = ht.empty((self.max_dim, ), ctx=self.ctx)
+        #     cur_bias._async_copyfrom_offset(
+        #         self.biases[dim].tensor_value, stream, i * self.max_dim, 0, self.max_dim)
+        #     new_biases.append(ht.placeholder_op(
+        #         'new_bias_{}'.format(i), value=cur_bias))
+        #     cur_offset += nembed
+        # stream.sync()
         for i, (nembed, dim) in enumerate(zip(separate_num_embeds, dim_choice)):
-            cur_embed_table = ht.empty((nembed, dim), ctx=self.ctx)
-            cur_embed_table._async_copyfrom_offset(
-                self.embedding_tables[dim].tensor_value, stream, cur_offset * dim, 0, nembed * dim)
-            new_embedding_tables.append(ht.placeholder_op(
-                'new_embed_{}'.format(i), value=cur_embed_table, ctx=self.ctx))
-            cur_weight = ht.empty((dim, self.max_dim), ctx=self.ctx)
-            cur_weight._async_copyfrom_offset(
-                self.weights[dim].tensor_value, stream, i * dim * self.max_dim, 0, dim * self.max_dim)
-            new_weights.append(ht.placeholder_op(
-                'new_weight_{}'.format(i), value=cur_weight))
-            cur_bias = ht.empty((self.max_dim, ), ctx=self.ctx)
-            cur_bias._async_copyfrom_offset(
-                self.biases[dim].tensor_value, stream, i * self.max_dim, 0, self.max_dim)
-            new_biases.append(ht.placeholder_op(
-                'new_bias_{}'.format(i), value=cur_bias))
-            cur_offset += nembed
-        stream.sync()
+            cur_embed_table = self.initializer(
+                shape=(nembed, dim), name=f'new_embed_{i}', ctx=self.ctx)
+            cur_weight = self.initializer(
+                shape=(dim, self.max_dim), name=f'new_weight_{i}', ctx=self.ctx)
+            cur_bias = ht.init.zeros(
+                shape=(self.max_dim, ), name=f'new_bias_{i}', ctx=self.ctx)
+            new_embedding_tables.append(cur_embed_table)
+            new_weights.append(cur_weight)
+            new_biases.append(cur_bias)
         self.embedding_tables = new_embedding_tables
         self.weights = new_weights
         self.biases = new_biases

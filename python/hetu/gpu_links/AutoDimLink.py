@@ -41,11 +41,13 @@ def all_fro_norm(grads, workspace, norm, stream=None):
 def all_add_(tensors, others, alpha, cons=1, stream=None):
     st_handle = stream.handle if stream else None
     assert isinstance(alpha, _nd.NDArray)
+    assert len(tensors) == len(others)
     for tensor, other in zip(tensors, others):
         assert isinstance(tensor, _nd.NDArray)
         if isinstance(other, _nd.IndexedSlices):
             other = other.values
         assert isinstance(other, _nd.NDArray)
+        assert tensor.shape == other.shape
         _LIB.DLGpuAdd_(tensor.handle, other.handle, alpha.handle,
                        ctypes.c_float(cons), st_handle)
 

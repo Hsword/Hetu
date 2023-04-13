@@ -10,6 +10,7 @@ class MulByConstOp(Op):
         super().__init__(MulByConstOp, [node_A], ctx)
         self.const_attr = const_val
         self.const_updater = const_updater
+        # only update in training
         if self.const_updater is not None:
             self.cnt = 0
 
@@ -17,7 +18,7 @@ class MulByConstOp(Op):
     def desc(self):
         return self.name + '(%s, %s)' % (self.inputs[0].name, str(self.const_attr))
 
-    def compute(self, input_vals, output_val, stream_handle=None):
+    def compute(self, input_vals, output_val, stream_handle=None, inference=False):
         assert self.const_attr is not None
         if self.on_cpu:
             if DNNL_LIB['DnnlMatrixElementwiseMultiplyByConst']:
@@ -28,12 +29,12 @@ class MulByConstOp(Op):
         else:
             matrix_elementwise_multiply_by_const(
                 input_vals[0], self.const_attr, output_val, stream_handle)
-        if self.const_updater is not None:
+        if self.const_updater is not None and not inference:
             self.cnt += 1
             self.const_attr = self.const_updater(self.cnt)
 
     def gradient(self, output_grad):
-        return [self.const_attr * output_grad]
+        return [mul_byconst_op(output_grad, self.const_attr, self.const_updater, ctx=self.raw_ctx)]
 
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 1
