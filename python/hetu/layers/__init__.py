@@ -5,7 +5,7 @@ from .conv import Conv2d
 from .dropout import DropOut
 from .embedding import Embedding, MultipleEmbedding
 from .compressed_embedding import RobeEmbedding, HashEmbedding, MultipleHashEmbedding, \
-    CompositionalEmbedding, LearningEmbedding, \
+    CompositionalEmbedding, DeepHashEmbedding, \
     DPQEmbedding, AutoDimEmbedding, MDEmbedding, \
     DeepLightEmbedding, QuantizedEmbedding, TensorTrainEmbedding
 from .identity import Identity
@@ -13,6 +13,7 @@ from .linear import Linear
 from .normalization import BatchNorm, LayerNorm
 from .pooling import MaxPool2d, AvgPool2d
 from .relu import Relu
+from .mish import Mish
 from .reshape import Reshape
 from .sequence import Sequence
 from .slice import Slice

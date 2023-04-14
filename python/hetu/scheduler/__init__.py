@@ -17,7 +17,7 @@ def get_trainer(layer):
         # HashEmbedding: BaseTrainer,
         # MultipleHashEmbedding: BaseTrainer,
         # CompositionalEmbedding: BaseTrainer,
-        # LearningEmbedding: BaseTrainer,
+        # DeepHashEmbedding: BaseTrainer,
         # DPQEmbedding: BaseTrainer,
         # MDEmbedding: BaseTrainer,
         # QuantizedEmbedding: BaseTrainer,

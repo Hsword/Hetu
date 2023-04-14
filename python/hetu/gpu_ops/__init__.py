@@ -18,6 +18,7 @@ from .Conv2dReduceSum import conv2d_reducesum_op
 from .CuSparse import csrmv_op, csrmm_op
 from .Division import div_op, div_const_op
 from .Dropout import dropout_op, dropout_gradient_op
+from .Exp import exp_op
 from .MatrixMult import matmul_op
 from .MaxPool import max_pool2d_op, max_pool2d_gradient_op
 from .MinDist import min_dist_op
@@ -146,6 +147,7 @@ __all__ = [
     'div_const_op',
     'dropout_op',
     'dropout_gradient_op',
+    'exp_op',
     'matmul_op',
     'max_pool2d_op',
     'max_pool2d_gradient_op',

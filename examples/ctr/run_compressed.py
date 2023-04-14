@@ -69,13 +69,14 @@ def worker(args):
         aggregator = 'mul'
         embed_layer = htl.CompositionalEmbedding(
             num_embed_fields, num_dim, compress_rate=compress_rate, aggregator=aggregator, initializer=initializer, ctx=ectx)
-    elif args.method == 'learn':
+    elif args.method == 'dhe':
         num_buckets = 1000000
         num_hash = 1024
-        mlp_dim = 1024
         dist = 'uniform'
-        embed_layer = htl.LearningEmbedding(
-            num_dim, num_buckets, num_hash, mlp_dim, dist, initializer=initializer, ctx=ectx)
+        ht.random.set_random_seed(args.seed)
+        input_nemb = num_embed_fields if args.use_multi else num_embed
+        embed_layer = htl.DeepHashEmbedding(
+            input_nemb, num_dim, compress_rate, num_buckets, num_hash, args.use_multi, dist, initializer=initializer, ctx=ectx)
     elif args.method == 'dpq':
         num_choices = 32
         num_parts = 8
@@ -144,7 +145,7 @@ if __name__ == '__main__':
     parser.add_argument("--method", type=str, default='full',
                         help="method to be used",
                         choices=['full', 'robe', 'hash', 'compo',
-                                 'learn', 'dpq', 'autodim', 'md',
+                                 'dhe', 'dpq', 'autodim', 'md',
                                  'prune', 'quantize', 'tt'])
     parser.add_argument("--phase", type=str, default='train',
                         help='train or test',
@@ -192,13 +193,15 @@ if __name__ == '__main__':
     if args.ectx is None:
         args.ectx = args.ctx
 
-    if args.method in ('robe', 'learn', 'dpq', 'prune', 'quantize', 'autodim'):
+    if args.method in ('robe', 'dpq', 'prune', 'quantize', 'autodim'):
         # TODO: improve in future
         # autodim not use multi in the first stage, use multi in the second stage.
         args.use_multi = 0
-    elif args.method in ('compo', 'md', 'tt'):
+    elif args.method in ('compo', 'md', 'tt', 'dhe'):
+        # dhe both is ok; use multi is better according to semantic meaning.
         args.use_multi = 1
     if args.method == 'robe':
+        # robe use multi, separate fields controls whether using slot coefficient
         if args.separate_fields is None:
             args.separate_fields = args.use_multi
     else:

@@ -5,6 +5,18 @@ import numpy as np
 import os.path as osp
 
 
+def binary_search(left, right, evaluator):
+    assert evaluator(left) < 0 < evaluator(right)
+    while right - left > 0.5:
+        middle = (left + right) / 2
+        mid_score = evaluator(middle)
+        if mid_score < 0:
+            left = middle
+        elif mid_score > 0:
+            right = middle
+    return left, right
+
+
 class RobeEmbedding(Embedding):
     def __init__(self, num_embeddings, embedding_dim, compress_rate, Z, random_numbers, use_slot_coef=True, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         robe_array_size = int(
@@ -101,15 +113,13 @@ class CompositionalEmbedding(Embedding):
         aggregator = aggregator[:3]
         assert aggregator in ('sum', 'mul')
         self.aggregator = aggregator
-        self.num_slot = len(num_embed_fields)
         self.num_embed_fields = num_embed_fields
-        self.num_embeddings = sum(num_embed_fields)
         self.embedding_dim = embedding_dim
         self.compress_rate = compress_rate
         self.name = name
         self.ctx = ctx
         self.collision = self.get_collision(
-            self.num_embeddings, self.num_slot, compress_rate)
+            self.num_embed_fields, compress_rate)
         self.embedding_tables = []
         for i, nemb in enumerate(self.num_embed_fields):
             cur_compo = self.decompo(nemb, self.collision)
@@ -134,14 +144,18 @@ class CompositionalEmbedding(Embedding):
                 )
                 self.embedding_tables.append(cur_embed)
 
-    def get_collision(self, num_embeddings, num_slot, compress_rate):
-        from sympy.solvers import solve
-        from sympy import Symbol
-        x = Symbol('x')
-        results = solve(num_embeddings / x + num_slot *
-                        x - compress_rate * num_embeddings)
-        results = filter(lambda x: x > 0, results)
-        res = int(round(min(results)))
+    def get_collision(self, num_embed_fields, compress_rate):
+        num_embeddings = sum(num_embed_fields)
+        target_nemb = num_embeddings * compress_rate
+
+        def evaluate(x):
+            memory = 0
+            for nemb in num_embed_fields:
+                newmem = math.ceil(nemb / x) + math.ceil(x)
+                memory += min(nemb, newmem)
+            return target_nemb - memory
+        res = binary_search(1, math.sqrt(num_embeddings), evaluate)
+        res = math.ceil(res[0])
         print(f'Collision {res} given compression rate {compress_rate}.')
         return res
 
@@ -174,58 +188,129 @@ class CompositionalEmbedding(Embedding):
             return result
 
 
-class LearningEmbedding(Embedding):
-    # deep learning embedding
-    def __init__(self, embedding_dim, num_buckets, num_hash, mlp_dim=1024, dist='uniform', initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
-        from .linear import Linear
-        from .normalization import BatchNorm
-        from .relu import Relu
-        from .sequence import Sequence
+class DeepHashEmbedding(Embedding):
+    def __init__(self, num_embeddings, embedding_dim, compress_rate, num_buckets, num_hash, use_multi=1, dist='uniform', initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         assert dist in ('uniform', 'normal')
         self.distribution = dist
         self.embedding_dim = embedding_dim
         self.num_buckets = num_buckets
         self.num_hash = num_hash
-        self.mlp_dim = mlp_dim
         self.name = name
         self.ctx = ctx
-        self.slopes = ht.Variable(name='slopes', value=np.random.randint(
-            0, num_buckets, size=num_hash), trainable=False)
-        self.biases = ht.Variable(name='biases', value=np.random.randint(
-            0, num_buckets, size=num_hash), trainable=False)
+        self.use_multi = use_multi
+        nprs = ht.random.get_np_rand(1)
+        self.mlp_dim = self.get_dim(
+            num_embeddings, compress_rate)
         prime_path = osp.join(osp.dirname(osp.abspath(
             __file__)), 'primes.npy')
         allprimes = np.load(prime_path)
         for i, p in enumerate(allprimes):
             if p >= num_buckets:
                 break
-        allprimes = allprimes[i:]
-        self.primes = ht.Variable(name='primes', value=np.random.choice(
-            allprimes, size=num_hash), trainable=False)
-        self.layers = Sequence(
-            Linear(self.num_hash, self.mlp_dim),
+        self.allprimes = allprimes[i:]
+        if not self.use_multi:
+            self.slopes = self.make_random(nprs, 'slopes')
+            self.biases = self.make_random(nprs, 'biases')
+            self.primes = self.make_primes(nprs, 'primes')
+            self.layers = self.make_layers(initializer)
+        else:
+            self.slopes = []
+            self.biases = []
+            self.primes = []
+            self.layers = []
+            threshold = self.get_one_memory(self.mlp_dim) / self.embedding_dim
+            for i, nemb in enumerate(num_embeddings):
+                if nemb > threshold:
+                    self.slopes.append(self.make_random(nprs, f'slopes{i}'))
+                    self.biases.append(self.make_random(nprs, f'biases{i}'))
+                    self.primes.append(self.make_primes(nprs, f'primes{i}'))
+                    self.layers.append(self.make_layers(initializer))
+                else:
+                    self.slopes.append(None)
+                    self.biases.append(None)
+                    self.primes.append(None)
+                    self.layers.append(initializer(
+                        shape=(nemb, self.embedding_dim), name=f'emb{i}'))
+
+    def make_layers(self, initializer):
+        from .linear import Linear
+        from .normalization import BatchNorm
+        from .mish import Mish
+        from .sequence import Sequence
+        input_layer = Sequence(
+            Linear(self.num_hash, self.mlp_dim, initializer=initializer),
             BatchNorm(self.mlp_dim),
-            Relu(),
-            Linear(self.mlp_dim, self.mlp_dim),
+            Mish(),
+        )
+        middle_layer = Sequence(
+            Linear(self.mlp_dim, self.mlp_dim, initializer=initializer),
             BatchNorm(self.mlp_dim),
-            Relu(),
-            Linear(self.mlp_dim, self.mlp_dim),
-            BatchNorm(self.mlp_dim),
-            Relu(),
-            Linear(self.mlp_dim, self.mlp_dim),
-            BatchNorm(self.mlp_dim),
-            Relu(),
-            Linear(self.mlp_dim, self.embedding_dim),
-            BatchNorm(self.embedding_dim),
-            Relu(),
-        )  # TODO: use mish instead
+            Mish(),
+        )
+        output_layer = Linear(
+            self.mlp_dim, self.embedding_dim, initializer=initializer)
+        return Sequence(
+            input_layer,
+            middle_layer,
+            middle_layer,
+            middle_layer,
+            middle_layer,
+            output_layer,
+        )
+
+    def make_primes(self, nprs, name):
+        return ht.Variable(name=name, value=nprs.choice(self.allprimes, size=self.num_hash), trainable=False)
+
+    def make_random(self, nprs, name):
+        return ht.Variable(name=name, value=nprs.randint(1, self.num_buckets, size=self.num_hash), trainable=False)
+
+    def get_one_memory(self, x):
+        return (self.num_hash + 1) * x + 4 * x * \
+            (x + 1) + (self.embedding_dim + 1) * x + 10 * x
+
+    def get_dim(self, num_embeddings, compress_rate):
+        if self.use_multi:
+            nemb = sum(num_embeddings)
+        else:
+            nemb = num_embeddings
+        target_memory = nemb * self.embedding_dim * compress_rate
+
+        def evaluate(x):
+            newmem = self.get_one_memory(x)
+            if self.use_multi:
+                memory = 0
+                for nemb in num_embeddings:
+                    orimem = nemb * self.embedding_dim
+                    memory += min(orimem, newmem)
+            else:
+                memory = newmem
+            return memory - target_memory
+        res = binary_search(1, math.sqrt(nemb), evaluate)
+        res = math.floor(res[1])
+        if evaluate(res) > 0:
+            res -= 1
+        print(f'Dimension {res} given compression rate {compress_rate}.')
+        return res
 
     def __call__(self, x):
         # KDD21, DHE
-        x = ht.learn_hash_op(x, self.slopes, self.biases,
-                             self.primes, self.num_buckets, self.distribution)
-        x = ht.array_reshape_op(x, (-1, self.num_hash))
-        x = self.layers(x)
+        if self.use_multi:
+            results = []
+            for i, xx in enumerate(x):
+                if self.primes[i] is None:
+                    res = ht.embedding_lookup_op(self.layers[i], xx)
+                else:
+                    xx = ht.learn_hash_op(xx, self.slopes[i], self.biases[i],
+                                          self.primes[i], self.num_buckets, self.distribution)
+                    xx = ht.array_reshape_op(xx, (-1, self.num_hash))
+                    res = self.layers[i](xx)
+                results.append(res)
+            x = ht.concatenate_op(results, axis=1)
+        else:
+            x = ht.learn_hash_op(x, self.slopes, self.biases,
+                                 self.primes, self.num_buckets, self.distribution)
+            x = ht.array_reshape_op(x, (-1, self.num_hash))
+            x = self.layers(x)
         return x
 
 
@@ -628,7 +713,7 @@ class MDEmbedding(Embedding):
             if proj is not None:
                 res = ht.matmul_op(res, proj)
             results.append(res)
-        result = ht.concatenate_op(results, axis=0)
+        result = ht.concatenate_op(results, axis=1)
         return result
 
 
@@ -749,7 +834,7 @@ class TensorTrainEmbedding(Embedding):
             nemb) for nemb in num_embed_fields]
         self.decomp_ndim = self.get_decomp_dim(embedding_dim)
         rank = self.get_rank(
-            self.num_embeddings, self.decomp_nembs, self.decomp_ndim, compress_rate)
+            num_embed_fields, self.decomp_nembs, self.decomp_ndim, embedding_dim, compress_rate)
         self.ranks = [1, rank, rank, 1]
         self.name = name
         self.ctx = ctx
@@ -790,19 +875,21 @@ class TensorTrainEmbedding(Embedding):
         n3 = math.ceil(nemb / n1 / n2)
         return [n3, n2, n1]
 
-    def get_rank(self, num_embeddings, decomp_nembs, decomp_ndim, compress_rate):
-        linear_coef = 0
-        quadra_coef = 0
-        for dn in decomp_nembs:
-            linear_coef += (dn[0] * decomp_ndim[0] + dn[2] * decomp_ndim[2])
-            quadra_coef += (dn[1] * decomp_ndim[1])
-        from sympy.solvers import solve
-        from sympy import Symbol
-        x = Symbol('x')
-        results = solve(quadra_coef * x * x + linear_coef *
-                        x - compress_rate * num_embeddings)
-        results = filter(lambda x: x > 0, results)
-        res = int(round(min(results)))
+    def get_rank(self, num_embed_fields, decomp_nembs, decomp_ndim, embedding_dim, compress_rate):
+        target_memory = sum(num_embed_fields) * embedding_dim * compress_rate
+
+        def evaluate(x):
+            memory = 0
+            for nemb, dn in zip(num_embed_fields, decomp_nembs):
+                orimem = nemb * embedding_dim
+                newmem = (dn[0] * decomp_ndim[0] + dn[2] * decomp_ndim[2]
+                          ) * x + (dn[1] * decomp_ndim[1]) * x * x
+                memory += min(orimem, newmem)
+            return memory - target_memory
+        res = binary_search(0, 1000, evaluate)
+        res = math.floor(res[1])
+        if evaluate(res) > 0:
+            res -= 1
         print(f'Rank {res} given compression rate {compress_rate}.')
         return res
 

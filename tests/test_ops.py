@@ -362,6 +362,13 @@ def test_softmax():
     tester.test([(8, 7), (8, 7)], rtol=1e-5)
 
 
+def test_exp():
+    tester = HetuTester(ht.exp_op, 1)
+    tester.test([(3, 4)], rtol=1e-6)
+    tester.test([(89, 71)], rtol=1e-6)
+    tester.test([(89, 71, 13, 101)], rtol=1e-6)
+
+
 def test_optimizers():
     test_shapes = [
         (1000, 8),
@@ -447,4 +454,5 @@ test_transpose()
 test_argmax()
 test_log_softmax()
 test_softmax()
+test_exp()
 test_optimizers()

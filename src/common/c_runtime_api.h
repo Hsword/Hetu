@@ -1118,6 +1118,9 @@ HETUSYS_EXTERN_C {
                      DLArrayHandle input_grad, float eps,
                      DLStreamHandle stream_handle = NULL);
 
+    int DLGpuExp(const DLArrayHandle input, DLArrayHandle output,
+                 DLStreamHandle stream_handle);
+
     int DLGpuNllLoss(const DLArrayHandle input, DLArrayHandle target,
                      DLArrayHandle output, DLStreamHandle stream_handle = NULL);
 

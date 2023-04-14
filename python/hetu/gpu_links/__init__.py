@@ -17,6 +17,7 @@ from .CudnnBnLink import *
 from .CudnnConv2d import *
 from .CudnnDropoutLink import *
 from .CudnnMaxPoolLink import *
+from .ExpLink import *
 from .MatrixMultLink import *
 from .MaxPoolLink import *
 from .MultiplyConstLink import *
@@ -126,6 +127,7 @@ __all__ = [
     'CuDNN_Dropout_gradient',
     'CuDNN_max_pooling2d',
     'CuDNN_max_pooling2d_gradient',
+    'exp_func',
     'matrix_multiply',
     'max_pooling2d',
     'max_pooling2d_gradient',
