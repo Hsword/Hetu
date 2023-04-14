@@ -50,7 +50,6 @@ from .Tanh import tanh_op, tanh_gradient_op
 from .Transpose import transpose_op
 from .Variable import Variable, placeholder_op
 from .ZerosLike import zeroslike_op
-from .RobeLookUp import robe_lookup_op, robe_lookup_gradient_op
 from .EmbeddingLookUp import embedding_lookup_op, embedding_lookup_gradient_op, embedding_lookup_gradient_with_lookup_op, embedding_lookup_gradient_dedupgrad_op
 from .SparseEmbeddingLookUp import sparse_embedding_lookup_op
 from .Where import where_op, where_const_op
@@ -99,7 +98,7 @@ from .HAllToAll import halltoall_op
 from .SamGroupSum import sam_group_sum_op
 from .GroupTopKIdx import group_topk_idx_op
 from .SamMax import sam_max_op
-from .CompressedEmbedding import mod_hash_op, div_hash_op, compo_hash_op, learn_hash_op, robe_hash_op
+from .CompressedEmbedding import mod_hash_op, div_hash_op, compo_hash_op, learn_hash_op, robe_hash_op, robe_sign_op
 from .TrilLookup import tril_lookup_op, tril_lookup_gradient_op
 from .Prune import prune_low_magnitude_op
 from .Quantize import quantize_op, dequantize_op
@@ -199,8 +198,6 @@ __all__ = [
     'worker_finish',
     'placeholder_op',
     'zeroslike_op',
-    "robe_lookup_op",
-    "robe_lookup_gradient_op",
     "embedding_lookup_op",
     "embedding_lookup_gradient_op",
     "embedding_lookup_gradient_with_lookup_op",
@@ -264,6 +261,7 @@ __all__ = [
     'group_topk_idx_op',
     'sam_max_op',
     'robe_hash_op',
+    'robe_sign_op',
     'mod_hash_op',
     'div_hash_op',
     'compo_hash_op',

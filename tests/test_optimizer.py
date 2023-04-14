@@ -23,41 +23,6 @@ def test_sgd():
 
     np.testing.assert_allclose(re_param, param, atol=1e-5)
 
-def test_sgd_robe():
-    ctx = ht.gpu(0)
-    roarsz = 50
-    shape = (roarsz,)
-    d = 16
-    l = np.random.randint(0,roarsz,size=(30))
-    indices = np.array(l)
-
-    param = np.random.uniform(-10, 10, size=shape).astype(np.float32)
-    values = np.random.uniform(-10, 10, size=(indices.shape[0], d)).astype(np.float32)
-    
-    lr = 1e-2
-    print("Prev param:")
-    print(param)
-
-    arr_param = ht.array(param, ctx)
-    arr_indices = ht.array(indices, dtype = np.int32, ctx = ctx)
-    arr_values = ht.array(values, ctx)
-    arr_grad = ht.RobeSlices(indices = arr_indices, values = arr_values)
-
-    gpu_op.sgd_update(arr_param, arr_grad, lr, 0.0)
-
-    re_param = arr_param.asnumpy()
-
-    for i,index in enumerate(indices):
-        for j in range(d):
-            if (index+j<roarsz):
-                param[index+j] -= lr * values[i][j]
-            else:
-                param[index+j-roarsz] -= lr * values[i][j]
-    print("Cur param:")
-    print(re_param)
-    print(param)
-    np.testing.assert_allclose(re_param, param, atol=1e-5)
-
 
 def test_adamw():
     ctx = ht.gpu(0)
@@ -358,4 +323,3 @@ def test_lamb_sparse():
 #test_adamw_sparse()
 #test_lamb_sparse()
 #test_sgd()
-test_sgd_robe()

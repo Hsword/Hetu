@@ -33,4 +33,4 @@ def get_np_rand(step=None):
     if step is not None:
         step_seqnum(step)
     seqnum = get_seed_seqnum()
-    return RandomState(MT19937(SeedSequence(get_seed(), seqnum)))
+    return RandomState(MT19937(SeedSequence((get_seed(), seqnum))))

@@ -243,6 +243,14 @@ def test_hash():
     tester.test([(2, 3, 4), (128,), (128,), (128,)], atol=1e-6)
     tester = HetuTester(ht.learn_hash_op, 4, 1000, 'normal', in_dtype='ui')
     tester.test([(2, 3, 4), (128,), (128,), (128,)], atol=1e-6)
+    tester = HetuTester(ht.robe_hash_op, 2, 123, 33, 3, True, in_dtype='ui')
+    tester.test([(13, 17), (10,)])
+    tester = HetuTester(ht.robe_hash_op, 2, 101, 42, 6, False, in_dtype='ui')
+    tester.test([(13, 17), (10,)])
+    tester = HetuTester(ht.robe_sign_op, 2, 33, True, in_dtype='ui')
+    tester.test([(13, 17), (10,)])
+    tester = HetuTester(ht.robe_sign_op, 2, 42, False, in_dtype='ui')
+    tester.test([(13, 17), (10,)])
 
 
 def test_tril_lookup():

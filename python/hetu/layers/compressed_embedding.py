@@ -6,38 +6,34 @@ import os.path as osp
 
 
 class RobeEmbedding(Embedding):
-    def __init__(self, num_embeddings, embedding_dim, compress_rate=None, size_limit=None, Z=None, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
-        assert compress_rate is None or size_limit is None
-        if size_limit is not None:
-            Robe_array_size = size_limit // embedding_dim
-        else:
-            if compress_rate is None:
-                compress_rate = 1.0
-            Robe_array_size = int(
-                num_embeddings * embedding_dim * compress_rate)
+    def __init__(self, num_embeddings, embedding_dim, compress_rate, Z, random_numbers, use_slot_coef=True, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+        robe_array_size = int(
+            num_embeddings * embedding_dim * compress_rate)
         self.num_embeddings = num_embeddings
-        self.Robe_array_size = Robe_array_size
+        self.robe_array_size = robe_array_size
         self.embedding_dim = embedding_dim
-        if (Z is None):
-            Z = embedding_dim
-        else:
-            assert (Z <= embedding_dim)
+        assert Z <= embedding_dim
         self.Z = Z
-
-        self.MO = 998244353
-        print(self.Z)
+        self.use_slot_coef = use_slot_coef
 
         self.name = name
         self.ctx = ctx
-        self.Robe_array = initializer(
-            shape=(self.Robe_array_size,), name=self.name, ctx=ctx)
+        self.embedding_table = initializer(
+            shape=(self.robe_array_size, 1), name=self.name, ctx=ctx)
+        self.random_numbers = ht.placeholder_op(
+            'random_numbers', value=random_numbers, dtype=np.int32, trainable=False)
 
     def __call__(self, x):
         with ht.context(self.ctx):
-            print("hahaha")
-            sparse_input = ht.robe_hash_op(
-                x, self.Robe_array_size, self.embedding_dim, self.Z, self.MO)
-            return ht.robe_lookup_op(self.Robe_array, sparse_input, self.embedding_dim, x, self.Z, self.MO)
+            expanded_indices = ht.robe_hash_op(
+                x, self.random_numbers, self.robe_array_size, self.embedding_dim, self.Z, self.use_slot_coef)
+            signs = ht.robe_sign_op(
+                x, self.random_numbers, self.embedding_dim, self.use_slot_coef)
+            lookups = ht.embedding_lookup_op(
+                self.embedding_table, expanded_indices)
+            lookups = ht.reshape_to_op(lookups, signs)
+            lookups = ht.mul_op(lookups, signs)
+            return lookups
 
 
 class HashEmbedding(Embedding):

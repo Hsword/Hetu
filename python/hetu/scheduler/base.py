@@ -35,6 +35,7 @@ class BaseTrainer(object):
         if self.batch_size is None:
             self.batch_size = self.args['bs']
         self.use_multi = self.args.get('use_multi', 0)
+        self.separate_fields = self.args.get('separate_fields', self.use_multi)
 
         self.nepoch = self.args.get('nepoch', 0.1)
         self.tqdm_enabled = self.args.get('tqdm_enabled', True)
@@ -75,6 +76,10 @@ class BaseTrainer(object):
         self.dataset = dataset
         self.data_ops = self.get_data()
 
+    def set_use_multi(self, new_use_multi):
+        self.use_multi = new_use_multi
+        self.separate_fields = new_use_multi
+
     @property
     def all_train_names(self):
         return self.train_name
@@ -95,7 +100,7 @@ class BaseTrainer(object):
 
     def get_data(self):
         all_data = self.dataset.process_all_data_by_day(
-            use_test=True, separate_fields=self.use_multi)
+            use_test=True, separate_fields=self.separate_fields)
 
         # define models for criteo
         tr_sparse, va_sparse = all_data[-2]

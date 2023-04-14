@@ -1,39 +1,92 @@
 from __future__ import absolute_import
 from .Node import Op
-from .._base import DNNL_LIB
 import numpy as np
-from ..gpu_links import robe_hash, mod_hash, div_hash, compo_hash, learn_hash
-from random import randrange
+from ..gpu_links import robe_hash, robe_sign, mod_hash, div_hash, compo_hash, learn_hash
 
 
 class RobeHashOp(Op):
-    def __init__(self, node, roarsz, len, Z, MO, ctx=None):
-        super().__init__(RobeHashOp, [node], ctx)
-        self.roarsz = roarsz  # roarsz means ROBE array size
-        self.Bh = 623987128  # randrange(998244353)
-        self.Ch = 423878919  # randrange(998244353)
-        self.Dh = 123129899
+    def __init__(self, indices, rands, length, dim, Z, use_slot_coef, ctx=None):
+        super().__init__(RobeHashOp, [indices, rands], ctx)
+        self.length = length
+        self.dim = dim
         self.Z = Z
-        self.len = len
-        self.MO = MO
+        assert self.dim % self.Z == 0
+        self.use_slot_coef = use_slot_coef
         self.dtype = np.int32
+        assert indices.dtype == np.int32 and rands.dtype == np.int32
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
-            output_val[:] = ((np.array(
-                input_vals[0].asnumpy(), dtype=np.int32) * self.Bh + self.Ch) % self.MO + self.MO) % self.MO % self.roarsz
+            # (Ah*e + Bh*x + Ch*c + Dh) mod P mod |M|
+            random_numbers = input_vals[1].asnumpy()
+            # Bh*x + Dh
+            result = random_numbers[3].astype(np.int64) * \
+                input_vals[0].asnumpy() + random_numbers[1]
+            if self.use_slot_coef:
+                # Ah*e
+                slot_offset = np.arange(
+                    input_vals[0].shape[-1], dtype=np.int64)
+                result = result + random_numbers[4] * slot_offset
+            Z_offset = random_numbers[2] * np.arange(self.Z, dtype=np.int64).repeat(
+                self.dim // self.Z)
+            # Ch*c
+            result = result[..., None] + Z_offset
+            result = result + \
+                np.arange(
+                    self.dim // self.Z)[None, ...].repeat(self.Z, 0).reshape(-1)
+            # mod P mod |M|
+            result = result % random_numbers[0] % self.length
+            output_val[:] = result.astype(np.int32)
         else:
-            robe_hash(input_vals[0], output_val, self.roarsz, self.Bh,
-                      self.Ch, self.Dh, self.Z, self.MO, stream_handle)
+            robe_hash(input_vals[0], input_vals[1], output_val, self.length,
+                      self.dim, self.Z, self.use_slot_coef, stream_handle)
 
     def gradient(self, output_grad):
-        return [None]
+        return [None, None]
 
     def infer_shape(self, input_shapes):
-        assert len(input_shapes) == 1
-        t = list(input_shapes[0])
-        t.append((self.len-1)//self.Z+1)
-        return tuple(t)
+        assert len(input_shapes) == 2 and len(input_shapes[0]) == 2
+        output_shape = tuple(input_shapes[0]) + (self.dim,)
+        return output_shape
+
+
+class RobeSignOp(Op):
+    def __init__(self, indices, rands, dim, use_slot_coef, ctx=None):
+        super().__init__(RobeSignOp, [indices, rands], ctx)
+        self.dim = dim
+        self.use_slot_coef = use_slot_coef
+        assert indices.dtype == np.int32 and rands.dtype == np.int32
+
+    def compute(self, input_vals, output_val, stream_handle=None):
+        if self.on_cpu:
+            # ((Ag*e + Bg*x + Cg*i + Dg) mod P mod 2) * 2 - 1
+            random_numbers = input_vals[1].asnumpy()
+            # Bg*x + Dg
+            result = random_numbers[7].astype(np.int64) * \
+                input_vals[0].asnumpy() + random_numbers[5]
+            if self.use_slot_coef:
+                # Ag*e
+                slot_offset = np.arange(
+                    input_vals[0].shape[-1], dtype=np.int64)
+                result = result + random_numbers[8] * slot_offset
+            # Cg*i
+            result = result[..., None] + random_numbers[6] * \
+                np.arange(self.dim, dtype=np.int64)
+            # mod P mod 2
+            result = result % random_numbers[0] % 2
+            result = result * 2 - 1
+            output_val[:] = result.astype(np.float32)
+        else:
+            robe_sign(input_vals[0], input_vals[1], output_val,
+                      self.dim, self.use_slot_coef, stream_handle)
+
+    def gradient(self, output_grad):
+        return [None, None]
+
+    def infer_shape(self, input_shapes):
+        assert len(input_shapes) == 2 and len(input_shapes[0]) == 2
+        output_shape = tuple(input_shapes[0]) + (self.dim,)
+        return output_shape
 
 
 class ModHashOp(Op):
@@ -152,8 +205,12 @@ class LearnHashOp(Op):
         return tuple(output_shape)
 
 
-def robe_hash_op(node, roarsz, len, Z, MO, ctx=None):
-    return RobeHashOp(node, roarsz, len, Z, MO, ctx=ctx)
+def robe_hash_op(indices, rands, length, dim, Z, use_slot_coef=True, ctx=None):
+    return RobeHashOp(indices, rands, length, dim, Z, use_slot_coef, ctx=ctx)
+
+
+def robe_sign_op(indices, rands, dim, use_slot_coef=True, ctx=None):
+    return RobeSignOp(indices, rands, dim, use_slot_coef, ctx=ctx)
 
 
 def mod_hash_op(node, nembed, ctx=None):

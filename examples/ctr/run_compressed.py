@@ -46,10 +46,17 @@ def worker(args):
             embed_layer = htl.Embedding(
                 num_embed, num_dim, initializer=initializer, ctx=ectx)
     elif args.method == 'robe':
-        size_limit = None
         Z = 1
+        use_slot_coef = bool(args.separate_fields)
+        ht.random.set_random_seed(args.seed)
+        nprs = ht.random.get_np_rand(1)
+        assert dataset.num_embed < 2038074743
+        random_numbers = np.concatenate(
+            [np.array([2038074743]), nprs.randint(1, 2038074743, (9,))])
+        print(
+            f'Using ROBE-{Z}; random numbers: {random_numbers} with seed {args.seed}; use slot coef {use_slot_coef}')
         embed_layer = htl.RobeEmbedding(
-            num_embed, num_dim, compress_rate=compress_rate, size_limit=size_limit, Z=Z, initializer=initializer, ctx=ectx)
+            num_embed, num_dim, compress_rate, Z, random_numbers, use_slot_coef=use_slot_coef, initializer=initializer, ctx=ectx)
     elif args.method == 'hash':
         size_limit = None
         if args.use_multi:
@@ -163,6 +170,8 @@ if __name__ == '__main__':
                         help="evaluate each 1/100 epoch in default")
     parser.add_argument("--seed", type=int, default=123,
                         help="random seed")
+    parser.add_argument("--separate_fields", type=int, default=None,
+                        help="whether seperate fields")
     parser.add_argument("--use_multi", type=int, default=0,
                         help="whether use multi embedding")
     parser.add_argument("--compress_rate", type=float, default=0.5,
@@ -189,6 +198,11 @@ if __name__ == '__main__':
         args.use_multi = 0
     elif args.method in ('compo', 'md', 'tt'):
         args.use_multi = 1
+    if args.method == 'robe':
+        if args.separate_fields is None:
+            args.separate_fields = args.use_multi
+    else:
+        args.separate_fields = args.use_multi
 
     infos = [
         f'{args.model}',

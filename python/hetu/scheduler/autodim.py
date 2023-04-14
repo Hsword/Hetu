@@ -62,7 +62,7 @@ class AutoDimTrainer(BaseTrainer):
 
         # re-init executor
         self.executor.return_tensor_values()
-        self.use_multi = 1
+        self.set_use_multi(1)
         self.data_ops = self.get_data()
         eval_nodes = self.embed_layer.get_eval_nodes_retrain(
             self.data_ops, self.model, self.opt, stream=self.executor.config.comp_stream)

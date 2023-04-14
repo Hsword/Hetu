@@ -41,7 +41,6 @@ from .SparseSetLink import *
 from .TanhLink import *
 from .SliceLink import *
 from .EmbeddingLookUpLink import *
-from .RobeLookUpLink import *
 from .SparseEmbeddingLookUpLink import *
 from .MinDistLink import *
 from .WhereLink import *
@@ -160,8 +159,6 @@ __all__ = [
     'matrix_slice_simple',
     'matrix_slice_gradient',
     'matrix_slice_gradient_simple',
-    'robe_lookup',
-    'robe_lookup_gradient',
     'embedding_lookup',
     'sparse_embedding_lookup',
     'minimum_distance_vector',
@@ -251,6 +248,8 @@ __all__ = [
     'group_topk_idx',
     'sammax_link',
     'sammax_grad_link',
+    'robe_hash',
+    'robe_sign',
     'mod_hash',
     'div_hash',
     'compo_hash',

@@ -1,11 +1,9 @@
 from .gpu_ops.AllReduceCommunicate import AllReduceCommunicateOp
-from .gpu_ops.RobeLookUp import RobeLookUp, RobeLookUp_Gradient
 from .gpu_ops.EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient, EmbeddingLookUp_Gradient_With_Lookup, EmbeddingLookUp_Gradient_DedupGrad
 from .gpu_ops.DataTransfer import DataD2HSparseOp, DataH2DOp
 from .gpu_ops.LayerNorm import Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp
 from .gpu_ops.BatchNorm import Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp
 from .gpu_ops.Variable import PlaceholderOp
-from .gpu_ops.RobeLookUp import RobeLookUp
 from .gpu_ops.EmbeddingLookUp import EmbeddingLookUp
 from .gpu_ops.Dropout import DropoutOp
 from .gpu_ops.PipelineReceive import PipelineReceiveOp
@@ -102,9 +100,6 @@ class HetuMemoryPool(object):
                 # add for OptimizerOp and ParameterServerOp
                 if shape is None:
                     node_to_arr_map[node] = None
-                elif isinstance(node, RobeLookUp_Gradient):
-                    node_to_arr_map[node] = ndarray.RobeSlices(
-                        dense_shape=shape)
                 elif isinstance(node, OptimizerSparseOp):
                     ind_shape, val_shape = indexed_slices_shape[node]
                     values = ndarray.empty(val_shape, node.ctx)

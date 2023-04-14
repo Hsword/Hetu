@@ -1,14 +1,50 @@
 #include "gpu_runtime.h"
 
-__global__ void robe_hash_kernel(const int *input, int *output, int roarsz,
-                                 int Bh, int Ch, int Dh, int Z, int blk, int MO,
-                                 size_t size) {
+__global__ void robe_hash_kernel(const int *input, const int *random_numbers,
+                                 int *output, int length, int dim, int Z,
+                                 bool use_slot_coef, int nslot, size_t size) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (ind >= size)
         return;
-    output[ind] =
-        ((1ll * input[ind / blk] * Bh + 1ll * (ind % blk) * Ch + Dh) % MO + MO)
-        % MO % roarsz;
+    size_t iind = ind / dim;
+    int npart = dim / Z;
+    // (Ah*e + Bh*x + Ch*c + Dh) mod P mod |M|
+    // Bh*x + Dh
+    int64_t result =
+        (int64_t)random_numbers[3] * input[iind] + random_numbers[1];
+    // Ch*c
+    result =
+        result + ind % npart + (int64_t)random_numbers[2] * (ind % dim / npart);
+    if (use_slot_coef) {
+        // Ah*e
+        result = result + (int64_t)random_numbers[4] * (iind % nslot);
+    }
+    // mod P mod |M|
+    result = result % random_numbers[0] % length;
+    output[ind] = (int)result;
+}
+
+__global__ void robe_sign_kernel(const int *input, const int *random_numbers,
+                                 float *output, int dim, bool use_slot_coef,
+                                 int nslot, size_t size) {
+    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
+    if (ind >= size)
+        return;
+    size_t iind = ind / dim;
+    // ((Ag*e + Bg*x + Cg*i + Dg) mod P mod 2) * 2 - 1
+    // Bg*x + Dg
+    int64_t result =
+        (int64_t)random_numbers[7] * input[iind] + random_numbers[5];
+    // Cg*i
+    result = result + (int64_t)random_numbers[6] * (ind % dim);
+    if (use_slot_coef) {
+        // Ah*e
+        result = result + (int64_t)random_numbers[8] * (iind % nslot);
+    }
+    // mod P mod 2
+    result = result % random_numbers[0] % 2;
+    result = 2 * result - 1;
+    output[ind] = (float)result;
 }
 
 __global__ void mod_hash_kernel(const int *input, int *output, int nembed,
@@ -70,27 +106,53 @@ __global__ void learn_hash_kernel(const int *input, const int *slope,
     output[output_ind + 1] = scale_both1;
 }
 
-int DLGpuRobeHash(const DLArrayHandle input, DLArrayHandle output, int roarsz,
-                  int Bh, int Ch, int Dh, int Z, int MO,
-                  DLStreamHandle stream_handle = NULL) {
-    size_t size = 1;
-    for (index_t i = 0; i < output->ndim; i++) {
-        size *= output->shape[i];
-    }
+int DLGpuRobeHash(const DLArrayHandle input, const DLArrayHandle random_numbers,
+                  DLArrayHandle output, int length, int dim, int Z,
+                  bool use_slot_coef, DLStreamHandle stream_handle = NULL) {
+    size_t size = ArrSize(output);
 
-    int blk = output->shape[(output->ndim) - 1];
+    assert(dim == output->shape[output->ndim - 1]);
+    int nslot = input->shape[input->ndim - 1];
 
     const int *input_data = (const int *)input->data;
+    const int *rand_data = (const int *)random_numbers->data;
     int *output_data = (int *)output->data;
     dim3 blocks, threads;
     ThreadBlock1D(threads, blocks, size);
     if (stream_handle)
         robe_hash_kernel<<<blocks, threads, 0,
                            *(cudaStream_t *)stream_handle->handle>>>(
-            input_data, output_data, roarsz, Bh, Ch, Dh, Z, blk, MO, size);
+            input_data, rand_data, output_data, length, dim, Z, use_slot_coef,
+            nslot, size);
     else
-        robe_hash_kernel<<<blocks, threads>>>(input_data, output_data, roarsz,
-                                              Bh, Ch, Dh, Z, blk, MO, size);
+        robe_hash_kernel<<<blocks, threads>>>(input_data, rand_data,
+                                              output_data, length, dim, Z,
+                                              use_slot_coef, nslot, size);
+    return 0;
+}
+
+int DLGpuRobeSign(const DLArrayHandle input, const DLArrayHandle random_numbers,
+                  DLArrayHandle output, int dim, bool use_slot_coef,
+                  DLStreamHandle stream_handle = NULL) {
+    size_t size = ArrSize(output);
+
+    assert(dim == output->shape[output->ndim - 1]);
+    int nslot = input->shape[input->ndim - 1];
+
+    const int *input_data = (const int *)input->data;
+    const int *rand_data = (const int *)random_numbers->data;
+    float *output_data = (float *)output->data;
+    dim3 blocks, threads;
+    ThreadBlock1D(threads, blocks, size);
+    if (stream_handle)
+        robe_sign_kernel<<<blocks, threads, 0,
+                           *(cudaStream_t *)stream_handle->handle>>>(
+            input_data, rand_data, output_data, dim, use_slot_coef, nslot,
+            size);
+    else
+        robe_sign_kernel<<<blocks, threads>>>(input_data, rand_data,
+                                              output_data, dim, use_slot_coef,
+                                              nslot, size);
     return 0;
 }
 
