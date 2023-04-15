@@ -7,116 +7,81 @@ import numpy as np
 import argparse
 
 
-def get_ctx(idx):
-    if idx < 0:
-        ctx = ht.cpu(0)
-    else:
-        assert idx < 8
-        ctx = ht.gpu(idx)
-    return ctx
-
-
 def worker(args):
-
-    batch_size = args.bs
     num_dim = args.dim
     learning_rate = args.lr
     from models.load_data import get_dataset
     dataset = get_dataset(args.dataset)()
-    num_embed = dataset.num_embed
-    num_embed_fields = dataset.num_embed_separate
     num_dense = dataset.num_dense
     num_sparse = dataset.num_sparse
 
-    if args.debug:
-        print('Use zero initializer for debug.')
-        initializer = ht.init.GenZeros()
-    else:
-        border = np.sqrt(1 / max(num_embed_fields))
-        initializer = ht.init.GenUniform(minval=-border, maxval=border)
-    ctx = get_ctx(args.ctx)
-    ectx = get_ctx(args.ectx)
-
-    compress_rate = args.compress_rate
     if args.method == 'full':
-        if args.use_multi:
-            embed_layer = htl.MultipleEmbedding(
-                num_embed_fields, num_dim, initializer=initializer, ctx=ectx)
-        else:
-            embed_layer = htl.Embedding(
-                num_embed, num_dim, initializer=initializer, ctx=ectx)
-    elif args.method == 'robe':
-        Z = 1
-        use_slot_coef = bool(args.separate_fields)
-        ht.random.set_random_seed(args.seed)
-        nprs = ht.random.get_np_rand(1)
-        assert dataset.num_embed < 2038074743
-        random_numbers = np.concatenate(
-            [np.array([2038074743]), nprs.randint(1, 2038074743, (9,))])
-        print(
-            f'Using ROBE-{Z}; random numbers: {random_numbers} with seed {args.seed}; use slot coef {use_slot_coef}')
-        embed_layer = htl.RobeEmbedding(
-            num_embed, num_dim, compress_rate, Z, random_numbers, use_slot_coef=use_slot_coef, initializer=initializer, ctx=ectx)
+        embed_layer_type = htl.Embedding
+        embedding_args = {}
     elif args.method == 'hash':
-        size_limit = None
-        if args.use_multi:
-            embed_layer = htl.MultipleHashEmbedding(
-                num_embed_fields, num_dim, compress_rate=compress_rate, size_limit=size_limit, initializer=initializer, ctx=ectx)
-        else:
-            embed_layer = htl.HashEmbedding(
-                num_embed, num_dim, compress_rate=compress_rate, size_limit=size_limit, initializer=initializer, ctx=ectx)
+        embed_layer_type = htl.HashEmbedding
+        embedding_args = {}
     elif args.method == 'compo':
-        aggregator = 'mul'
-        embed_layer = htl.CompositionalEmbedding(
-            num_embed_fields, num_dim, compress_rate=compress_rate, aggregator=aggregator, initializer=initializer, ctx=ectx)
-    elif args.method == 'dhe':
-        num_buckets = 1000000
-        num_hash = 1024
-        dist = 'uniform'
-        ht.random.set_random_seed(args.seed)
-        input_nemb = num_embed_fields if args.use_multi else num_embed
-        embed_layer = htl.DeepHashEmbedding(
-            input_nemb, num_dim, compress_rate, num_buckets, num_hash, args.use_multi, dist, initializer=initializer, ctx=ectx)
-    elif args.method == 'dpq':
-        num_choices = 32
-        num_parts = 8
-        share_weights = True
-        mode = 'vq'
-        num_slot = num_sparse
-        embed_layer = htl.DPQEmbedding(num_embed, num_dim, num_choices, num_parts,
-                                       num_slot, batch_size, share_weights, mode, initializer=initializer, ctx=ectx)
-    elif args.method == 'autodim':
-        candidates = [2, num_dim // 4, num_dim // 2, num_dim]
-        num_slot = num_sparse
-        alpha_lr = 0.001
-        embed_layer = htl.AutoDimEmbedding(
-            num_embed_fields, candidates, num_slot, batch_size, alpha_lr, initializer=initializer, ctx=ectx)
-    elif args.method == 'md':
-        alpha = 0.3
-        round_dim = True
-        embed_layer = htl.MDEmbedding(
-            num_embed_fields, num_dim, alpha, round_dim, initializer=initializer, ctx=ectx)
-    elif args.method == 'deeplight':
-        warm = 2
-        embed_layer = htl.DeepLightEmbedding(
-            num_embed, num_dim, compress_rate, warm, initializer=initializer, ctx=ectx)
-    elif args.method == 'quantize':
-        digit = 16
-        scale = 0.01
-        middle = 0
-        use_qparam = False
-        embed_layer = htl.QuantizedEmbedding(
-            num_embed, num_dim, digit, scale=scale, middle=middle, use_qparam=use_qparam, initializer=initializer, ctx=ectx)
+        embed_layer_type = htl.CompositionalEmbedding
+        embedding_args = {
+            'aggregator': 'mul',  # (mul, sum)
+        }
     elif args.method == 'tt':
-        stddev = 1 / ((np.sqrt(1 / 3 * max(num_embed_fields))) ** (1/3))
-        ttcore_initializer = ht.init.GenReversedTruncatedNormal(stddev=stddev)
-        embed_layer = htl.TensorTrainEmbedding(
-            num_embed_fields, args.dim, compress_rate, ttcore_initializer=ttcore_initializer, initializer=initializer, ctx=ectx)
+        embed_layer_type = htl.TensorTrainEmbedding
+        embedding_args = {
+            'ttcore_initializer': ht.init.GenReversedTruncatedNormal(stddev=1 / ((np.sqrt(1 / 3 * max(dataset.num_embed_separate))) ** (1/3))),
+        }
+    elif args.method == 'dhe':
+        embed_layer_type = htl.DeepHashEmbedding
+        embedding_args = {
+            'num_buckets': 1000000,
+            'num_hash': 1024,
+            'dist': 'uniform',
+        }
+    elif args.method == 'robe':
+        embed_layer_type = htl.RobeEmbedding
+        embedding_args = {
+            'Z': 1,
+        }
+    elif args.method == 'dpq':
+        embed_layer_type = htl.DPQEmbedding
+        embedding_args = {
+            'num_choices': 32,
+            'num_parts': 8,
+            'share_weights': True,
+            'mode': 'vq',
+        }
+    elif args.method == 'md':
+        embed_layer_type = htl.MDEmbedding
+        embedding_args = {
+            'alpha': 0.3,
+            'round_dim': True,
+        }
+    elif args.method == 'autodim':
+        embed_layer_type = htl.AutoDimEmbedding
+        embedding_args = {
+            'alpha_lr': 0.001,
+            'r': 1e-2,
+        }
+    elif args.method == 'deeplight':
+        embed_layer_type = htl.DeepLightEmbedding
+        embedding_args = {
+            'warm': 2,
+        }
+    elif args.method == 'quantize':
+        embed_layer_type = htl.QuantizedEmbedding
+        embedding_args = {
+            'digit': 16,
+            'scale': 0.01,
+            'middle': 0,
+            'use_qparam': False,
+        }
     else:
         raise NotImplementedError
 
-    # define models
+    args.embedding_args = embedding_args
 
+    # define models
     model = args.model(num_dim, num_sparse, num_dense)
 
     if args.opt == 'sgd':
@@ -129,8 +94,8 @@ def worker(args):
         optimizer = ht.optim.AMSGradOptimizer
     opt = optimizer(learning_rate=learning_rate)
 
-    trainer = ht.sched.get_trainer(embed_layer)(
-        embed_layer, dataset, model, opt, args)
+    trainer = ht.sched.get_trainer(embed_layer_type)(
+        dataset, model, opt, args)
 
     if args.phase == 'train':
         trainer.fit()
@@ -194,11 +159,12 @@ if __name__ == '__main__':
         args.ectx = args.ctx
 
     if args.method in ('robe', 'dpq', 'deeplight', 'quantize', 'autodim'):
-        # TODO: improve in future
         # autodim not use multi in the first stage, use multi in the second stage.
         args.use_multi = 0
     elif args.method in ('compo', 'md', 'tt', 'dhe'):
         # dhe both is ok; use multi is better according to semantic meaning.
+        args.use_multi = 1
+    if args.method == 'autodim' and args.phase == 'test':
         args.use_multi = 1
     if args.method == 'robe':
         # robe use multi, separate fields controls whether using slot coefficient

@@ -8,10 +8,15 @@ from sklearn import metrics
 import contextlib
 import pickle
 
+from ..layers import Embedding
+from ..initializers import GenUniform
+from ..dataloader import Dataloader, dataloader_op
+from ..ndarray import cpu, gpu
+from ..gpu_ops import Executor, concatenate_op
 
-class BaseTrainer(object):
-    def __init__(self, embed_layer, dataset, model, opt, args, **kargs):
-        self.embed_layer = embed_layer
+
+class EmbeddingTrainer(object):
+    def __init__(self, dataset, model, opt, args, **kargs):
         self.model = model
         self.opt = opt
 
@@ -24,8 +29,19 @@ class BaseTrainer(object):
         self.args = args
         self.args.update(kargs)
 
+        self.num_embed = dataset.num_embed
+        self.num_embed_separate = dataset.num_embed_separate
+        self.num_slot = dataset.num_sparse
+        self.embedding_dim = self.args['dim']
+        self.compress_rate = self.args['compress_rate']
+        self.initializer = self.args.get('initializer', None)
+        if self.initializer is None:
+            border = np.sqrt(1 / max(self.num_embed_separate))
+            self.initializer = GenUniform(minval=-border, maxval=border)
+        self.embedding_args = self.args.get('embedding_args', {})
+
         self.ctx = self.get_ctx(self.args['ctx'])
-        # self.ectx = self.get_ctx(self.args['ectx']) # not in use
+        self.ectx = self.get_ctx(self.args['ectx'])
         self.seed = self.args['seed']
         self.log_dir = self.args['log_dir']
         self.proj_name = self.args.get('project_name', 'embedmem')
@@ -75,10 +91,15 @@ class BaseTrainer(object):
         self.start_ep = 0
         self.dataset = dataset
         self.data_ops = self.get_data()
+        self.embed_layer = self.get_embed_layer()
+        self.log_func(f'Embedding layer: {self.embed_layer}')
 
     def set_use_multi(self, new_use_multi):
         self.use_multi = new_use_multi
         self.separate_fields = new_use_multi
+
+    def assert_use_multi(self):
+        assert self.use_multi == self.separate_fields
 
     @property
     def all_train_names(self):
@@ -89,7 +110,6 @@ class BaseTrainer(object):
         return self.validate_name
 
     def make_dataloader_op(self, tr_data, va_data, dtype=np.float32):
-        from ..dataloader import Dataloader, dataloader_op
         train_dataloader = Dataloader(
             tr_data, self.batch_size, self.all_train_names, dtype=dtype)
         valid_dataloader = Dataloader(
@@ -99,6 +119,7 @@ class BaseTrainer(object):
         return data_op
 
     def get_data(self):
+        self.assert_use_multi()
         all_data = self.dataset.process_all_data_by_day(
             use_test=True, separate_fields=self.separate_fields)
 
@@ -125,6 +146,24 @@ class BaseTrainer(object):
                 tr_sparse, va_sparse, dtype=np.int32)
         self.log_func("Data loaded.")
         return embed_input, dense_input, y_
+
+    def get_embed_layer(self):
+        if self.use_multi:
+            emb = [self.get_single_embed_layer(
+                nemb, f'Embedding_{i}') for i, nemb in enumerate(self.num_embed_separate)]
+        else:
+            emb = self.get_single_embed_layer(self.num_embed, 'Embedding')
+        return emb
+
+    def get_single_embed_layer(self, nemb, name):
+        return Embedding(
+            nemb,
+            self.embedding_dim,
+            self.initializer,
+            name,
+            self.ectx,
+            **self.embedding_args,
+        )
 
     def run_epoch(self, train_batch_num, epoch, part, log_file=None):
         with self.timing():
@@ -309,7 +348,6 @@ class BaseTrainer(object):
             self.log_func(f'Load ckpt from {osp.split(self.load_ckpt)[-1]}.')
 
     def get_ctx(self, idx):
-        from ..ndarray import cpu, gpu
         if idx < 0:
             ctx = cpu(0)
         else:
@@ -318,7 +356,6 @@ class BaseTrainer(object):
         return ctx
 
     def init_executor(self, eval_nodes):
-        from ..gpu_ops import Executor
         run_name = osp.split(self.result_file)[1][:-4]
         executor = Executor(
             eval_nodes,
@@ -334,8 +371,7 @@ class BaseTrainer(object):
         self.executor = executor
 
     def fit(self):
-        eval_nodes = self.embed_layer.get_eval_nodes(
-            self.data_ops, self.model, self.opt)
+        eval_nodes = self.get_eval_nodes()
         self.init_executor(eval_nodes)
 
         self.total_epoch = int(self.nepoch * self.num_test_every_epoch)
@@ -361,8 +397,7 @@ class BaseTrainer(object):
 
     def test(self):
         assert self.load_ckpt is not None, 'Checkpoint should be given in testing.'
-        eval_nodes = self.embed_layer.get_eval_nodes_inference(
-            self.data_ops, self.model)
+        eval_nodes = self.get_eval_nodes_inference()
         self.init_executor(eval_nodes)
 
         self.try_load_ckpt()
@@ -383,3 +418,46 @@ class BaseTrainer(object):
         self.log_func(printstr)
         if log_file is not None:
             print(printstr, file=log_file, flush=True)
+
+    def get_embeddings(self, embed_input):
+        if self.use_multi:
+            results = [emb_layer(x) for emb_layer, x in zip(
+                self.embed_layer, embed_input)]
+            result = concatenate_op(results, axis=-1)
+        else:
+            result = self.embed_layer(embed_input)
+        return result
+
+    def get_eval_nodes(self):
+        embed_input, dense_input, y_ = self.data_ops
+        embeddings = self.get_embeddings(embed_input)
+        loss, prediction = self.model(
+            embeddings, dense_input, y_)
+        train_op = self.opt.minimize(loss)
+        eval_nodes = {
+            'train': [loss, prediction, y_, train_op],
+            'validate': [loss, prediction, y_],
+        }
+        return eval_nodes
+
+    def get_eval_nodes_inference(self):
+        embed_input, dense_input, y_ = self.data_ops
+        embeddings = self.get_embeddings(embed_input)
+        loss, prediction = self.model(
+            embeddings, dense_input, y_)
+        eval_nodes = {
+            'validate': [loss, prediction, y_],
+        }
+        return eval_nodes
+
+    @staticmethod
+    def binary_search(left, right, evaluator):
+        assert evaluator(left) < 0 < evaluator(right)
+        while right - left > 0.5:
+            middle = (left + right) / 2
+            mid_score = evaluator(middle)
+            if mid_score < 0:
+                left = middle
+            elif mid_score > 0:
+                right = middle
+        return left, right

@@ -1,37 +1,175 @@
 from .embedding import Embedding
 import hetu as ht
-import math
 import numpy as np
 import os.path as osp
 
 
-def binary_search(left, right, evaluator):
-    assert evaluator(left) < 0 < evaluator(right)
-    while right - left > 0.5:
-        middle = (left + right) / 2
-        mid_score = evaluator(middle)
-        if mid_score < 0:
-            left = middle
-        elif mid_score > 0:
-            right = middle
-    return left, right
+class HashEmbedding(Embedding):
+    def __call__(self, x):
+        # ref MLSys20, HierPS
+        with ht.context(self.ctx):
+            sparse_input = ht.mod_hash_op(x, self.num_embeddings)
+            return ht.embedding_lookup_op(self.embedding_table, sparse_input)
+
+
+class CompositionalEmbedding(Embedding):
+    def __init__(self, num_quotient, num_remainder, embedding_dim, aggregator='mul', initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+        # KDD20, CompositionalHash
+        # CIKM21, BinaryCodeHash
+        # adapted from DLRM QREmbeddingBag
+        aggregator = aggregator[:3]
+        assert aggregator in ('sum', 'mul')
+        self.aggregator = aggregator
+        self.num_quotient = num_quotient
+        self.num_remainder = num_remainder
+        self.embedding_dim = embedding_dim
+        self.name = name
+        self.ctx = ctx
+        self.qemb = initializer(
+            shape=(self.num_quotient, self.embedding_dim), name=f'{name}_q', ctx=ctx)
+        self.remb = initializer(
+            shape=(self.num_remainder, self.embedding_dim), name=f'{name}_r', ctx=ctx)
+
+    def __call__(self, x):
+        with ht.context(self.ctx):
+            qind = ht.div_hash_op(x, self.num_remainder)
+            rind = ht.mod_hash_op(x, self.num_remainder)
+            q = ht.embedding_lookup_op(self.qemb, qind)
+            r = ht.embedding_lookup_op(self.remb, rind)
+            if self.aggregator == 'sum':
+                result = ht.add_op(q, r)
+            elif self.aggregator == 'mul':
+                result = ht.mul_op(q, r)
+            return result
+
+    def __repr__(self):
+        return f'{self.name}({self.num_quotient},{self.num_remainder},{self.embedding_dim})'
+
+
+class TensorTrainEmbedding(Embedding):
+    def __init__(self, decomp_nemb, decomp_ndim, rank, ttcore_initializer, name='embedding', ctx=None):
+        self.num_tables = len(decomp_nemb)
+        assert len(decomp_ndim) == self.num_tables
+        self.decomp_nemb = decomp_nemb
+        self.decomp_ndim = decomp_ndim
+        self.ranks = [1, rank, rank, 1]
+        self.name = name
+        self.ctx = ctx
+        cur_shapes = []
+        for i in range(self.num_tables):
+            nrow = decomp_nemb[i]
+            ndim = decomp_ndim[i]
+            prerank = self.ranks[i]
+            postrank = self.ranks[i+1]
+            ncol = prerank * ndim * postrank
+            cur_shapes.append((nrow, ncol))
+        self.tt_cores = tuple(ttcore_initializer(
+            shape=sh, name=f'{name}_{i}') for i, sh in enumerate(cur_shapes))
+
+    def __call__(self, x):
+        indices = x
+        accum_embed = None
+        accum_dim = 1
+        for i in range(self.num_tables):
+            if i == self.num_tables - 1:
+                cur_ind = indices
+            else:
+                cur_ind = ht.mod_hash_op(indices, self.decomp_nemb[i])
+                indices = ht.div_hash_op(indices, self.decomp_nemb[i])
+            partial_embed = ht.embedding_lookup_op(self.tt_cores[i], cur_ind)
+            if i == 0:
+                accum_embed = partial_embed
+            else:
+                accum_embed = ht.array_reshape_op(
+                    accum_embed, (-1, accum_dim, self.ranks[i]))
+                partial_embed = ht.array_reshape_op(
+                    partial_embed, (-1, self.ranks[i], self.decomp_ndim[i] * self.ranks[i+1]))
+                accum_embed = ht.batch_matmul_op(
+                    accum_embed, partial_embed)
+            accum_dim *= self.decomp_ndim[i]
+        accum_embed = ht.array_reshape_op(
+            accum_embed, (-1, accum_dim))
+        return accum_embed
+
+    def __repr__(self):
+        return f'{self.name}({self.ranks[1]})'
+
+
+class DeepHashEmbedding(Embedding):
+    def __init__(self, embedding_dim, mlp_dim, num_buckets, num_hash, nprs, dist='uniform', initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+        assert dist in ('uniform', 'normal')
+        self.distribution = dist
+        self.embedding_dim = embedding_dim
+        self.num_buckets = num_buckets
+        self.num_hash = num_hash
+        self.name = name
+        self.ctx = ctx
+        self.mlp_dim = mlp_dim
+        prime_path = osp.join(osp.dirname(osp.abspath(
+            __file__)), 'primes.npy')
+        allprimes = np.load(prime_path)
+        for i, p in enumerate(allprimes):
+            if p >= num_buckets:
+                break
+        self.allprimes = allprimes[i:]
+        self.slopes = self.make_random(nprs, 'slopes')
+        self.biases = self.make_random(nprs, 'biases')
+        self.primes = self.make_primes(nprs, 'primes')
+        self.layers = self.make_layers(initializer)
+
+    def make_layers(self, initializer):
+        from .linear import Linear
+        from .normalization import BatchNorm
+        from .mish import Mish
+        from .sequence import Sequence
+        layers = [
+            Linear(self.num_hash, self.mlp_dim,
+                   initializer=initializer, name='linear1'),
+            BatchNorm(self.mlp_dim, name='bn1'),
+            Mish(),
+        ]
+        for i in range(4):
+            layers.extend([
+                Linear(self.mlp_dim, self.mlp_dim,
+                       initializer=initializer, name=f'linear{i+2}'),
+                BatchNorm(self.mlp_dim, name=f'bn{i+2}'),
+                Mish(),
+            ])
+        layers.append(Linear(
+            self.mlp_dim, self.embedding_dim, initializer=initializer, name='linear6'))
+        return Sequence(*layers)
+
+    def make_primes(self, nprs, name):
+        return ht.Variable(name=name, value=nprs.choice(self.allprimes, size=self.num_hash), trainable=False)
+
+    def make_random(self, nprs, name):
+        return ht.Variable(name=name, value=nprs.randint(1, self.num_buckets, size=self.num_hash), trainable=False)
+
+    def __call__(self, x):
+        # KDD21, DHE
+        x = ht.learn_hash_op(x, self.slopes, self.biases,
+                             self.primes, self.num_buckets, self.distribution)
+        x = ht.array_reshape_op(x, (-1, self.num_hash))
+        x = self.layers(x)
+        return x
+
+    def __repr__(self):
+        return f'{self.name}({self.mlp_dim})'
 
 
 class RobeEmbedding(Embedding):
-    def __init__(self, num_embeddings, embedding_dim, compress_rate, Z, random_numbers, use_slot_coef=True, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
-        robe_array_size = int(
-            num_embeddings * embedding_dim * compress_rate)
-        self.num_embeddings = num_embeddings
+    def __init__(self, robe_array_size, embedding_dim, Z, nprs, use_slot_coef=True, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         self.robe_array_size = robe_array_size
         self.embedding_dim = embedding_dim
         assert Z <= embedding_dim
         self.Z = Z
         self.use_slot_coef = use_slot_coef
-
         self.name = name
         self.ctx = ctx
         self.embedding_table = initializer(
             shape=(self.robe_array_size, 1), name=self.name, ctx=ctx)
+        random_numbers = np.concatenate(
+            [np.array([2038074743]), nprs.randint(1, 2038074743, (9,))])
         self.random_numbers = ht.placeholder_op(
             'random_numbers', value=random_numbers, dtype=np.int32, trainable=False)
 
@@ -47,271 +185,8 @@ class RobeEmbedding(Embedding):
             lookups = ht.mul_op(lookups, signs)
             return lookups
 
-
-class HashEmbedding(Embedding):
-    def __init__(self, num_embeddings, embedding_dim, compress_rate=None, size_limit=None, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
-        assert compress_rate is None or size_limit is None
-        if size_limit is not None:
-            real_num_embeds = size_limit // embedding_dim
-        else:
-            if compress_rate is None:
-                compress_rate = 1.0
-            real_num_embeds = int(num_embeddings * compress_rate)
-        self.num_embeddings = num_embeddings
-        self.real_num_embeds = real_num_embeds
-        self.embedding_dim = embedding_dim
-        self.name = name
-        self.ctx = ctx
-        self.embedding_table = initializer(
-            shape=(self.real_num_embeds, self.embedding_dim), name=self.name, ctx=ctx)
-
-    def __call__(self, x):
-        # ref MLSys20, HierPS
-        with ht.context(self.ctx):
-            sparse_input = ht.mod_hash_op(x, self.real_num_embeds)
-            return ht.embedding_lookup_op(self.embedding_table, sparse_input)
-
-
-class MultipleHashEmbedding(Embedding):
-    def __init__(self, num_embed_fields, embedding_dim, compress_rate=None, size_limit=None, initializer=ht.init.GenXavierNormal(), names='embedding', ctx=None):
-        assert compress_rate is None or size_limit is None
-        if size_limit is not None:
-            compress_rate = size_limit / sum(num_embed_fields)
-        real_num_embeds = [math.ceil(nemb * compress_rate)
-                           for nemb in num_embed_fields]
-        self.num_embed_fields = num_embed_fields
-        self.real_num_embeds = real_num_embeds
-        self.embedding_dim = embedding_dim
-        if not isinstance(names, list):
-            names = [f'{names}_{i}' for i in range(len(num_embed_fields))]
-        self.name = names
-        self.ctx = ctx
-        self.embedding_table = [
-            initializer(
-                shape=(nemb, self.embedding_dim),
-                name=nam,
-                ctx=ctx,
-            ) for nemb, nam in zip(self.real_num_embeds, self.name)
-        ]
-
-    def __call__(self, xs):
-        with ht.context(self.ctx):
-            results = []
-            for emb, x, rnum in zip(self.embedding_table, xs, self.real_num_embeds):
-                x = ht.mod_hash_op(x, rnum)
-                results.append(ht.embedding_lookup_op(emb, x))
-            result = ht.concatenate_op(results, axis=1)
-            return result
-
-
-class CompositionalEmbedding(Embedding):
-    # compositional embedding
-    def __init__(self, num_embed_fields, embedding_dim, compress_rate, aggregator='mul', initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
-        # KDD20, CompositionalHash
-        # CIKM21, BinaryCodeHash
-        # adapted from DLRM QREmbeddingBag
-        aggregator = aggregator[:3]
-        assert aggregator in ('sum', 'mul')
-        self.aggregator = aggregator
-        self.num_embed_fields = num_embed_fields
-        self.embedding_dim = embedding_dim
-        self.compress_rate = compress_rate
-        self.name = name
-        self.ctx = ctx
-        self.collision = self.get_collision(
-            self.num_embed_fields, compress_rate)
-        self.embedding_tables = []
-        for i, nemb in enumerate(self.num_embed_fields):
-            cur_compo = self.decompo(nemb, self.collision)
-            if isinstance(cur_compo, tuple):
-                nqemb, nremb = cur_compo
-                qemb = initializer(
-                    shape=(nqemb, self.embedding_dim),
-                    name=f'{name}_{i}_q',
-                    ctx=ctx,
-                )
-                remb = initializer(
-                    shape=(nremb, self.embedding_dim),
-                    name=f'{name}_{i}_r',
-                    ctx=ctx,
-                )
-                self.embedding_tables.append((qemb, remb))
-            else:
-                cur_embed = initializer(
-                    shape=(nemb, self.embedding_dim),
-                    name=f'{name}_{i}',
-                    ctx=ctx,
-                )
-                self.embedding_tables.append(cur_embed)
-
-    def get_collision(self, num_embed_fields, compress_rate):
-        num_embeddings = sum(num_embed_fields)
-        target_nemb = num_embeddings * compress_rate
-
-        def evaluate(x):
-            memory = 0
-            for nemb in num_embed_fields:
-                newmem = math.ceil(nemb / x) + math.ceil(x)
-                memory += min(nemb, newmem)
-            return target_nemb - memory
-        res = binary_search(1, math.sqrt(num_embeddings), evaluate)
-        res = math.ceil(res[0])
-        print(f'Collision {res} given compression rate {compress_rate}.')
-        return res
-
-    def decompo(self, num, collision):
-        if num <= collision:
-            return num
-        another = math.ceil(num / collision)
-        if num <= another + collision:
-            return num
-        return (another, collision)
-
-    def __call__(self, xs):
-        with ht.context(self.ctx):
-            results = []
-            for emb, x in zip(self.embedding_tables, xs):
-                if not isinstance(emb, tuple):
-                    results.append(ht.embedding_lookup_op(emb, x))
-                else:
-                    qemb, remb = emb
-                    qind = ht.div_hash_op(x, self.collision)
-                    rind = ht.mod_hash_op(x, self.collision)
-                    q = ht.embedding_lookup_op(qemb, qind)
-                    r = ht.embedding_lookup_op(remb, rind)
-                    if self.aggregator == 'sum':
-                        cur_embedding = ht.add_op(q, r)
-                    elif self.aggregator == 'mul':
-                        cur_embedding = ht.mul_op(q, r)
-                    results.append(cur_embedding)
-            result = ht.concatenate_op(results, axis=1)
-            return result
-
-
-class DeepHashEmbedding(Embedding):
-    def __init__(self, num_embeddings, embedding_dim, compress_rate, num_buckets, num_hash, use_multi=1, dist='uniform', initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
-        assert dist in ('uniform', 'normal')
-        self.distribution = dist
-        self.embedding_dim = embedding_dim
-        self.num_buckets = num_buckets
-        self.num_hash = num_hash
-        self.name = name
-        self.ctx = ctx
-        self.use_multi = use_multi
-        nprs = ht.random.get_np_rand(1)
-        self.mlp_dim = self.get_dim(
-            num_embeddings, compress_rate)
-        prime_path = osp.join(osp.dirname(osp.abspath(
-            __file__)), 'primes.npy')
-        allprimes = np.load(prime_path)
-        for i, p in enumerate(allprimes):
-            if p >= num_buckets:
-                break
-        self.allprimes = allprimes[i:]
-        if not self.use_multi:
-            self.slopes = self.make_random(nprs, 'slopes')
-            self.biases = self.make_random(nprs, 'biases')
-            self.primes = self.make_primes(nprs, 'primes')
-            self.layers = self.make_layers(initializer)
-        else:
-            self.slopes = []
-            self.biases = []
-            self.primes = []
-            self.layers = []
-            threshold = self.get_one_memory(self.mlp_dim) / self.embedding_dim
-            for i, nemb in enumerate(num_embeddings):
-                if nemb > threshold:
-                    self.slopes.append(self.make_random(nprs, f'slopes{i}'))
-                    self.biases.append(self.make_random(nprs, f'biases{i}'))
-                    self.primes.append(self.make_primes(nprs, f'primes{i}'))
-                    self.layers.append(self.make_layers(initializer))
-                else:
-                    self.slopes.append(None)
-                    self.biases.append(None)
-                    self.primes.append(None)
-                    self.layers.append(initializer(
-                        shape=(nemb, self.embedding_dim), name=f'emb{i}'))
-
-    def make_layers(self, initializer):
-        from .linear import Linear
-        from .normalization import BatchNorm
-        from .mish import Mish
-        from .sequence import Sequence
-        input_layer = Sequence(
-            Linear(self.num_hash, self.mlp_dim, initializer=initializer),
-            BatchNorm(self.mlp_dim),
-            Mish(),
-        )
-        middle_layer = Sequence(
-            Linear(self.mlp_dim, self.mlp_dim, initializer=initializer),
-            BatchNorm(self.mlp_dim),
-            Mish(),
-        )
-        output_layer = Linear(
-            self.mlp_dim, self.embedding_dim, initializer=initializer)
-        return Sequence(
-            input_layer,
-            middle_layer,
-            middle_layer,
-            middle_layer,
-            middle_layer,
-            output_layer,
-        )
-
-    def make_primes(self, nprs, name):
-        return ht.Variable(name=name, value=nprs.choice(self.allprimes, size=self.num_hash), trainable=False)
-
-    def make_random(self, nprs, name):
-        return ht.Variable(name=name, value=nprs.randint(1, self.num_buckets, size=self.num_hash), trainable=False)
-
-    def get_one_memory(self, x):
-        return (self.num_hash + 1) * x + 4 * x * \
-            (x + 1) + (self.embedding_dim + 1) * x + 10 * x
-
-    def get_dim(self, num_embeddings, compress_rate):
-        if self.use_multi:
-            nemb = sum(num_embeddings)
-        else:
-            nemb = num_embeddings
-        target_memory = nemb * self.embedding_dim * compress_rate
-
-        def evaluate(x):
-            newmem = self.get_one_memory(x)
-            if self.use_multi:
-                memory = 0
-                for nemb in num_embeddings:
-                    orimem = nemb * self.embedding_dim
-                    memory += min(orimem, newmem)
-            else:
-                memory = newmem
-            return memory - target_memory
-        res = binary_search(1, math.sqrt(nemb), evaluate)
-        res = math.floor(res[1])
-        if evaluate(res) > 0:
-            res -= 1
-        print(f'Dimension {res} given compression rate {compress_rate}.')
-        return res
-
-    def __call__(self, x):
-        # KDD21, DHE
-        if self.use_multi:
-            results = []
-            for i, xx in enumerate(x):
-                if self.primes[i] is None:
-                    res = ht.embedding_lookup_op(self.layers[i], xx)
-                else:
-                    xx = ht.learn_hash_op(xx, self.slopes[i], self.biases[i],
-                                          self.primes[i], self.num_buckets, self.distribution)
-                    xx = ht.array_reshape_op(xx, (-1, self.num_hash))
-                    res = self.layers[i](xx)
-                results.append(res)
-            x = ht.concatenate_op(results, axis=1)
-        else:
-            x = ht.learn_hash_op(x, self.slopes, self.biases,
-                                 self.primes, self.num_buckets, self.distribution)
-            x = ht.array_reshape_op(x, (-1, self.num_hash))
-            x = self.layers(x)
-        return x
+    def __repr__(self):
+        return f'{self.name}({self.robe_array_size})'
 
 
 class DPQEmbedding(Embedding):
@@ -442,37 +317,37 @@ class DPQEmbedding(Embedding):
             # (bs * slot, dim)
             return outputs
 
-    def get_eval_nodes(self, data_ops, model, opt):
-        embed_input, dense_input, y_ = data_ops
-        loss, prediction = model(self(embed_input), dense_input, y_)
-        if self.mode == 'vq':
-            loss = ht.add_op(loss, self.reg)
-        train_op = opt.minimize(loss)
-        eval_nodes = {
-            'train': [loss, prediction, y_, train_op, self.codebook_update],
-        }
-        test_embed_input = self.make_inference(embed_input)
-        test_loss, test_prediction = model(
-            test_embed_input, dense_input, y_)
-        eval_nodes['validate'] = [test_loss, test_prediction, y_]
-        return eval_nodes
 
-    def get_eval_nodes_inference(self, data_ops, model):
-        embed_input, dense_input, y_ = data_ops
-        test_embed_input = self.make_inference(embed_input)
-        test_loss, test_prediction = model(
-            test_embed_input, dense_input, y_)
-        eval_nodes = {
-            'validate': [test_loss, test_prediction, y_],
-        }
-        return eval_nodes
+class MDEmbedding(Embedding):
+    def __init__(self, num_embeddings, compressed_dim, embedding_dim, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+        self.num_embeddings = num_embeddings
+        self.compressed_dim = compressed_dim
+        self.embedding_dim = embedding_dim
+        self.name = name
+        self.ctx = ctx
+        self.embedding_table = initializer(
+            shape=(num_embeddings, compressed_dim), name=name, ctx=self.ctx)
+        if compressed_dim < embedding_dim:
+            self.projection = initializer(
+                shape=(compressed_dim, embedding_dim), name=f'{name}_proj', ctx=self.ctx)
+        else:
+            self.projection = None
+
+    def __call__(self, x):
+        with ht.context(self.ctx):
+            res = ht.embedding_lookup_op(self.embedding_table, x)
+            if self.projection is not None:
+                res = ht.matmul_op(res, self.projection)
+        return res
+
+    def __repr__(self):
+        return f'{self.name}({self.num_embeddings},{self.compressed_dim},{self.embedding_dim})'
 
 
 class AutoDimEmbedding(Embedding):
-    def __init__(self, separate_num_embeds, dim_candidates, num_slot, batch_size, alpha_lr, r=1e-2, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+    def __init__(self, num_embeddings, dim_candidates, num_slot, batch_size, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         from .normalization import BatchNorm
-        self.num_embeddings = sum(separate_num_embeds)
-        self.separate_num_embeds = separate_num_embeds
+        self.num_embeddings = num_embeddings
         self.num_slot = num_slot
         self.batch_size = batch_size
         temperature_decay = 0.00005 / 2000 * batch_size
@@ -484,8 +359,6 @@ class AutoDimEmbedding(Embedding):
         self.max_dim = self.dim_candidates[-1]
         self.name = name
         self.ctx = ctx
-        self.alpha_lr = alpha_lr
-        self.r = r
         self.initializer = initializer
         self.bn_layers = {dim: BatchNorm(self.max_dim, scale=False, bias=False, name='bn{}'.format(
             dim)) for dim in self.dim_candidates}
@@ -547,195 +420,46 @@ class AutoDimEmbedding(Embedding):
         # (bs, nslot, dim)
         return final_embedding
 
-    def get_eval_nodes(self, data_ops, model, opt):
-        from ..gpu_ops.AssignWithIndexedSlices import AssignWithIndexedSlicesOp
-        embed_input, dense_input, y_ = data_ops
-        loss, prediction = model(self(embed_input), dense_input, y_)
-        train_op = opt.minimize(loss)
-        lookups = []
-        dedup_lookups = []
-        dembed_ops = []
-        dup_dembed_ops = []
-        dparam_ops = []
-        dalpha_op = None
-        param_opts = []
-        for op in train_op:
-            if op.inputs[0] is self.alpha:
-                dalpha_op = op.inputs[1]
-            else:
-                param_opts.append(op)
-                if isinstance(op, AssignWithIndexedSlicesOp):
-                    sparse_opt = op.inputs[1]
-                    deduplookup = sparse_opt.inputs[1]
-                    lookups.append(deduplookup.inputs[2])
-                    dedup_lookups.append(deduplookup)
-                    dedupgrad = sparse_opt.inputs[2]
-                    dembed_ops.append(dedupgrad)
-                    dup_dembed_ops.append(deduplookup.inputs[0])
-                    assert deduplookup.inputs[0] is dedupgrad.inputs[1]
-                else:
-                    dparam_ops.append(op.inputs[1])
-        assert dalpha_op is not None
-
-        self.var_lookups = {dim: ht.init.GenEmpty()(
-            (self.batch_size, self.num_slot, dim), f'lookups{dim}', False, self.ctx) for dim in self.dim_candidates}
-        new_loss, new_pred = model(self.make_embed(
-            self.var_lookups), dense_input, y_)
-        alpha_grad = ht.gradients(new_loss, [self.alpha])
-
-        eval_nodes = {
-            'train': [loss, prediction, y_, param_opts],
-            'lookups': lookups + dedup_lookups + param_opts,
-            'validate': [loss, prediction, y_],
-            'allgrads': [dalpha_op] + dup_dembed_ops + dembed_ops + dparam_ops,
-            'alpha': [alpha_grad],
-        }
-
-        return eval_nodes
-
-    def make_retrain(self, xs, stream):
-        separate_num_embeds = self.separate_num_embeds
-        from ..gpu_links import argmax
-        dim_choice = ht.empty((self.num_slot, ), ctx=self.ctx, dtype=np.int32)
-        argmax(self.alpha.tensor_value, dim_choice, 1, stream=stream)
-        stream.sync()
-        dim_choice = [self.dim_candidates[int(ind)]
-                      for ind in dim_choice.asnumpy()]
-        print('Dimension choices:', dim_choice)
-        new_embedding_tables = []
-        new_weights = []
-        new_biases = []
-        # ## previous code, copy parameters from the first stage; actually no need?
-        # cur_offset = 0
-        # for i, (nembed, dim) in enumerate(zip(separate_num_embeds, dim_choice)):
-        #     cur_embed_table = ht.empty((nembed, dim), ctx=self.ctx)
-        #     cur_embed_table._async_copyfrom_offset(
-        #         self.embedding_tables[dim].tensor_value, stream, cur_offset * dim, 0, nembed * dim)
-        #     new_embedding_tables.append(ht.placeholder_op(
-        #         'new_embed_{}'.format(i), value=cur_embed_table, ctx=self.ctx))
-        #     cur_weight = ht.empty((dim, self.max_dim), ctx=self.ctx)
-        #     cur_weight._async_copyfrom_offset(
-        #         self.weights[dim].tensor_value, stream, i * dim * self.max_dim, 0, dim * self.max_dim)
-        #     new_weights.append(ht.placeholder_op(
-        #         'new_weight_{}'.format(i), value=cur_weight))
-        #     cur_bias = ht.empty((self.max_dim, ), ctx=self.ctx)
-        #     cur_bias._async_copyfrom_offset(
-        #         self.biases[dim].tensor_value, stream, i * self.max_dim, 0, self.max_dim)
-        #     new_biases.append(ht.placeholder_op(
-        #         'new_bias_{}'.format(i), value=cur_bias))
-        #     cur_offset += nembed
-        # stream.sync()
-        for i, (nembed, dim) in enumerate(zip(separate_num_embeds, dim_choice)):
-            cur_embed_table = self.initializer(
-                shape=(nembed, dim), name=f'new_embed_{i}', ctx=self.ctx)
-            cur_weight = self.initializer(
-                shape=(dim, self.max_dim), name=f'new_weight_{i}', ctx=self.ctx)
-            cur_bias = ht.init.zeros(
-                shape=(self.max_dim, ), name=f'new_bias_{i}', ctx=self.ctx)
-            new_embedding_tables.append(cur_embed_table)
-            new_weights.append(cur_weight)
-            new_biases.append(cur_bias)
-        self.embedding_tables = new_embedding_tables
-        self.weights = new_weights
-        self.biases = new_biases
-        all_lookups = []
-        for x, table, weight, bias in zip(xs, self.embedding_tables, self.weights, self.biases):
-            lookups = ht.embedding_lookup_op(table, x)
-            # (bs, cdim)
-            lookups = ht.linear_op(lookups, weight, bias)
-            # (bs, dim)
-            all_lookups.append(lookups)
-        all_lookups = ht.concatenate_op(all_lookups, 1)
-        return all_lookups
-
-    def get_eval_nodes_retrain(self, data_ops, model, opt, stream):
-        embed_input, dense_input, y_ = data_ops
-        loss, prediction = model(
-            self.make_retrain(embed_input, stream), dense_input, y_)
-        train_op = opt.minimize(loss)
-        eval_nodes = {
-            'train': [loss, prediction, y_, train_op],
-            'validate': [loss, prediction, y_],
-        }
-        return eval_nodes
+    def __repr__(self):
+        return f'{self.name}({self.num_embeddings};{self.dim_candidates})'
 
 
-class MDEmbedding(Embedding):
-    def __init__(self, num_embed_fields, embedding_dim, alpha, round_dim, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
-        dims = self.md_solver(num_embed_fields, alpha,
-                              num_dim=embedding_dim, round_dim=round_dim)
+class AutoDimRetrainEmbedding(Embedding):
+    def __init__(self, num_embeddings, compressed_dim, embedding_dim, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+        self.num_embeddings = num_embeddings
+        self.compressed_dim = compressed_dim
+        self.embedding_dim = embedding_dim
+        self.name = name
         self.ctx = ctx
-        embeds = []
-        projs = []
-        base_dim = embedding_dim
-        assert base_dim == max(dims)
-        for i, (n, d) in enumerate(zip(num_embed_fields, dims)):
-            embeds.append(initializer(
-                shape=(n, d), name=f'{name}_fields_{i}', ctx=ctx))
-            if dims[i] < base_dim:
-                projs.append(initializer(
-                    shape=(dims[i], base_dim), name=f'{name}_proj_{i}'))
-            else:
-                projs.append(None)
-        self.embeds = embeds
-        self.projs = projs
+        self.embedding_table = initializer(
+            shape=(num_embeddings, compressed_dim), name=name, ctx=self.ctx)
+        self.weight = initializer(
+            shape=(compressed_dim, embedding_dim), name=f'{name}_weight', ctx=self.ctx)
+        self.bias = ht.init.zeros(
+            shape=(embedding_dim,), name=f'{name}_bias', ctx=self.ctx)
 
-    def md_solver(self, num_embed_fields, alpha, num_dim=None, mem_cap=None, round_dim=True, freq=None):
-        # inherited from dlrm repo
-        indices, num_embed_fields = zip(
-            *sorted(enumerate(num_embed_fields), key=lambda x: x[1]))
-        num_embed_fields = np.array(num_embed_fields)
-        if freq is not None:
-            num_embed_fields /= freq[indices]
-        if num_dim is not None:
-            # use max dimension
-            lamb = num_dim * (num_embed_fields[0] ** alpha)
-        elif mem_cap is not None:
-            # use memory capacity
-            lamb = mem_cap / np.sum(num_embed_fields ** (1 - alpha))
-        else:
-            raise ValueError("Must specify either num_dim or mem_cap")
-        d = lamb * (num_embed_fields ** (-alpha))
-        d = np.round(np.maximum(d, 1))
-        if round_dim:
-            d = 2 ** np.round(np.log2(d))
-        d = d.astype(int)
-        undo_sort = [0] * len(indices)
-        for i, v in enumerate(indices):
-            undo_sort[v] = i
-        return d[undo_sort]
+    def __call__(self, x):
+        with ht.context(self.ctx):
+            res = ht.embedding_lookup_op(self.embedding_table, x)
+            res = ht.linear_op(res, self.weight, self.bias)
+        return res
 
-    def __call__(self, xs):
-        results = []
-        for x, embed, proj in zip(xs, self.embeds, self.projs):
-            with ht.context(self.ctx):
-                res = ht.embedding_lookup_op(embed, x)
-            if proj is not None:
-                res = ht.matmul_op(res, proj)
-            results.append(res)
-        result = ht.concatenate_op(results, axis=1)
-        return result
+    def __repr__(self):
+        return f'{self.name}({self.num_embeddings},{self.compressed_dim},{self.embedding_dim})'
 
 
 class DeepLightEmbedding(Embedding):
-    def __init__(self, num_embeddings, embedding_dim, target_sparse, warm=2, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+    def __init__(self, num_embeddings, embedding_dim, prune_rate, form, warm=2, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+        assert form in ('coo', 'csr')
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.name = name
         self.ctx = ctx
         self.embedding_table = initializer(
             shape=(self.num_embeddings, self.embedding_dim), name=self.name, ctx=ctx)
-        self.target_sparse = target_sparse
         self.warm = warm
-        real_dim = self.target_sparse * embedding_dim
-        if real_dim >= 3:
-            self.form = 'csr'
-            self.real_target_sparse = (real_dim - 1) / 2 / embedding_dim
-        else:
-            self.form = 'coo'
-            self.real_target_sparse = self.target_sparse / 3
-        self.prune_rate = 1 - self.real_target_sparse
-        print(f'Use {self.form} for sparse storage; final prune rate {self.prune_rate}, given target sparse rate {target_sparse}.')
+        self.prune_rate = prune_rate
+        self.form = form
 
     def __call__(self, x):
         with ht.context(self.ctx):
@@ -777,25 +501,6 @@ class DeepLightEmbedding(Embedding):
                 'sparse_embedding', value=embeddings)
             return ht.sparse_embedding_lookup_op(self.sparse_embedding_table, embed_input)
 
-    def get_eval_nodes(self, data_ops, model, opt):
-        embed_input, dense_input, y_ = data_ops
-        loss, prediction = model(self(embed_input), dense_input, y_)
-        train_op = opt.minimize(loss)
-        eval_nodes = {
-            'train': [loss, prediction, y_, train_op, self.make_prune_op(y_)],
-            'validate': [loss, prediction, y_],
-        }
-        return eval_nodes
-
-    def get_eval_nodes_inference(self, data_ops, model, load_value=True):
-        # check inference; use sparse embedding
-        embed_input, dense_input, y_ = data_ops
-        test_embed_input = self.make_inference(embed_input, load_value)
-        test_loss, test_prediction = model(
-            test_embed_input, dense_input, y_)
-        eval_nodes = {'validate': [test_loss, test_prediction, y_]}
-        return eval_nodes
-
 
 class QuantizedEmbedding(Embedding):
     def __init__(self, num_embeddings, embedding_dim, digit, scale=0.01, middle=0, use_qparam=False, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
@@ -825,103 +530,5 @@ class QuantizedEmbedding(Embedding):
                     self.embedding_table, x, self.scale, self.middle, self.digit)
             return lookup
 
-
-class TensorTrainEmbedding(Embedding):
-    def __init__(self, num_embed_fields, embedding_dim, compress_rate, ttcore_initializer, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
-        self.num_tables = 3
-        self.num_embeddings = sum(num_embed_fields)
-        self.decomp_nembs = [self.get_decomp_emb(
-            nemb) for nemb in num_embed_fields]
-        self.decomp_ndim = self.get_decomp_dim(embedding_dim)
-        rank = self.get_rank(
-            num_embed_fields, self.decomp_nembs, self.decomp_ndim, embedding_dim, compress_rate)
-        self.ranks = [1, rank, rank, 1]
-        self.name = name
-        self.ctx = ctx
-        self.embedding_tables = []
-        for j, (nemb, dn) in enumerate(zip(num_embed_fields, self.decomp_nembs)):
-            cur_shapes = []
-            size = 0
-            for i in range(self.num_tables):
-                nrow = dn[i]
-                ndim = self.decomp_ndim[i]
-                prerank = self.ranks[i]
-                postrank = self.ranks[i+1]
-                ncol = prerank * ndim * postrank
-                cur_shapes.append((nrow, ncol))
-                size += nrow * ncol
-            if size < nemb * embedding_dim:
-                cur_tables = tuple(ttcore_initializer(
-                    shape=sh, name=f'{name}_field{j}_{i}') for i, sh in enumerate(cur_shapes))
-            else:
-                cur_tables = initializer(
-                    shape=(nemb, embedding_dim), name=f'{name}_field{j}')
-            self.embedding_tables.append(cur_tables)
-
-    def get_decomp_dim(self, embedding_dim):
-        assert embedding_dim >= 8 and embedding_dim & (embedding_dim - 1) == 0
-        decomp_ndim = [2, 2, 2]
-        idx = 2
-        embedding_dim //= 8
-        while embedding_dim != 1:
-            decomp_ndim[idx] *= 2
-            embedding_dim //= 2
-            idx = (idx - 1) % 3
-        return decomp_ndim
-
-    def get_decomp_emb(self, nemb):
-        n1 = math.ceil(nemb ** (1/3))
-        n2 = math.ceil((nemb / n1) ** (1/2))
-        n3 = math.ceil(nemb / n1 / n2)
-        return [n3, n2, n1]
-
-    def get_rank(self, num_embed_fields, decomp_nembs, decomp_ndim, embedding_dim, compress_rate):
-        target_memory = sum(num_embed_fields) * embedding_dim * compress_rate
-
-        def evaluate(x):
-            memory = 0
-            for nemb, dn in zip(num_embed_fields, decomp_nembs):
-                orimem = nemb * embedding_dim
-                newmem = (dn[0] * decomp_ndim[0] + dn[2] * decomp_ndim[2]
-                          ) * x + (dn[1] * decomp_ndim[1]) * x * x
-                memory += min(orimem, newmem)
-            return memory - target_memory
-        res = binary_search(0, 1000, evaluate)
-        res = math.floor(res[1])
-        if evaluate(res) > 0:
-            res -= 1
-        print(f'Rank {res} given compression rate {compress_rate}.')
-        return res
-
-    def __call__(self, xs):
-        results = []
-        for j, (emb, x) in enumerate(zip(self.embedding_tables, xs)):
-            if isinstance(emb, tuple):
-                indices = x
-                accum_embed = None
-                accum_dim = 1
-                nemb = self.decomp_nembs[j]
-                for i in range(self.num_tables):
-                    if i == self.num_tables - 1:
-                        cur_ind = indices
-                    else:
-                        cur_ind = ht.mod_hash_op(indices, nemb[i])
-                        indices = ht.div_hash_op(indices, nemb[i])
-                    partial_embed = ht.embedding_lookup_op(emb[i], cur_ind)
-                    if i == 0:
-                        accum_embed = partial_embed
-                    else:
-                        accum_embed = ht.array_reshape_op(
-                            accum_embed, (-1, accum_dim, self.ranks[i]))
-                        partial_embed = ht.array_reshape_op(
-                            partial_embed, (-1, self.ranks[i], self.decomp_ndim[i] * self.ranks[i+1]))
-                        accum_embed = ht.batch_matmul_op(
-                            accum_embed, partial_embed)
-                    accum_dim *= self.decomp_ndim[i]
-                accum_embed = ht.array_reshape_op(
-                    accum_embed, (-1, accum_dim))
-                results.append(accum_embed)
-            else:
-                results.append(ht.embedding_lookup_op(emb, x))
-        result = ht.concatenate_op(results, axis=1)
-        return result
+    def __repr__(self):
+        return f'{self.name}({self.num_embeddings},{self.embedding_dim},{self.digit})'

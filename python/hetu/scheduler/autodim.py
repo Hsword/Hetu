@@ -2,7 +2,8 @@ import os
 import os.path as osp
 import numpy as np
 
-from .base import BaseTrainer
+from .base import EmbeddingTrainer
+from ..layers import AutoDimEmbedding, AutoDimRetrainEmbedding
 from ..gpu_ops import Executor
 from ..ndarray import empty, IndexedSlices
 from ..gpu_links import all_fro_norm, matrix_elementwise_divide_const, \
@@ -10,17 +11,20 @@ from ..gpu_links import all_fro_norm, matrix_elementwise_divide_const, \
     sgd_update, assign_embedding_with_indexedslices
 
 
-class AutoDimTrainer(BaseTrainer):
+class AutoDimTrainer(EmbeddingTrainer):
+    def __init__(self, dataset, model, opt, args, **kargs):
+        self.retraining = (args.phase == 'test')
+        super().__init__(dataset, model, opt, args, **kargs)
+
+    def assert_use_multi(self):
+        assert self.use_multi == self.separate_fields == int(self.retraining)
+
     def fit(self):
-        eval_nodes = self.embed_layer.get_eval_nodes(
-            self.data_ops, self.model, self.opt)
         self.alpha = self.embed_layer.alpha
+        self.r = self.embedding_args['r']
+        self.alpha_lr = self.embedding_args['alpha_lr']
+        eval_nodes = self.get_eval_nodes()
         self.lookups = self.embed_layer.lookups
-        self.var_lookups = self.embed_layer.var_lookups
-        self.num_slot = self.embed_layer.num_slot
-        self.num_cands = self.embed_layer.num_cands
-        self.r = self.embed_layer.r
-        self.alpha_lr = self.embed_layer.alpha_lr
         self.init_executor(eval_nodes)
 
         self.executor.subexecutor['alpha'].inference = False
@@ -63,9 +67,12 @@ class AutoDimTrainer(BaseTrainer):
         # re-init executor
         self.executor.return_tensor_values()
         self.set_use_multi(1)
+        self.retraining = True
         self.data_ops = self.get_data()
-        eval_nodes = self.embed_layer.get_eval_nodes_retrain(
-            self.data_ops, self.model, self.opt, stream=self.executor.config.comp_stream)
+        dim_choices = self.make_retrain(self.executor.config.comp_stream)
+        self.embed_layer = self.get_embed_layer_retrain(dim_choices)
+        self.log_func(f'New embedding layer: {self.embed_layer}')
+        eval_nodes = super().get_eval_nodes()
 
         del self.executor
 
@@ -225,26 +232,94 @@ class AutoDimTrainer(BaseTrainer):
         return results[:3]
 
     def test(self):
-        assert self.load_ckpt is not None, 'Checkpoint should be given in testing.'
-        eval_nodes = self.embed_layer.get_eval_nodes_inference(
-            self.data_ops, self.model, False)
-        self.init_executor(eval_nodes)
+        raise NotImplementedError
 
-        self.try_load_ckpt()
+    def get_embed_layer(self):
+        self.dim_candidates = [2]
+        while self.dim_candidates[-1] < self.embedding_dim:
+            self.dim_candidates.append(2 * self.dim_candidates[-1])
+        self.dim_candidates[-1] = self.embedding_dim
+        self.log_func(f'Dimension candidates: {self.dim_candidates}')
+        self.num_cands = len(self.dim_candidates)
+        return AutoDimEmbedding(
+            self.num_embed,
+            self.dim_candidates,
+            self.num_slot,
+            self.batch_size,
+            initializer=self.initializer,
+            name='AutoDimEmb',
+            ctx=self.ectx,
+        )
 
-        log_file = open(self.result_file,
-                        'w') if self.result_file is not None else None
-        with self.timing():
-            test_loss, test_metric, _ = self.validate_once(
-                self.executor.get_batch_num('validate'))
-        test_time = self.temp_time[0]
-        results = {
-            'test_loss': test_loss,
-            f'test_{self.monitor}': test_metric,
-            'test_time': test_time,
+    def get_embed_layer_retrain(self, dim_choices):
+        emb = []
+        for i, (nemb, cdim) in enumerate(zip(self.num_embed_separate, dim_choices)):
+            emb.append(AutoDimRetrainEmbedding(
+                nemb,
+                cdim,
+                self.embedding_dim,
+                initializer=self.initializer,
+                name=f'AutoDimNew_{i}',
+                ctx=self.ectx,
+            ))
+        return emb
+
+    def get_eval_nodes(self):
+        from ..gpu_ops.AssignWithIndexedSlices import AssignWithIndexedSlicesOp
+        from ..gpu_ops import gradients
+        from ..initializers import GenEmpty
+        embed_input, dense_input, y_ = self.data_ops
+        loss, prediction = self.model(
+            self.embed_layer(embed_input), dense_input, y_)
+        train_op = self.opt.minimize(loss)
+        lookups = []
+        dedup_lookups = []
+        dembed_ops = []
+        dup_dembed_ops = []
+        dparam_ops = []
+        dalpha_op = None
+        param_opts = []
+        for op in train_op:
+            if op.inputs[0] is self.alpha:
+                dalpha_op = op.inputs[1]
+            else:
+                param_opts.append(op)
+                if isinstance(op, AssignWithIndexedSlicesOp):
+                    sparse_opt = op.inputs[1]
+                    deduplookup = sparse_opt.inputs[1]
+                    lookups.append(deduplookup.inputs[2])
+                    dedup_lookups.append(deduplookup)
+                    dedupgrad = sparse_opt.inputs[2]
+                    dembed_ops.append(dedupgrad)
+                    dup_dembed_ops.append(deduplookup.inputs[0])
+                    assert deduplookup.inputs[0] is dedupgrad.inputs[1]
+                else:
+                    dparam_ops.append(op.inputs[1])
+        assert dalpha_op is not None
+
+        self.var_lookups = {dim: GenEmpty()(
+            (self.batch_size, self.num_slot, dim), f'lookups{dim}', False, self.ctx) for dim in self.dim_candidates}
+        new_loss, new_pred = self.model(self.embed_layer.make_embed(
+            self.var_lookups), dense_input, y_)
+        alpha_grad = gradients(new_loss, [self.alpha])
+
+        eval_nodes = {
+            'train': [loss, prediction, y_, param_opts],
+            'lookups': lookups + dedup_lookups + param_opts,
+            'validate': [loss, prediction, y_],
+            'allgrads': [dalpha_op] + dup_dembed_ops + dembed_ops + dparam_ops,
+            'alpha': [alpha_grad],
         }
-        printstr = ', '.join(
-            [f'{key}: {value:.4f}' for key, value in results.items()])
-        self.log_func(printstr)
-        if log_file is not None:
-            print(printstr, file=log_file, flush=True)
+
+        return eval_nodes
+
+    def make_retrain(self, stream):
+        from ..gpu_links import argmax
+        from ..ndarray import empty
+        dim_choice = empty((self.num_slot, ), ctx=self.ctx, dtype=np.int32)
+        argmax(self.alpha.tensor_value, dim_choice, 1, stream=stream)
+        stream.sync()
+        dim_choice = [self.dim_candidates[int(ind)]
+                      for ind in dim_choice.asnumpy()]
+        self.log_func('Dimension choices:', dim_choice)
+        return dim_choice

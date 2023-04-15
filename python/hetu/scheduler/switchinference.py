@@ -1,18 +1,17 @@
 import os
 
-from .base import BaseTrainer
+from .base import EmbeddingTrainer
 from ..gpu_ops import Executor
 
 
-class SwitchInferenceTrainer(BaseTrainer):
+class SwitchInferenceTrainer(EmbeddingTrainer):
     def fit(self):
         self.save_dir = self.args['save_dir']
         super().fit()
         self.executor.config.comp_stream.sync()
         self.executor.return_tensor_values()
         # check inference; use sparse embedding
-        infer_eval_nodes = self.embed_layer.get_eval_nodes_inference(
-            self.data_ops, self.model)
+        infer_eval_nodes = self.get_eval_nodes_inference()
         infer_executor = Executor(infer_eval_nodes, ctx=self.ctx,
                                   seed=self.seed, log_path=self.log_dir)
         del self.executor
@@ -41,11 +40,9 @@ class SwitchInferenceTrainer(BaseTrainer):
         assert self.load_ckpt is not None, 'Checkpoint should be given in testing.'
         from ..layers import DeepLightEmbedding
         if isinstance(self.embed_layer, DeepLightEmbedding):
-            eval_nodes = self.embed_layer.get_eval_nodes_inference(
-                self.data_ops, self.model, False)
+            eval_nodes = self.get_eval_nodes_inference(False)
         else:
-            eval_nodes = self.embed_layer.get_eval_nodes_inference(
-                self.data_ops, self.model)
+            eval_nodes = self.get_eval_nodes_inference()
         self.init_executor(eval_nodes)
 
         self.try_load_ckpt()

@@ -3,11 +3,13 @@ from .batch_split_layer import BatchSplitOnlyLayer, ReserveSplitLayer
 from .concatenate import Concatenate, ConcatenateLayers
 from .conv import Conv2d
 from .dropout import DropOut
-from .embedding import Embedding, MultipleEmbedding
-from .compressed_embedding import RobeEmbedding, HashEmbedding, MultipleHashEmbedding, \
-    CompositionalEmbedding, DeepHashEmbedding, \
-    DPQEmbedding, AutoDimEmbedding, MDEmbedding, \
-    DeepLightEmbedding, QuantizedEmbedding, TensorTrainEmbedding
+from .embedding import Embedding
+from .compressed_embedding import HashEmbedding, \
+    CompositionalEmbedding, TensorTrainEmbedding, \
+    DeepHashEmbedding, RobeEmbedding, \
+    DPQEmbedding, \
+    MDEmbedding, AutoDimEmbedding, AutoDimRetrainEmbedding, \
+    DeepLightEmbedding, QuantizedEmbedding
 from .identity import Identity
 from .linear import Linear
 from .normalization import BatchNorm, LayerNorm
