@@ -96,7 +96,7 @@ def worker(args):
         round_dim = True
         embed_layer = htl.MDEmbedding(
             num_embed_fields, num_dim, alpha, round_dim, initializer=initializer, ctx=ectx)
-    elif args.method == 'prune':
+    elif args.method == 'deeplight':
         warm = 2
         embed_layer = htl.DeepLightEmbedding(
             num_embed, num_dim, compress_rate, warm, initializer=initializer, ctx=ectx)
@@ -146,7 +146,7 @@ if __name__ == '__main__':
                         help="method to be used",
                         choices=['full', 'robe', 'hash', 'compo',
                                  'dhe', 'dpq', 'autodim', 'md',
-                                 'prune', 'quantize', 'tt'])
+                                 'deeplight', 'quantize', 'tt'])
     parser.add_argument("--phase", type=str, default='train',
                         help='train or test',
                         choices=['train', 'test'])
@@ -193,7 +193,7 @@ if __name__ == '__main__':
     if args.ectx is None:
         args.ectx = args.ctx
 
-    if args.method in ('robe', 'dpq', 'prune', 'quantize', 'autodim'):
+    if args.method in ('robe', 'dpq', 'deeplight', 'quantize', 'autodim'):
         # TODO: improve in future
         # autodim not use multi in the first stage, use multi in the second stage.
         args.use_multi = 0

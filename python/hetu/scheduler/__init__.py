@@ -1,12 +1,13 @@
 # only for DLRMs now
 
 from .base import BaseTrainer
-from .deeplight import DeepLightTrainer
+from .switchinference import SwitchInferenceTrainer
 from .autodim import AutoDimTrainer
 
 
 def get_trainer(layer):
     from ..layers.compressed_embedding import \
+        DPQEmbedding, \
         AutoDimEmbedding, \
         DeepLightEmbedding
 
@@ -18,10 +19,10 @@ def get_trainer(layer):
         # MultipleHashEmbedding: BaseTrainer,
         # CompositionalEmbedding: BaseTrainer,
         # DeepHashEmbedding: BaseTrainer,
-        # DPQEmbedding: BaseTrainer,
         # MDEmbedding: BaseTrainer,
         # QuantizedEmbedding: BaseTrainer,
-        DeepLightEmbedding: DeepLightTrainer,
+        DPQEmbedding: SwitchInferenceTrainer,
+        DeepLightEmbedding: SwitchInferenceTrainer,
         AutoDimEmbedding: AutoDimTrainer,
     }
 

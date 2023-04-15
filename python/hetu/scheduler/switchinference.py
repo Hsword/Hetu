@@ -4,7 +4,7 @@ from .base import BaseTrainer
 from ..gpu_ops import Executor
 
 
-class DeepLightTrainer(BaseTrainer):
+class SwitchInferenceTrainer(BaseTrainer):
     def fit(self):
         self.save_dir = self.args['save_dir']
         super().fit()
@@ -39,8 +39,13 @@ class DeepLightTrainer(BaseTrainer):
 
     def test(self):
         assert self.load_ckpt is not None, 'Checkpoint should be given in testing.'
-        eval_nodes = self.embed_layer.get_eval_nodes_inference(
-            self.data_ops, self.model, False)
+        from ..layers import DeepLightEmbedding
+        if isinstance(self.embed_layer, DeepLightEmbedding):
+            eval_nodes = self.embed_layer.get_eval_nodes_inference(
+                self.data_ops, self.model, False)
+        else:
+            eval_nodes = self.embed_layer.get_eval_nodes_inference(
+                self.data_ops, self.model)
         self.init_executor(eval_nodes)
 
         self.try_load_ckpt()
