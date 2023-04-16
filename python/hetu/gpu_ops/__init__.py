@@ -5,6 +5,7 @@ from .executor import wrapped_mpi_nccl_init, Executor, gradients, scheduler_init
 from .AddConst import addbyconst_op
 from .AddElewise import add_op
 from .Argmax import argmax_op
+from .ArgmaxPartial import argmax_partial_op
 from .AvgPool import avg_pool2d_op, avg_pool2d_gradient_op
 from .BatchNorm import batch_normalization_op, batch_normalization_gradient_op, batch_normalization_gradient_of_data_op, batch_normalization_gradient_of_scale_op, batch_normalization_gradient_of_bias_op
 from .Broadcast import broadcastto_op
@@ -124,6 +125,7 @@ __all__ = [
     'addbyconst_op',
     'add_op',
     'argmax_op',
+    'argmax_partial_op',
     'avg_pool2d_op',
     'avg_pool2d_gradient_op',
     'batch_normalization_op',

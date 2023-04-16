@@ -57,16 +57,22 @@ class HetuTester(object):
 
     def test(self, input_shapes, rtol=1e-7, atol=0):
         input_vals = []
-        for dt, shape in zip(self.in_dtype, input_shapes):
-            if dt == 'f':
-                cur_val = self.random_float(shape)
-            elif dt == 'uf':
-                cur_val = self.random_float(shape, 0, 10)
-            elif dt == 'i':
-                cur_val = self.random_int(shape, -10, 10)
-            else:
-                cur_val = self.random_int(shape, 1, 1000)
-            input_vals.append(cur_val)
+        if self.cpu_op.op_type == 'ArgmaxPartialOp':
+            input_vals = [self.random_float(
+                input_shapes[0]), self.random_int(input_shapes[1], 0, 2)]
+            self.cpu_inputs[1].dtype = np.int32
+            self.gpu_inputs[1].dtype = np.int32
+        else:
+            for dt, shape in zip(self.in_dtype, input_shapes):
+                if dt == 'f':
+                    cur_val = self.random_float(shape)
+                elif dt == 'uf':
+                    cur_val = self.random_float(shape, 0, 10)
+                elif dt == 'i':
+                    cur_val = self.random_int(shape, -10, 10)
+                else:
+                    cur_val = self.random_int(shape, 1, 1000)
+                input_vals.append(cur_val)
         cpu_result, gpu_result = self.run(input_vals)
         assert not np.any(np.logical_or(np.isnan(cpu_result), np.isinf(
             cpu_result))), 'NAN of INF exist in cpu result!'

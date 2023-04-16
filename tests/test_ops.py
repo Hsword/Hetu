@@ -369,6 +369,18 @@ def test_exp():
     tester.test([(89, 71, 13, 101)], rtol=1e-6)
 
 
+def test_argmax_partial():
+    tester = HetuTester(ht.argmax_partial_op, 2, 3, 1)
+    tester.test([(3, 4), (3,)])
+    tester.test([(89, 93, 71), (89,)])
+    tester = HetuTester(ht.argmax_partial_op, 2, 2, 2)
+    tester.test([(3, 4, 5), (3,)])
+    tester.test([(89, 93, 71, 13), (89,)])
+    tester = HetuTester(ht.argmax_partial_op, 2, 4, 3)
+    tester.test([(3, 4, 5, 5, 6), (3,)])
+    tester.test([(89, 93, 71, 13, 1, 2), (89,)])
+
+
 def test_optimizers():
     test_shapes = [
         (1000, 8),
@@ -455,4 +467,5 @@ test_argmax()
 test_log_softmax()
 test_softmax()
 test_exp()
+test_argmax_partial()
 test_optimizers()

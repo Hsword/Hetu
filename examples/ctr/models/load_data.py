@@ -2,6 +2,7 @@ import os
 import os.path as osp
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 default_data_path = osp.join(
     osp.split(osp.abspath(__file__))[0], '../datasets')
@@ -115,6 +116,56 @@ class CTRDataset(object):
 
     def get_split_indices(self, num_samples):
         raise NotImplementedError
+
+    def _binary_search_frequency(self, left, right, counter, target):
+        if left >= right - 1:
+            return left
+        middle = (left + right) // 2
+        high_freq_num = np.sum(counter >= middle)
+        if high_freq_num > target:
+            return self._binary_search_frequency(middle, right, counter, target)
+        elif high_freq_num < target:
+            return self._binary_search_frequency(left, middle, counter, target)
+        else:
+            return middle
+
+    def get_single_frequency_split(self, train_data, num_embed, top_percent, fpath):
+        if osp.exists(fpath):
+            result = np.fromfile(fpath, dtype=np.int32)
+        else:
+            dirpath, filepath = osp.split(fpath)
+            cache_fpath = osp.join(dirpath, 'counter_' + filepath)
+            if osp.exists(cache_fpath):
+                counter = np.fromfile(cache_fpath, dtype=np.int32)
+            else:
+                counter = np.zeros((num_embed,), dtype=np.int32)
+                for idx in tqdm(train_data.reshape(-1)):
+                    counter[idx] += 1
+                counter.tofile(cache_fpath)
+            nhigh = len(counter) * top_percent
+            kth = self._binary_search_frequency(
+                np.min(counter), np.max(counter) + 1, counter, nhigh)
+            print(f'The threshold for high frequency is {kth}.')
+            result = (counter >= kth).astype(np.int32)
+            print(
+                f'Real ratio of high frequency is {np.sum(result) / len(result)}.')
+            result.tofile(fpath)
+        return result
+
+    def get_whole_frequency_split(self, train_data, top_percent):
+        freq_path = osp.join(self.path, 'freq_split.bin')
+        result = self.get_single_frequency_split(
+            train_data, self.num_embed, top_percent, freq_path)
+        return result
+
+    def get_separate_frequency_split(self, train_data, top_percent):
+        separate_dir = osp.join(self.path, 'freq_split_separate')
+        os.makedirs(separate_dir, exist_ok=True)
+        freq_paths = [
+            osp.join(separate_dir, f'fields{i}.bin') for i in range(self.num_sparse)]
+        results = [self.get_single_frequency_split(data, nemb, top_percent, fp) for data, nemb, fp in zip(
+            train_data, self.num_embed_separate, freq_paths)]
+        return results
 
     def process_all_data_by_day(self, use_test=True, separate_fields=False):
         path = self.path

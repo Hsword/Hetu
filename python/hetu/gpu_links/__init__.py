@@ -97,6 +97,7 @@ __all__ = [
     'matrix_elementwise_add_simple',
     'matrix_elementwise_add_lazy',
     'argmax',
+    'argmax_partial',
     'array_set',
     'reduce_norm2',
     'reduce_norm2_raw',

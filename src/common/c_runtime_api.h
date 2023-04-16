@@ -1039,6 +1039,11 @@ HETUSYS_EXTERN_C {
     int DLGpuArgmax(const DLArrayHandle input, DLArrayHandle output, int dim,
                     DLStreamHandle stream_handle = NULL);
 
+    int DLGpuArgmaxPartial(const DLArrayHandle input,
+                           const DLArrayHandle full_mask, DLArrayHandle output,
+                           int dim, int topk,
+                           DLStreamHandle stream_handle = NULL);
+
     int DLGpuCumsumWithBias(DLArrayHandle input, DLArrayHandle output,
                             float bias, int dim,
                             DLStreamHandle stream_handle = NULL);

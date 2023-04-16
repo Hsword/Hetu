@@ -7,7 +7,7 @@ from .embedding import Embedding
 from .compressed_embedding import HashEmbedding, \
     CompositionalEmbedding, TensorTrainEmbedding, \
     DeepHashEmbedding, RobeEmbedding, \
-    DPQEmbedding, \
+    DPQEmbedding, MGQEmbedding, \
     MDEmbedding, AutoDimEmbedding, AutoDimRetrainEmbedding, \
     DeepLightEmbedding, QuantizedEmbedding
 from .identity import Identity

@@ -51,6 +51,14 @@ def worker(args):
             'share_weights': False,
             'mode': 'vq',
         }
+    elif args.method == 'mgqe':
+        embed_layer_type = htl.MGQEmbedding
+        embedding_args = {
+            'high_num_choices': 256,
+            'low_num_choices': 64,
+            'num_parts': 4,
+            'top_percent': 0.1,
+        }
     elif args.method == 'md':
         embed_layer_type = htl.MDEmbedding
         embedding_args = {
@@ -109,9 +117,10 @@ if __name__ == '__main__':
                         help="model to be tested")
     parser.add_argument("--method", type=str, default='full',
                         help="method to be used",
-                        choices=['full', 'robe', 'hash', 'compo',
-                                 'dhe', 'dpq', 'autodim', 'md',
-                                 'deeplight', 'quantize', 'tt'])
+                        choices=['full', 'hash', 'compo', 'tt',
+                                 'dhe', 'robe', 'dpq', 'mgqe',
+                                 'md', 'autodim',
+                                 'deeplight', 'quantize', ])
     parser.add_argument("--phase", type=str, default='train',
                         help='train or test',
                         choices=['train', 'test'])
