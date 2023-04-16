@@ -8,6 +8,7 @@ from .dhe import DHETrainer
 from .robe import ROBETrainer
 from .dpq import DPQTrainer
 from .mgqe import MGQETrainer
+from .adapt import AdaptEmbTrainer
 from .md import MDETrainer
 from .autodim import AutoDimTrainer
 from .deeplight import DeepLightTrainer
@@ -15,7 +16,7 @@ from .quantize import QuantizeEmbTrainer
 from ..layers import Embedding, HashEmbedding, \
     CompositionalEmbedding, TensorTrainEmbedding, \
     DeepHashEmbedding, RobeEmbedding, \
-    DPQEmbedding, MGQEmbedding, \
+    DPQEmbedding, MGQEmbedding, AdaptiveEmbedding, \
     MDEmbedding, AutoDimEmbedding, \
     DeepLightEmbedding, QuantizedEmbedding
 
@@ -29,6 +30,7 @@ _layer2trainer_mapping = {
     RobeEmbedding: ROBETrainer,
     DPQEmbedding: DPQTrainer,
     MGQEmbedding: MGQETrainer,
+    AdaptiveEmbedding: AdaptEmbTrainer,
     MDEmbedding: MDETrainer,
     AutoDimEmbedding: AutoDimTrainer,
     DeepLightEmbedding: DeepLightTrainer,

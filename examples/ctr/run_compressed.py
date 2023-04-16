@@ -59,6 +59,12 @@ def worker(args):
             'num_parts': 4,
             'top_percent': 0.1,
         }
+    elif args.method == 'adapt':
+        embed_layer_type = htl.AdaptiveEmbedding
+        embedding_args = {
+            'high_freq_ratio': 0.5,
+            'top_percent': 0.1,
+        }
     elif args.method == 'md':
         embed_layer_type = htl.MDEmbedding
         embedding_args = {
@@ -118,7 +124,7 @@ if __name__ == '__main__':
     parser.add_argument("--method", type=str, default='full',
                         help="method to be used",
                         choices=['full', 'hash', 'compo', 'tt',
-                                 'dhe', 'robe', 'dpq', 'mgqe',
+                                 'dhe', 'robe', 'dpq', 'mgqe', 'adapt',
                                  'md', 'autodim',
                                  'deeplight', 'quantize', ])
     parser.add_argument("--phase", type=str, default='train',
