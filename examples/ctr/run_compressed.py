@@ -48,7 +48,7 @@ def worker(args):
         embedding_args = {
             'num_choices': 32,
             'num_parts': 8,
-            'share_weights': True,
+            'share_weights': False,
             'mode': 'vq',
         }
     elif args.method == 'md':
@@ -158,7 +158,7 @@ if __name__ == '__main__':
     if args.ectx is None:
         args.ectx = args.ctx
 
-    if args.method in ('robe', 'dpq', 'deeplight', 'quantize', 'autodim'):
+    if args.method in ('robe', 'deeplight', 'quantize', 'autodim'):
         # autodim not use multi in the first stage, use multi in the second stage.
         args.use_multi = 0
     elif args.method in ('compo', 'md', 'tt', 'dhe'):

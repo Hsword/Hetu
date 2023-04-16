@@ -190,7 +190,7 @@ class RobeEmbedding(Embedding):
 
 
 class DPQEmbedding(Embedding):
-    def __init__(self, num_embeddings, embedding_dim, num_choices, num_parts, num_slot, batch_size, share_weights=False, mode='vq', initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+    def __init__(self, num_embeddings, embedding_dim, num_choices, num_parts, batch_size, share_weights=False, mode='vq', initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         from ..initializers import nulls
         from .normalization import BatchNorm
         assert mode in ('vq', 'sx')
@@ -199,8 +199,7 @@ class DPQEmbedding(Embedding):
         self.embedding_dim = embedding_dim
         self.num_choices = num_choices
         self.num_parts = num_parts
-        self.num_slot = num_slot
-        self.batch_size = batch_size
+        self.batch_size = batch_size  # contains slot if use multi==0
         self.share_weights = share_weights
         self.mode = mode
         self.part_embedding_dim = embedding_dim // num_parts
@@ -220,7 +219,7 @@ class DPQEmbedding(Embedding):
         if not self.share_weights:
             dbase = np.array(
                 [self.num_choices * d for d in range(self.num_parts)], dtype=int)
-            dbase = np.tile(dbase, [self.batch_size * self.num_slot, 1])
+            dbase = np.tile(dbase, [self.batch_size, 1])
             dbase = ht.array(dbase, ctx=self.ctx)
             self.dbase = ht.placeholder_op(
                 'dbase', value=dbase, trainable=False)
@@ -302,6 +301,8 @@ class DPQEmbedding(Embedding):
                     outputs, (-1, self.embedding_dim))
                 # (bs * slot, dim)
 
+            outputs_final = ht.array_reshape_op(
+                outputs_final, (-1, self.embedding_dim))
             return outputs_final
 
     def make_inference(self, embed_input):
@@ -309,8 +310,7 @@ class DPQEmbedding(Embedding):
             codes = ht.embedding_lookup_op(self.codebooks, embed_input)
             # (bs, slot, npart)
             if not self.share_weights:
-                codes = ht.add_op(codes, ht.array_reshape_op(
-                    self.dbase, (-1, self.num_slot, self.num_parts)))
+                codes = ht.add_op(codes, ht.reshape_to_op(self.dbase, codes))
             outputs = ht.embedding_lookup_op(self.value_matrix, codes)
             # (bs, slot, npart, pdim)
             outputs = ht.array_reshape_op(outputs, (-1, self.embedding_dim))
