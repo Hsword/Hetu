@@ -175,8 +175,8 @@ if __name__ == '__main__':
     if args.method in ('robe', 'deeplight', 'quantize', 'autodim'):
         # autodim not use multi in the first stage, use multi in the second stage.
         args.use_multi = 0
-    elif args.method in ('compo', 'md', 'tt', 'dhe'):
-        # dhe both is ok; use multi is better according to semantic meaning.
+    elif args.method in ('compo', 'md', 'tt', 'dhe', 'mgqe', 'adapt'):
+        # dhe, mgqe, adapt both is ok; use multi is better according to semantic meaning.
         args.use_multi = 1
     if args.method == 'autodim' and args.phase == 'test':
         args.use_multi = 1
