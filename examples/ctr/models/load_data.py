@@ -193,6 +193,7 @@ class CTRDataset(object):
         else:
             result = self.get_whole_frequency_split(train_data, top_percent)
             remap_indices = self.remap_split_frequency(result)
+            remap_indices.tofile(remap_path)
         return remap_indices
 
     def get_separate_remap(self, train_data, top_percent):

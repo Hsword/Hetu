@@ -1,6 +1,9 @@
 #include "gpu_runtime.h"
+#include "dispatch.h"
 
-__global__ void opposite_kernel(float *input, float *output, size_t size) {
+template <typename spec_t>
+__global__ void opposite_kernel(const spec_t *input, spec_t *output,
+                                size_t size) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (ind >= size)
         return;
@@ -9,26 +12,17 @@ __global__ void opposite_kernel(float *input, float *output, size_t size) {
 
 int DLGpuOpposite(const DLArrayHandle input, DLArrayHandle output,
                   DLStreamHandle stream_handle = NULL) {
-    size_t size = 1;
-    for (index_t i = 0; i < input->ndim; i++) {
-        size *= input->shape[i];
-    }
+    size_t size = ArrSize(input);
     dim3 blocks;
     dim3 threads;
-    float *input_data = (float *)input->data;
-    float *output_data = (float *)output->data;
-    if (size <= 1024) {
-        threads.x = size;
-        blocks.x = 1;
-    } else {
-        threads.x = 1024;
-        blocks.x = (size + 1023) / 1024;
-    }
-    if (stream_handle)
-        opposite_kernel<<<blocks, threads, 0,
-                          *(cudaStream_t *)stream_handle->handle>>>(
-            input_data, output_data, size);
-    else
-        opposite_kernel<<<blocks, threads>>>(input_data, output_data, size);
+    ThreadBlock1D(threads, blocks, size);
+    void *input_data = input->data;
+    void *output_data = output->data;
+    assert(stream_handle != NULL);
+    cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
+    HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(input->dtype, spec_t, [&]() {
+        opposite_kernel<spec_t><<<blocks, threads, 0, stream>>>(
+            (const spec_t *)input_data, (spec_t *)output_data, size);
+    });
     return 0;
 }

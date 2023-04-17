@@ -20,6 +20,8 @@ class EmbeddingLookUp(Op):
         super().__init__(EmbeddingLookUp, [embedding, index], ctx)
         embedding.is_embed = True
         self.grad_node = None
+        self.dtype = embedding.dtype
+        assert index.dtype == np.int32
 
     def _compute_cpu_dnnl(self, input_vals, output_val, stream_handle=None):
         cpu_embedding_lookup(input_vals[0], input_vals[1], output_val)
@@ -236,6 +238,8 @@ class EmbeddingLookUp_Gradient_With_Lookup(Op):
         self.dedup_args = None
         self.embed_shape = embed_shape
         self.tmp_dedup_grad = None
+        assert index.dtype == np.int32
+        assert vectors.dtype == lookup.dtype == np.float32
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_gpu:
@@ -275,6 +279,7 @@ class EmbeddingLookUp_Gradient_DedupGrad(Op):
     def __init__(self, emb_grad_opt, grad, ctx=None):
         super().__init__(EmbeddingLookUp_Gradient_DedupGrad,
                          [emb_grad_opt, grad], ctx)
+        assert grad.dtype == np.float32
 
     def compute(self, input_vals, output_val, stream_handle=None):
         assert False, 'In memory plan we already set the result array; should not call the compute.'

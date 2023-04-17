@@ -8,6 +8,7 @@ from ..gpu_links import array_reshape
 class ReshapeToOp(Op):
     def __init__(self, node_A, target, ctx=None):
         super().__init__(ReshapeToOp, [node_A, target], ctx)
+        self.dtype = node_A.dtype
 
     def compute(self, input_vals, output_val, stream_handle=None):
         output_shape = output_val.shape

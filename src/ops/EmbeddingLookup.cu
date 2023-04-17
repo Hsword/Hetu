@@ -1,18 +1,20 @@
 #include "gpu_runtime.h"
+#include "dispatch.h"
 
-__global__ void embedding_lookup_kernel(const float *input, const int *ids,
-                                        float *output, size_t nrow,
+template <typename spec_t>
+__global__ void embedding_lookup_kernel(const spec_t *input, const int *ids,
+                                        spec_t *output, size_t nrow,
                                         size_t length, size_t size) {
     size_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= size)
         return;
     int id = ids[index];
-    float *output_ptr = output + length * index;
+    spec_t *output_ptr = output + length * index;
     if (id < 0 || id >= nrow) {
         for (int i = 0; i < length; ++i)
             output_ptr[i] = 0;
     } else {
-        const float *input_ptr = input + length * id;
+        const spec_t *input_ptr = input + length * id;
         for (int i = 0; i < length; ++i)
             output_ptr[i] = input_ptr[i];
     }
@@ -34,15 +36,15 @@ int DLGpuEmbeddingLookUp(const DLArrayHandle input, const DLArrayHandle ids,
     dim3 blocks;
     dim3 threads;
     ThreadBlock1D(threads, blocks, size);
-    float *output_data = (float *)output->data;
-    const float *input_data = (const float *)input->data;
+    void *output_data = output->data;
+    void *input_data = input->data;
     const int *id_list = (const int *)ids->data;
-    if (stream_handle)
-        embedding_lookup_kernel<<<blocks, threads, 0,
-                                  *(cudaStream_t *)stream_handle->handle>>>(
-            input_data, id_list, output_data, nrow, length, size);
-    else
-        embedding_lookup_kernel<<<blocks, threads>>>(
-            input_data, id_list, output_data, nrow, length, size);
+    assert(stream_handle != NULL);
+    cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
+    HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(input->dtype, spec_t, [&]() {
+        embedding_lookup_kernel<spec_t><<<blocks, threads, 0, stream>>>(
+            (const spec_t *)input_data, id_list, (spec_t *)output_data, nrow,
+            length, size);
+    });
     return 0;
 }

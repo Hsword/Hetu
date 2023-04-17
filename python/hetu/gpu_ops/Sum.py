@@ -15,6 +15,10 @@ class SumOp(Op):
         super().__init__(SumOp, list(node_list), ctx)
         self.lazy_execution = True
         self.compute_to_be_config = False
+        dtype = node_list[0].dtype
+        for n in node_list[1:]:
+            assert dtype == n.dtype
+        self.dtype = dtype
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:

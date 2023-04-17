@@ -248,123 +248,123 @@ class ReversedTruncatedNormalInit(BaseInit):
 
 # here we provide easy APIs
 
-def nulls(shape, name=None, trainable=True, ctx=None):
+def nulls(shape, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'empty_initializer'
     init = EmptyInit(shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
-def zeros(shape, name=None, trainable=True, ctx=None):
+def zeros(shape, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'zeros_initializer'
     init = ZerosInit(shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
-def ones(shape, name=None, trainable=True, ctx=None):
+def ones(shape, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'ones_initializer'
     init = OnesInit(shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
-def constant(shape, fill_value=0.0, name=None, trainable=True, ctx=None):
+def constant(shape, fill_value=0.0, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'constant_initializer'
     init = ConstantInit(fill_value, shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
-def truncated_normal(shape, mean=0.0, stddev=1.0, name=None, trainable=True, ctx=None):
+def truncated_normal(shape, mean=0.0, stddev=1.0, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'truncated_normal_initializer'
     init = TruncatedNormalInit(mean, stddev, shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
-def reversed_truncated_normal(shape, mean=0.0, stddev=1.0, name=None, trainable=True, ctx=None):
+def reversed_truncated_normal(shape, mean=0.0, stddev=1.0, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'reversed_truncated_normal_initializer'
     init = ReversedTruncatedNormalInit(mean, stddev, shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
-def random_normal(shape, mean=0.0, stddev=1.0, name=None, trainable=True, ctx=None):
+def random_normal(shape, mean=0.0, stddev=1.0, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'random_normal_initializer'
     init = NormalInit(mean, stddev, shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
-def random_uniform(shape, minval=-1.0, maxval=1.0, name=None, trainable=True, ctx=None):
+def random_uniform(shape, minval=-1.0, maxval=1.0, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'random_uniform_initializer'
     init = UniformInit(minval, maxval, shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
-def general_xavier_normal(shape, gain, mode, name=None, trainable=True, ctx=None):
+def general_xavier_normal(shape, gain, mode, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'general_xavier_normal_initializer'
     init = GeneralXavierNormalInit(gain, mode, shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
-def general_xavier_uniform(shape, gain, mode, name=None, trainable=True, ctx=None):
+def general_xavier_uniform(shape, gain, mode, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'general_xavier_uniform_initializer'
     init = GeneralXavierUniformInit(gain, mode, shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
-def xavier_normal(shape, name=None, trainable=True, ctx=None):
+def xavier_normal(shape, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'xavier_normal_initializer'
     init = XavierNormalInit(shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
-def xavier_uniform(shape, name=None, trainable=True, ctx=None):
+def xavier_uniform(shape, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'xavier_uniform_initializer'
     init = XavierUniformInit(shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
-def he_normal(shape, name=None, trainable=True, ctx=None):
+def he_normal(shape, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'he_normal_initializer'
     init = HeNormalInit(shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
-def he_uniform(shape, name=None, trainable=True, ctx=None):
+def he_uniform(shape, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'he_uniform_initializer'
     init = HeUniformInit(shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
-def lecun_normal(shape, name=None, trainable=True, ctx=None):
+def lecun_normal(shape, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'lecun_normal_initializer'
     init = LecunNormalInit(shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
-def lecun_uniform(shape, name=None, trainable=True, ctx=None):
+def lecun_uniform(shape, name=None, trainable=True, dtype=np.float32, ctx=None):
     if name is None:
         name = 'lecun_uniform_initializer'
     init = LecunUniformInit(shape)
-    return Variable(name=name, initializer=init, trainable=trainable, ctx=ctx)
+    return Variable(name=name, initializer=init, trainable=trainable, dtype=dtype, ctx=ctx)
 
 
 # here we provide generators
 
 def _generate(init_func, **init_kargs):
-    def _generator_helper(shape, name=None, trainable=True, ctx=None):
-        return init_func(shape=shape, name=name, trainable=trainable, ctx=ctx, **init_kargs)
+    def _generator_helper(shape, name=None, trainable=True, dtype=np.float32, ctx=None):
+        return init_func(shape=shape, name=name, trainable=trainable, dtype=dtype, ctx=ctx, **init_kargs)
     return _generator_helper
 
 

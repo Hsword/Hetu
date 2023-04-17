@@ -215,14 +215,14 @@ class DPQEmbedding(Embedding):
         self.bn_layer = BatchNorm(
             self.num_choices, scale=False, bias=False, name='{}_bn'.format(name))
         self.codebooks = nulls(shape=(num_embeddings, self.num_parts), name='{}_codebook'.format(
-            name), ctx=ctx, trainable=False)
+            name), ctx=ctx, dtype=np.int32, trainable=False)
         if not self.share_weights:
             dbase = np.array(
                 [self.num_choices * d for d in range(self.num_parts)], dtype=int)
             dbase = np.tile(dbase, [self.batch_size, 1])
-            dbase = ht.array(dbase, ctx=self.ctx)
+            dbase = ht.array(dbase, dtype=np.int32, ctx=self.ctx)
             self.dbase = ht.placeholder_op(
-                'dbase', value=dbase, trainable=False)
+                'dbase', value=dbase, dtype=np.int32, trainable=False)
 
     def make_matries(self, initializer, name):
         if self.share_weights:
@@ -323,8 +323,10 @@ class MGQEmbedding(DPQEmbedding):
         super().__init__(num_embeddings, embedding_dim, high_num_choices,
                          num_parts, batch_size, False, 'vq', initializer, name, ctx)
         self.low_num_choices = low_num_choices
+        frequency = ht.array(frequency.reshape((-1, 1)),
+                             dtype=np.int32, ctx=self.ctx)
         self.frequency = ht.placeholder_op(
-            f'{name}_frequency', value=frequency.reshape((-1, 1)), dtype=np.int32, trainable=False)
+            f'{name}_frequency', value=frequency, dtype=np.int32, trainable=False)
 
     def make_matries(self, initializer, name):
         if self.share_weights:
@@ -403,8 +405,10 @@ class AdaptiveEmbedding(Embedding):
             shape=(num_freq_emb, embedding_dim), name=f'{name}_freq', ctx=ctx)
         self.rare_emb = initializer(
             shape=(num_rare_emb, embedding_dim), name=f'{name}_rare', ctx=ctx)
+        remap_indices = ht.array(remap_indices.reshape(
+            (-1, 1)), dtype=np.int32, ctx=self.ctx)
         self.remap_indices = ht.placeholder_op(
-            f'{name}_remap', value=remap_indices.reshape((-1, 1)), dtype=np.int32, trainable=False)
+            f'{name}_remap', value=remap_indices, dtype=np.int32, trainable=False)
 
     def __call__(self, x):
         with ht.context(self.ctx):

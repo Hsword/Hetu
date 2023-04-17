@@ -57,14 +57,34 @@ class DLContext(ctypes.Structure):
         return hash(self) != hash(other)
 
 
+DataType = {
+    np.float32: 0,
+    np.int32: 1,
+    np.uint32: 2,
+    np.int8: 3,
+    np.uint8: 4,
+    np.int16: 5,
+    np.uint16: 6,
+}
+
+
+def get_dtype(dtype):
+    if isinstance(dtype, np.dtype):
+        dtype = dtype.type
+    return DataType[dtype]
+
+
 class DLArray(ctypes.Structure):
     """DLArray in C API"""
-    _fields_ = [("data", ctypes.c_void_p),
-                ("ctx", DLContext),
-                ("ndim", ctypes.c_int),
-                ("shape", ctypes.POINTER(ctypes.c_int64)),
-                ("stride", ctypes.POINTER(ctypes.c_int64)),
-                ("nbits", ctypes.c_int)]
+    _fields_ = [
+        ("data", ctypes.c_void_p),
+        ("ctx", DLContext),
+        ("ndim", ctypes.c_int),
+        ("shape", ctypes.POINTER(ctypes.c_int64)),
+        ("stride", ctypes.POINTER(ctypes.c_int64)),
+        ("nbits", ctypes.c_int),
+        ("dtype", ctypes.c_int8),
+    ]
 
 
 DLArrayHandle = ctypes.POINTER(DLArray)
@@ -311,6 +331,7 @@ class NDArray(object):
         arr.nbits = get_nbits(data.dtype)
         # CPU device
         arr.ctx = cpu(0)
+        arr.dtype = get_dtype(data.dtype)
         return arr, shape, stride
 
     def asnumpy(self):
@@ -362,6 +383,7 @@ class NDArray(object):
         arr.ctx = self.handle.contents.ctx
         arr.ndim = len(shape)
         arr.nbits = self.handle.contents.nbits
+        arr.dtype = self.handle.contents.dtype
         arr.shape = c_array(ctypes.c_int64, shape)
         arr.stride = c_array(ctypes.c_int64, shape_to_stride(shape))
         target.handle = ctypes.pointer(arr)
@@ -382,6 +404,7 @@ class NDArray(object):
         arr.shape = self.handle.contents.shape
         arr.stride = self.handle.contents.stride
         arr.nbits = self.handle.contents.nbits
+        arr.dtype = self.handle.contents.dtype
         target.handle = ctypes.pointer(arr)
         target.no_free = True
 
@@ -432,6 +455,7 @@ class NDArray(object):
         arr.shape = c_array(ctypes.c_int64, tuple(shape))
         arr.stride = c_array(ctypes.c_int64, tuple(target_stride))
         arr.nbits = self.handle.contents.nbits
+        arr.dtype = self.handle.contents.dtype
         target.handle = ctypes.pointer(arr)
         target.no_free = True
 
@@ -446,6 +470,7 @@ class NDArray(object):
                                      self.handle.contents.ctx, ctypes.byref(handle), ctypes.c_int(get_nbits(self.dtype))))
         check_call(_LIB.DLGpuArrayLazyCallback(
             self.handle, handle, stream.handle if stream else None))
+        handle.contents.dtype = get_dtype(self.dtype)
         self.handle = handle
 
     def wrapped_lazy_callback(self, stream=None):
@@ -498,6 +523,7 @@ def empty(shape, ctx=cpu(0), dtype=np.float32, force32=True):
     handle = DLArrayHandle()
     check_call(_LIB.DLArrayAlloc(
         shape, stride, ndim, ctx, ctypes.byref(handle), ctypes.c_int(get_nbits(dtype))))
+    handle.contents.dtype = get_dtype(dtype)
     return NDArray(handle, dtype=dtype, force32=force32)
 
 
@@ -515,6 +541,7 @@ def numpyasdlarrayhandle(data):
     arr.stride = c_array(ctypes.c_int64, shape_to_stride(data.shape))
     arr.ndim = data.ndim
     arr.nbits = get_nbits(data.dtype)
+    arr.dtype = get_dtype(data.dtype)
     arr.ctx = cpu(0)
     return arr
 

@@ -19,6 +19,8 @@ class AddOp(Op):
         super().__init__(AddOp, [node_A, node_B], ctx)
         self.lazy_execution = True
         self.compute_to_be_config = False
+        assert node_A.dtype == node_B.dtype
+        self.dtype = node_A.dtype
 
     def _compute_with_index(self, input_vals, output_val, stream_handle=None):
         def cpu_oneside_add(sparse, dense):
