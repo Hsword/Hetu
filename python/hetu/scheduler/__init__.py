@@ -13,12 +13,13 @@ from .md import MDETrainer
 from .autodim import AutoDimTrainer
 from .deeplight import DeepLightTrainer
 from .quantize import QuantizeEmbTrainer
+from .alpt import ALPTEmbTrainer
 from ..layers import Embedding, HashEmbedding, \
     CompositionalEmbedding, TensorTrainEmbedding, \
     DeepHashEmbedding, RobeEmbedding, \
     DPQEmbedding, MGQEmbedding, AdaptiveEmbedding, \
     MDEmbedding, AutoDimEmbedding, \
-    DeepLightEmbedding, QuantizedEmbedding
+    DeepLightEmbedding, QuantizedEmbedding, ALPTEmbedding
 
 
 _layer2trainer_mapping = {
@@ -35,6 +36,7 @@ _layer2trainer_mapping = {
     AutoDimEmbedding: AutoDimTrainer,
     DeepLightEmbedding: DeepLightTrainer,
     QuantizedEmbedding: QuantizeEmbTrainer,
+    ALPTEmbedding: ALPTEmbTrainer,
 }
 
 _trainer2layer_mapping = {value: key for key,

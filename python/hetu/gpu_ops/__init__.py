@@ -104,6 +104,7 @@ from .CompressedEmbedding import mod_hash_op, div_hash_op, compo_hash_op, learn_
 from .TrilLookup import tril_lookup_op, tril_lookup_gradient_op
 from .Prune import prune_low_magnitude_op
 from .Quantize import quantize_op, dequantize_op
+from .QuantizeALPTEmb import alpt_embedding_lookup_op, alpt_rounding_op, alpt_scale_gradient_op
 from .QuantizeEmbedding import quantized_embedding_lookup_op, unified_quantized_embedding_lookup_op
 from .AssignWithIndexedSlices import assign_with_indexedslices_op, assign_quantized_embedding_op
 from .Sample import uniform_sample_op, normal_sample_op, truncated_normal_sample_op, gumbel_sample_op
@@ -275,6 +276,9 @@ __all__ = [
     'prune_low_magnitude_op',
     'quantize_op',
     'dequantize_op',
+    'alpt_embedding_lookup_op',
+    'alpt_rounding_op',
+    'alpt_scale_gradient_op',
     'quantized_embedding_lookup_op',
     'unified_quantized_embedding_lookup_op',
     'assign_with_indexedslices_op',

@@ -1198,6 +1198,9 @@ HETUSYS_EXTERN_C {
     int DLGpuDequantize(const DLArrayHandle input, DLArrayHandle output,
                         int digit, float scale, float minele,
                         DLStreamHandle stream_handle);
+    int DLGpuDequantizeSigned(const DLArrayHandle input, DLArrayHandle output,
+                              int digit, float scale, float middle,
+                              DLStreamHandle stream_handle);
 
     int DLGpuPrepackEmbedding(const DLArrayHandle input, DLArrayHandle output,
                               DLArrayHandle qparams, int digit,
@@ -1206,6 +1209,10 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle input, const DLArrayHandle indices,
         DLArrayHandle output, DLArrayHandle qparams, int digit,
         DLStreamHandle stream_handle);
+    int DLGpuQuantizedEmbeddingLookupWithScale(
+        const DLArrayHandle input, const DLArrayHandle indices,
+        const DLArrayHandle scale, DLArrayHandle output, int digit,
+        float middle, DLStreamHandle stream_handle);
     int DLGpuUnifiedQuantizedEmbeddingLookup(
         const DLArrayHandle input, const DLArrayHandle indices,
         DLArrayHandle output, int digit, float scale, float minele,
@@ -1213,6 +1220,19 @@ HETUSYS_EXTERN_C {
     int DLGpuRoundingToInt(const DLArrayHandle input, DLArrayHandle output,
                            float scale, float minele, int digit,
                            bool stochastic, DLStreamHandle stream_handle);
+    int DLGpuRoundingToSignedInt(
+        const DLArrayHandle input, DLArrayHandle output, float scale,
+        float middle, int digit, bool stochastic, DLStreamHandle stream_handle);
+    int DLGpuQuantizeEmbeddingWithScale(
+        const DLArrayHandle input, const DLArrayHandle scale,
+        DLArrayHandle output, float middle, int digit,
+        DLStreamHandle stream_handle);
+    int DLGpuLSQRounding(const DLArrayHandle input, const DLArrayHandle scale,
+                         DLArrayHandle output, int digit, float middle,
+                         DLStreamHandle stream_handle);
+    int DLGpuLSQRoundingGradient(const DLArrayHandle input,
+                                 DLArrayHandle output, int digit,
+                                 DLStreamHandle stream_handle);
 
 } // HETUSYS_EXTERN_C
 

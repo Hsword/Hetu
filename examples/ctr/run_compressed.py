@@ -89,6 +89,12 @@ def worker(args):
             'middle': 0,
             'use_qparam': False,
         }
+    elif args.method == 'alpt':
+        embed_layer_type = htl.ALPTEmbedding
+        embedding_args = {
+            'digit': 16,
+            'init_scale': 0.01,
+        }
     else:
         raise NotImplementedError
 
@@ -125,7 +131,7 @@ if __name__ == '__main__':
                         choices=['full', 'hash', 'compo', 'tt',
                                  'dhe', 'robe', 'dpq', 'mgqe', 'adapt',
                                  'md', 'autodim',
-                                 'deeplight', 'quantize', ])
+                                 'deeplight', 'quantize', 'alpt',])
     parser.add_argument("--phase", type=str, default='train',
                         help='train or test',
                         choices=['train', 'test'])
@@ -172,7 +178,7 @@ if __name__ == '__main__':
     if args.ectx is None:
         args.ectx = args.ctx
 
-    if args.method in ('robe', 'deeplight', 'quantize', 'autodim'):
+    if args.method in ('robe', 'deeplight', 'quantize', 'alpt', 'autodim'):
         # autodim not use multi in the first stage, use multi in the second stage.
         args.use_multi = 0
     elif args.method in ('compo', 'md', 'tt', 'dhe', 'mgqe', 'adapt'):
