@@ -202,7 +202,7 @@ class EmbeddingLookUp_Gradient(Op):
             self.dedup_args = {
                 'sp': ndarray.empty((all_ws_size, ), ctx=self.ctx),
                 'size': ws_size,
-                'eb': int(np.ceil(np.log2(self.embed_shape[0]))),
+                'eb': 32,
             }
         else:
             self.dedup_args = {}
@@ -268,7 +268,7 @@ class EmbeddingLookUp_Gradient_With_Lookup(Op):
             self.dedup_args = {
                 'sp': ndarray.empty((all_ws_size, ), ctx=self.ctx),
                 'size': ws_size,
-                'eb': int(np.ceil(np.log2(self.embed_shape[0]))),
+                'eb': 32,
             }
         else:
             self.dedup_args = {}

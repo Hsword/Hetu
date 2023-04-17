@@ -62,7 +62,6 @@ def worker(args):
     elif args.method == 'adapt':
         embed_layer_type = htl.AdaptiveEmbedding
         embedding_args = {
-            'high_freq_ratio': 0.5,
             'top_percent': 0.1,
         }
     elif args.method == 'md':

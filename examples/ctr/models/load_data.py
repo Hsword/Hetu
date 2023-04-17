@@ -130,8 +130,11 @@ class CTRDataset(object):
             return middle
 
     def get_single_frequency_split(self, train_data, num_embed, top_percent, fpath):
-        if osp.exists(fpath):
-            result = np.fromfile(fpath, dtype=np.int32)
+        fpath_parts = fpath.split('.')
+        real_fpath = '.'.join(
+            fpath_parts[:-1]) + '_' + str(top_percent) + '.' + fpath_parts[-1]
+        if osp.exists(real_fpath):
+            result = np.fromfile(real_fpath, dtype=np.int32)
         else:
             dirpath, filepath = osp.split(fpath)
             cache_fpath = osp.join(dirpath, 'counter_' + filepath)
@@ -149,7 +152,7 @@ class CTRDataset(object):
             result = (counter >= kth).astype(np.int32)
             print(
                 f'Real ratio of high frequency is {np.sum(result) / len(result)}.')
-            result.tofile(fpath)
+            result.tofile(real_fpath)
         return result
 
     def get_whole_frequency_split(self, train_data, top_percent):
@@ -173,7 +176,7 @@ class CTRDataset(object):
 
     def remap_split_frequency(self, frequency):
         hidx = 0
-        lidx = 0
+        lidx = 1
         remap_indices = np.zeros(frequency.shape, dtype=np.int32)
         for i, ind in enumerate(frequency):
             if ind:
@@ -187,7 +190,7 @@ class CTRDataset(object):
     def get_whole_remap(self, train_data, top_percent):
         # now the filename is not correlated to top percent;
         # if modify top percent, MUST modify the fpath!
-        remap_path = osp.join(self.path, 'freq_remap.bin')
+        remap_path = osp.join(self.path, f'freq_remap{top_percent}.bin')
         if osp.exists(remap_path):
             remap_indices = np.fromfile(remap_path, dtype=np.int32)
         else:
@@ -202,7 +205,7 @@ class CTRDataset(object):
         separate_dir = osp.join(self.path, 'freq_split_separate')
         os.makedirs(separate_dir, exist_ok=True)
         remap_path = [
-            osp.join(separate_dir, f'remap_fields{i}.bin') for i in range(self.num_sparse)]
+            osp.join(separate_dir, f'remap_fields{i}_{top_percent}.bin') for i in range(self.num_sparse)]
         if all([osp.exists(rp) for rp in remap_path]):
             remap_indices = [np.fromfile(rp, dtype=np.int32)
                              for rp in remap_path]

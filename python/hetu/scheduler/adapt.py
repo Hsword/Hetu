@@ -27,17 +27,21 @@ class AdaptEmbTrainer(EmbeddingTrainer):
             ctx=self.ectx,
         )
 
-    def _split_freq_rare(self, nemb):
-        nemb = math.ceil(nemb * self.compress_rate)
-        nfreq_emb = math.ceil(nemb * self.embedding_args['high_freq_ratio'])
-        nrare_emb = nemb - nfreq_emb
+    def _split_freq_rare(self, nemb, remap):
+        # nfreq_emb = math.ceil(nemb * self.embedding_args['top_percent'])
+        # assert nfreq_emb == remap.max() + 1
+        nfreq_emb = remap.max() + 1
+        nrare_emb = math.ceil(nemb * self.compress_rate) - nfreq_emb
+        assert nrare_emb >= 0
         return nfreq_emb, nrare_emb
 
     def get_embed_layer(self):
+        assert self.embedding_args['top_percent'] < self.compress_rate
         if self.use_multi:
             emb = []
             for i, nemb in enumerate(self.num_embed_separate):
-                nfreq, nrare = self._split_freq_rare(nemb)
+                nfreq, nrare = self._split_freq_rare(
+                    nemb, self.remap_indices[i])
                 if nrare > 0:
                     emb.append(self.get_single_embed_layer(
                         nfreq, nrare, self.remap_indices[i], f'AdaptEmb_{i}'))
@@ -45,7 +49,8 @@ class AdaptEmbTrainer(EmbeddingTrainer):
                     emb.append(super().get_single_embed_layer(
                         nemb, f'Embedding_{i}'))
         else:
-            nfreq, nrare = self._split_freq_rare(self.num_embed)
+            nfreq, nrare = self._split_freq_rare(
+                self.num_embed, self.remap_indices)
             assert nrare > 0
             emb = self.get_single_embed_layer(
                 nfreq, nrare, self.remap_indices, 'AdaptEmb')
