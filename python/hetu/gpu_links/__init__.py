@@ -278,4 +278,6 @@ __all__ = [
     'get_unique_workspace_size',
     'deduplicate_lookup',
     'deduplicate_grad',
+    'reorder_into_lookup',
+    'assign_alpt_embedding',
 ]

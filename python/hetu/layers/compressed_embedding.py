@@ -650,7 +650,7 @@ class ALPTEmbedding(Embedding):
         self.embedding_table = initializer(
             shape=(self.num_embeddings, self.embedding_dim), name=self.name, ctx=ctx)
         self.scale = ht.init.constant(shape=(
-            self.num_embeddings, 1), fill_value=init_scale, name=f'{self.name}_scale', trainable=True, ctx=ctx)
+            self.num_embeddings, 1), fill_value=init_scale, name=f'{self.name}_scale', trainable=False, ctx=ctx)
         self.middle = 0
 
     def __call__(self, x):

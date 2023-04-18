@@ -100,12 +100,16 @@ class Optimizer(object):
                 if param.dtype != np.float32:
                     lookup = deduplookup.inputs[0]
                     from .gpu_ops.QuantizeEmbedding import QuantizedEmbeddingLookUpOp, UnifiedQuantizedEmbeddingLookUpOp
+                    from .gpu_ops.QuantizeALPTEmb import ALPTEmbeddingLookUpOp
                     if isinstance(lookup, UnifiedQuantizedEmbeddingLookUpOp):
                         assign_op = assign_quantized_embedding_op(
                             param, unique, opt_op, lookup.digit, scale=lookup.scale, minele=lookup.minele)
                     elif isinstance(lookup, QuantizedEmbeddingLookUpOp):
                         assign_op = assign_quantized_embedding_op(
                             param, unique, opt_op, lookup.digit, qparam=lookup.inputs[2])
+                    elif isinstance(lookup, ALPTEmbeddingLookUpOp):
+                        assign_op = assign_with_indexedslices_op(
+                            param, unique, opt_op)
                     else:
                         assert False
                 else:

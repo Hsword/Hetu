@@ -834,6 +834,15 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle values, const DLArrayHandle qparam, int digit,
         bool stochastic, DLStreamHandle stream_handle);
 
+    int DLGPUReorderIntoLookup(
+        const DLArrayHandle idoffsets, const DLArrayHandle dedupemb,
+        DLArrayHandle lookup, DLStreamHandle stream_handle);
+
+    int DLGPUAssignALPTEmbedding(
+        DLArrayHandle embedding, const DLArrayHandle indices,
+        const DLArrayHandle values, const DLArrayHandle scale, float middle,
+        int digit, bool stochastic, DLStreamHandle stream_handle);
+
     int DLGpuUniqueIndices(const DLArrayHandle indices, DLArrayHandle output,
                            DLArrayHandle idoffsets, DLArrayHandle workspace,
                            size_t storage_size, int end_bit,

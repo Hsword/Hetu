@@ -6,6 +6,7 @@ from ..gpu_links import quantize_embedding_with_scale, \
     lsq_rounding, lsq_rounding_gradient
 from ..ndarray import empty
 from .MultiplyElewise import mul_op
+from .ReduceSum import reduce_sum_op
 
 
 class ALPTEmbeddingLookUpOp(Op):
@@ -43,8 +44,6 @@ class ALPTEmbeddingLookUpOp(Op):
         assert len(input_shapes) == 3
         if self.grad_node is not None:
             self.grad_node.embed_shape = input_shapes[0]
-        if self.scale_grad_node is not None:
-            self.scale_grad_node.scale_shape = input_shapes[2]
         output_shape = list(input_shapes[1])
         output_shape.append(input_shapes[0][1])
         return tuple(output_shape)
@@ -84,8 +83,8 @@ class ALPTRoundingOp(Op):
 
     def gradient(self, output_grad):
         grad_node = alpt_scale_gradient_op(
-            output_grad, self.inputs[0], self.digit, ctx=self.raw_ctx)
-        return [None, mul_op(output_grad, grad_node)]
+            self.inputs[0], self.digit, ctx=self.raw_ctx)
+        return [None, reduce_sum_op(mul_op(output_grad, grad_node), -1, keepdims=True, ctx=self.raw_ctx)]
 
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 2
