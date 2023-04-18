@@ -6,7 +6,6 @@ from ..gpu_links import tensor_quantize, \
     unified_quantized_embedding_lookup, \
     embedding_prepack
 from ..ndarray import empty
-from .EmbeddingLookUp import embedding_lookup_gradient_with_lookup_op, embedding_lookup_gradient_dedupgrad_op
 
 
 class UnifiedQuantizedEmbeddingLookUpOp(Op):
@@ -34,11 +33,13 @@ class UnifiedQuantizedEmbeddingLookUpOp(Op):
                 input_vals[0], input_vals[1], output_val, self.digit, self.scale, self.minele, stream_handle)
 
     def gradient(self, output_grad):
-        self.grad_node = embedding_lookup_gradient_with_lookup_op(
-            output_grad, self.inputs[1], self, None, ctx=self.raw_ctx)
-        grad_node = embedding_lookup_gradient_dedupgrad_op(
-            self.grad_node, output_grad, ctx=self.raw_ctx)
-        return [grad_node, None]
+        from .Unique import unique_indices_op, unique_indices_offsets_op, deduplicate_lookup_op, deduplicate_grad_op
+        unique = unique_indices_op(self.inputs[1], ctx=self.raw_ctx)
+        idoffsets = unique_indices_offsets_op(unique, ctx=self.raw_ctx)
+        deduplookup = deduplicate_lookup_op(self, idoffsets, ctx=self.raw_ctx)
+        dedupgrad = deduplicate_grad_op(
+            output_grad, idoffsets, ctx=self.raw_ctx)
+        return [(unique, deduplookup, dedupgrad), None]
 
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 2
@@ -87,11 +88,13 @@ class QuantizedEmbeddingLookUpOp(Op):
                 input_vals[0], input_vals[1], output_val, input_vals[2], self.digit, stream_handle)
 
     def gradient(self, output_grad):
-        self.grad_node = embedding_lookup_gradient_with_lookup_op(
-            output_grad, self.inputs[1], self, None, ctx=self.raw_ctx)
-        grad_node = embedding_lookup_gradient_dedupgrad_op(
-            self.grad_node, output_grad, ctx=self.raw_ctx)
-        return [grad_node, None]
+        from .Unique import unique_indices_op, unique_indices_offsets_op, deduplicate_lookup_op, deduplicate_grad_op
+        unique = unique_indices_op(self.inputs[1], ctx=self.raw_ctx)
+        idoffsets = unique_indices_offsets_op(unique, ctx=self.raw_ctx)
+        deduplookup = deduplicate_lookup_op(self, idoffsets, ctx=self.raw_ctx)
+        dedupgrad = deduplicate_grad_op(
+            output_grad, idoffsets, ctx=self.raw_ctx)
+        return [(unique, deduplookup, dedupgrad), None]
 
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 3

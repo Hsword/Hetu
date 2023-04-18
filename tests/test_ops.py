@@ -392,8 +392,8 @@ def test_optimizers():
         'sgd': True,
         'momentum': False,
         'nesterov': False,
-        'adagrad': True,
-        'adam': False,
+        'adagrad': False,
+        'adam': True,
         'amsgrad': False,
     }
 

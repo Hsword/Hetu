@@ -127,6 +127,7 @@ class AutoDimTrainer(EmbeddingTrainer):
         copy_params = {}
         ori_params = {}
         copy_lookups = {}
+        copy_unique_indices = {}
         copy_dedup_lookups = {}
         for node, arr in var2arr.items():
             if node is not self.alpha and node.trainable and not node.is_embed:
@@ -135,14 +136,14 @@ class AutoDimTrainer(EmbeddingTrainer):
         for dim, lookup in self.lookups.items():
             copy_lookups[lookup] = empty(
                 (self.batch_size, self.num_slot, dim), ctx=self.ctx)
-            indices = empty(
+            copy_unique_indices[lookup] = empty(
                 (self.batch_size, self.num_slot), ctx=self.ctx, dtype=np.int32)
-            values = empty(
+            copy_dedup_lookups[lookup] = empty(
                 (self.batch_size, self.num_slot, dim), ctx=self.ctx)
-            copy_dedup_lookups[lookup] = IndexedSlices(indices, values)
         self.copy_params = copy_params
         self.ori_params = ori_params
         self.copy_lookups = copy_lookups
+        self.copy_unique_indices = copy_unique_indices
         self.copy_dedup_lookups = copy_dedup_lookups
         self.workspace = empty(
             (len(self.copy_params) + len(self.copy_lookups),), ctx=self.ctx)
@@ -154,13 +155,11 @@ class AutoDimTrainer(EmbeddingTrainer):
         for node, arr in self.ori_params.items():
             self.copy_params[node]._async_copyfrom(arr, stream)
 
-    def copy_from_lookups(self, lookups, dedup_lookups, stream):
-        for node, l, dl in zip(self.lookups.values(), lookups, dedup_lookups):
+    def copy_from_lookups(self, lookups, dedup_lookups, unique_indices, stream):
+        for node, l, dl, ui in zip(self.lookups.values(), lookups, dedup_lookups, unique_indices):
             self.copy_lookups[node]._async_copyfrom(l, stream)
-            self.copy_dedup_lookups[node].values._async_copyfrom(
-                dl.values, stream)
-            self.copy_dedup_lookups[node].indices._async_copyfrom(
-                dl.indices, stream)
+            self.copy_dedup_lookups[node]._async_copyfrom(dl, stream)
+            self.copy_unique_indices[node]._async_copyfrom(ui, stream)
 
     def copy_to(self, var2arr, stream):
         for node, arr in self.ori_params.items():
@@ -169,7 +168,7 @@ class AutoDimTrainer(EmbeddingTrainer):
             var2arr[self.var_lookups[dim]]._async_copyfrom(
                 self.copy_lookups[node], stream)
             assign_embedding_with_indexedslices(
-                var2arr[node.inputs[0]], self.copy_dedup_lookups[node], stream)
+                var2arr[node.inputs[0]], self.copy_unique_indices[node], self.copy_dedup_lookups[node], stream)
 
     def first_stage_train_step(self):
         var2arr = self.executor.config.placeholder_to_arr_map
@@ -179,7 +178,7 @@ class AutoDimTrainer(EmbeddingTrainer):
         lookups = self.executor.run(
             'lookups', dataloader_step=False, inference=False)  # train data
         self.copy_from_lookups(
-            lookups[:self.num_cands], lookups[self.num_cands:self.num_cands * 2], stream)
+            lookups[:self.num_cands], lookups[self.num_cands:self.num_cands * 2], lookups[self.num_cands * 2:self.num_cands * 3], stream)
 
         # get all gradients using validation data; memorize dalpha
         allgrads = self.executor.run('allgrads', inference=True)  # valid data
@@ -274,6 +273,7 @@ class AutoDimTrainer(EmbeddingTrainer):
         train_op = self.opt.minimize(loss)
         lookups = []
         dedup_lookups = []
+        unique_indices = []
         dembed_ops = []
         dup_dembed_ops = []
         dparam_ops = []
@@ -285,14 +285,14 @@ class AutoDimTrainer(EmbeddingTrainer):
             else:
                 param_opts.append(op)
                 if isinstance(op, AssignWithIndexedSlicesOp):
-                    sparse_opt = op.inputs[1]
-                    deduplookup = sparse_opt.inputs[1]
-                    lookups.append(deduplookup.inputs[2])
+                    sparse_opt = op.inputs[2]
+                    deduplookup = sparse_opt.inputs[2]
+                    lookups.append(deduplookup.inputs[0])
+                    unique_indices.append(sparse_opt.inputs[1])
                     dedup_lookups.append(deduplookup)
-                    dedupgrad = sparse_opt.inputs[2]
+                    dedupgrad = sparse_opt.inputs[3]
                     dembed_ops.append(dedupgrad)
                     dup_dembed_ops.append(deduplookup.inputs[0])
-                    assert deduplookup.inputs[0] is dedupgrad.inputs[1]
                 else:
                     dparam_ops.append(op.inputs[1])
         assert dalpha_op is not None
@@ -305,7 +305,7 @@ class AutoDimTrainer(EmbeddingTrainer):
 
         eval_nodes = {
             'train': [loss, prediction, y_, param_opts],
-            'lookups': lookups + dedup_lookups + param_opts,
+            'lookups': lookups + dedup_lookups + unique_indices + param_opts,
             'validate': [loss, prediction, y_],
             'allgrads': [dalpha_op] + dup_dembed_ops + dembed_ops + dparam_ops,
             'alpha': [alpha_grad],

@@ -94,22 +94,23 @@ class Optimizer(object):
                 betats, self.beta1, self.beta2, ctx) for ctx, betats in self.betatss.items()}
         for param, grad in zip(var_list, grads):
             if param.is_embed:
-                dedup_lookup_op = grad.inputs[0]
+                unique, deduplookup, dedupgrad = grad
                 opt_op = self.sparse_opt_op_type(
-                    param, dedup_lookup_op, grad, self)
+                    self, param, unique, deduplookup, dedupgrad)
                 if param.dtype != np.float32:
-                    lookup = dedup_lookup_op.inputs[2]
+                    lookup = deduplookup.inputs[0]
                     from .gpu_ops.QuantizeEmbedding import QuantizedEmbeddingLookUpOp, UnifiedQuantizedEmbeddingLookUpOp
                     if isinstance(lookup, UnifiedQuantizedEmbeddingLookUpOp):
                         assign_op = assign_quantized_embedding_op(
-                            param, opt_op, lookup.digit, scale=lookup.scale, minele=lookup.minele)
+                            param, unique, opt_op, lookup.digit, scale=lookup.scale, minele=lookup.minele)
                     elif isinstance(lookup, QuantizedEmbeddingLookUpOp):
                         assign_op = assign_quantized_embedding_op(
-                            param, opt_op, lookup.digit, qparam=lookup.inputs[2])
+                            param, unique, opt_op, lookup.digit, qparam=lookup.inputs[2])
                     else:
                         assert False
                 else:
-                    assign_op = assign_with_indexedslices_op(param, opt_op)
+                    assign_op = assign_with_indexedslices_op(
+                        param, unique, opt_op)
                 opt_nodes.append(assign_op)
             else:
                 opt_nodes.append(self.opt_op_type(param, grad, self))
@@ -174,13 +175,22 @@ class OptimizerOp(Op):
             self.inputs[1] = cur_node
 
 
-class OptimizerSparseOp(OptimizerOp):
-    def __init__(self, param, dedup_lookup, dedup_grad, optimizer, *states):
-        super().__init__(param, dedup_lookup, optimizer, dedup_grad, *states)
-        self.use_indexed_slices = True
+class OptimizerSparseOp(Op):
+    def __init__(self, optimizer, param, unique, dedup_lookup, dedup_grad, *states):
+        self.optimizer = optimizer
+        self.learning_rate = optimizer.learning_rate
+        self.l2reg = optimizer.l2reg
+        super().__init__(type(self), [
+            param, unique, dedup_lookup, dedup_grad] + list(states))
+
+    def compute(self, input_vals, output_val, stream_handle=None):
+        raise NotImplementedError
+
+    def gradient(self, output_grad):
+        raise NotImplementedError
 
     def infer_shape(self, input_shapes):
-        return input_shapes[0]
+        return input_shapes[2]
 
 
 class SGDUpdateOp(OptimizerOp):
@@ -217,23 +227,22 @@ class SGDUpdateOp(OptimizerOp):
 
 
 class SGDSparseUpdateOp(OptimizerSparseOp):
-    def __init__(self, param, dedup_lookup, dedup_grad, optimizer):
-        super().__init__(param, dedup_lookup, dedup_grad, optimizer)
+    def __init__(self, optimizer, param, unique, dedup_lookup, dedup_grad):
+        super().__init__(optimizer, param, unique, dedup_lookup, dedup_grad)
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        _, dedup_lookup, dedup_grad = input_vals
-        assert output_val.indices is dedup_lookup.indices
+        _, unique, dedup_lookup, dedup_grad = input_vals
         if self.on_gpu:
             sgd_update_indexedslices(
-                dedup_lookup.indices, dedup_grad, dedup_lookup.values, output_val.values, self.learning_rate, stream_handle)
+                unique, dedup_grad, dedup_lookup, output_val, self.learning_rate, stream_handle)
         else:
             if DNNL_LIB['cpu_SGDUpdateIndexedSlices']:
                 cpu_sgd_update_indexedslices(
-                    dedup_lookup.indices, dedup_grad, dedup_lookup.values, output_val.values, self.learning_rate)
+                    unique, dedup_grad, dedup_lookup, output_val, self.learning_rate)
             else:
                 # not implement regularization
-                output_val.values[:] = dedup_lookup.values.asnumpy(
-                ) - self.learning_rate * dedup_grad.values.asnumpy()
+                output_val[:] = dedup_lookup.asnumpy(
+                ) - self.learning_rate * dedup_grad.asnumpy()
 
 
 class SGDOptimizer(Optimizer):
@@ -502,7 +511,7 @@ class AdamUpdateOp(OptimizerOp):
 
 
 class AdamSparseUpdateOp(OptimizerSparseOp):
-    def __init__(self, param, dedup_lookup, dedup_grad, optimizer):
+    def __init__(self, optimizer, param, unique, dedup_lookup, dedup_grad):
         from .initializers import zeros
         m = _init_states(param, 'adam_m', zeros)
         v = _init_states(param, 'adam_v', zeros)
@@ -516,31 +525,30 @@ class AdamSparseUpdateOp(OptimizerSparseOp):
         self.beta1 = optimizer.beta1
         self.beta2 = optimizer.beta2
         self.epsilon = optimizer.epsilon
-        super().__init__(param, dedup_lookup, dedup_grad, optimizer, *states)
+        super().__init__(optimizer, param, unique, dedup_lookup, dedup_grad, *states)
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        _, dedup_lookup, dedup_grad = input_vals[:3]
-        m, v, betats = input_vals[3:6]
+        _, unique, dedup_lookup, dedup_grad = input_vals[:4]
+        m, v, betats = input_vals[4:7]
         if self.amsgrad:
             maxv = input_vals[-1]
         else:
             maxv = None
-        assert output_val.indices is dedup_lookup.indices
         if self.on_gpu:
             adam_update_indexedslices(
-                dedup_lookup.indices, dedup_grad,
-                dedup_lookup.values, output_val.values,
+                unique, dedup_grad,
+                dedup_lookup, output_val,
                 self.learning_rate, m, v, maxv, self.beta1,
                 self.beta2, betats, self.epsilon, stream_handle)
         else:
             if DNNL_LIB['cpu_AdamUpdateIndexedSlices']:
                 cpu_adam_update_indexedslices(
-                    dedup_lookup.indices, dedup_grad,
-                    dedup_lookup.values, output_val.values,
+                    unique, dedup_grad,
+                    dedup_lookup, output_val,
                     self.learning_rate, m, v, maxv, self.beta1,
                     self.beta2, betats, self.epsilon)
             else:
-                grad = dedup_grad.values.asnumpy()
+                grad = dedup_grad.asnumpy()
                 m[:] = self.beta1 * \
                     m.asnumpy() + (1 - self.beta1) * grad
                 v[:] = self.beta2 * v.asnumpy() + \
@@ -551,7 +559,7 @@ class AdamSparseUpdateOp(OptimizerSparseOp):
                 if self.amsgrad:
                     raise NotImplementedError
                 else:
-                    output_val[:] = dedup_lookup.values.asnumpy() - \
+                    output_val[:] = dedup_lookup.asnumpy() - \
                         self.learning_rate * mc / (np.sqrt(vc) + self.epsilon)
 
 

@@ -412,13 +412,12 @@ def reduce_indexedslice_with_embedding(in_indices, in_values, in_params, out_ind
         in_indices.handle, in_values.handle, in_params.handle, out_indices.handle, out_values.handle, out_params.handle)
 
 
-def assign_embedding_with_indexedslices(embedding, newparam):
+def assign_embedding_with_indexedslices(embedding, unique, newparam):
     assert isinstance(embedding, NDArray)
-    assert isinstance(newparam, IndexedSlices)
-    assert isinstance(newparam.indices, NDArray)
-    assert isinstance(newparam.values, NDArray)
+    assert isinstance(unique, NDArray)
+    assert isinstance(newparam, NDArray)
     _LIB.cpu_AssignWithIndexedSlices(
-        embedding.handle, newparam.indices.handle, newparam.values.handle)
+        embedding.handle, unique.handle, newparam.handle)
 
 
 def sgd_update_indexedslices(indices, grads, params, output, lr):
@@ -446,6 +445,27 @@ def adam_update_indexedslices(indices, grads, params, output, lr,
         m.handle, v.handle, maxv.handle if maxv else None,
         ctypes.c_float(beta1), ctypes.c_float(beta2),
         betats.handle, ctypes.c_float(epsilon))
+
+
+def unique_indices(indices, output, idoffsets):
+    assert isinstance(indices, NDArray)
+    assert isinstance(output, NDArray)
+    assert isinstance(idoffsets, NDArray)
+    _LIB.cpu_UniqueIndices(indices.handle, output.handle, idoffsets.handle)
+
+
+def deduplicate_lookup(lookups, idoffsets, output):
+    assert isinstance(lookups, NDArray)
+    assert isinstance(idoffsets, NDArray)
+    assert isinstance(output, NDArray)
+    _LIB.cpu_DedupLookup(lookups.handle, idoffsets.handle, output.handle)
+
+
+def deduplicate_grad(grad, idoffsets, output):
+    assert isinstance(grad, NDArray)
+    assert isinstance(idoffsets, NDArray)
+    assert isinstance(output, NDArray)
+    _LIB.cpu_DedupGrad(grad.handle, idoffsets.handle, output.handle)
 
 
 def normal_init(param, mean, stddev):

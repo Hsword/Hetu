@@ -834,6 +834,20 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle values, const DLArrayHandle qparam, int digit,
         bool stochastic, DLStreamHandle stream_handle);
 
+    int DLGpuUniqueIndices(const DLArrayHandle indices, DLArrayHandle output,
+                           DLArrayHandle idoffsets, DLArrayHandle workspace,
+                           size_t storage_size, int end_bit,
+                           DLStreamHandle stream_handle);
+
+    int DLGpuGetUniqueWorkspaceSize(size_t ind_size, size_t * size);
+
+    int DLGpuDedupLookup(const DLArrayHandle lookups,
+                         const DLArrayHandle idoffsets, DLArrayHandle output,
+                         DLStreamHandle stream_handle);
+
+    int DLGpuDedupGrad(const DLArrayHandle grad, const DLArrayHandle idoffsets,
+                       DLArrayHandle output, DLStreamHandle stream_handle);
+
     // DNNL Ops
     int DnnlMatrixMultiply(const DLArrayHandle matA, bool transposeA,
                            const DLArrayHandle matB, bool transposeB,
@@ -1007,6 +1021,13 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle params, DLArrayHandle output, float lr,
         DLArrayHandle m, DLArrayHandle v, DLArrayHandle maxv, float beta1,
         float beta2, DLArrayHandle betats, float epsilon);
+
+    int cpu_UniqueIndices(const DLArrayHandle indices, DLArrayHandle output,
+                          DLArrayHandle idoffsets);
+    int cpu_DedupLookup(const DLArrayHandle lookups,
+                        const DLArrayHandle idoffsets, DLArrayHandle output);
+    int cpu_DedupGrad(const DLArrayHandle grad, const DLArrayHandle idoffsets,
+                      DLArrayHandle output);
 
     int cpu_NormalInit(DLArrayHandle arr, const float mean, const float stddev);
     int cpu_UniformInit(DLArrayHandle arr, const float lb, const float ub);

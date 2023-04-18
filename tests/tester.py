@@ -15,6 +15,8 @@ class HetuTester(object):
             self.in_dtype = in_dtype
         self.node_dtype = [np.float32 if dt in (
             'f', 'uf') else np.int32 for dt in self.in_dtype]
+        self.cpu_ctx = ht.cpu()
+        self.gpu_ctx = ht.gpu(0)
         self.make_inputs(num_inputs)
         self.make_ops(op, *args, **kargs)
         self.make_executors()
@@ -22,9 +24,9 @@ class HetuTester(object):
         self.gpu_feeds = None
 
     def make_inputs(self, num_inputs):
-        self.cpu_inputs = [ht.Variable(name='input%d' % i, ctx=ht.cpu(), dtype=self.node_dtype[i])
+        self.cpu_inputs = [ht.Variable(name='input%d' % i, ctx=self.cpu_ctx, dtype=self.node_dtype[i])
                            for i in range(num_inputs)]
-        self.gpu_inputs = [ht.Variable(name='input%d' % i, ctx=ht.gpu(0), dtype=self.node_dtype[i])
+        self.gpu_inputs = [ht.Variable(name='input%d' % i, ctx=self.gpu_ctx, dtype=self.node_dtype[i])
                            for i in range(num_inputs)]
 
     def make_ops(self, op, *args, **kargs):
@@ -32,8 +34,8 @@ class HetuTester(object):
         self.gpu_op = op(*self.gpu_inputs, *args, **kargs)
 
     def make_executors(self):
-        self.cpu_executor = ht.Executor([self.cpu_op], ctx=ht.cpu())
-        self.gpu_executor = ht.Executor([self.gpu_op], ctx=ht.gpu(0))
+        self.cpu_executor = ht.Executor([self.cpu_op], ctx=self.cpu_ctx)
+        self.gpu_executor = ht.Executor([self.gpu_op], ctx=self.gpu_ctx)
 
     def random_float(self, shape, low=None, high=None):
         if low is not None:
@@ -87,6 +89,8 @@ class HetuTester(object):
 class HetuOptimizerTester(HetuTester):
     def __init__(self, opt, input_shapes):
         assert isinstance(opt, ht.optim.Optimizer)
+        self.cpu_ctx = ht.cpu()
+        self.gpu_ctx = ht.gpu(0)
         opt.backward2forward = {}
         opt.forward2backward = {}
         opt.loss = None
@@ -95,17 +99,15 @@ class HetuOptimizerTester(HetuTester):
         has_betats = (ht.optim.AdamOptimizer,
                       ht.optim.AdamWOptimizer, ht.optim.LambOptimizer)
         if isinstance(self.cpu_opt, has_betats):
-            ctx = ht.cpu()
-            self.cpu_opt.betatss = {ctx: ht.init.constant(
-                (2,), 1.0, f'adam_betats_cpu', False, ctx)}
-            self.cpu_opt.betats_update_ops = {ctx: ht.optim.betats_update_op(
-                self.cpu_opt.betatss[ctx], self.cpu_opt.beta1, self.cpu_opt.beta2, ctx)}
+            self.cpu_opt.betatss = {self.cpu_ctx: ht.init.constant(
+                (2,), 1.0, f'adam_betats_cpu', False, self.cpu_ctx)}
+            self.cpu_opt.betats_update_ops = {self.cpu_ctx: ht.optim.betats_update_op(
+                self.cpu_opt.betatss[self.cpu_ctx], self.cpu_opt.beta1, self.cpu_opt.beta2, self.cpu_ctx)}
         if isinstance(self.gpu_opt, has_betats):
-            ctx = ht.gpu(0)
-            self.gpu_opt.betatss = {ctx: ht.init.constant(
-                (2,), 1.0, f'adam_betats_gpu', False, ctx)}
-            self.gpu_opt.betats_update_ops = {ctx: ht.optim.betats_update_op(
-                self.gpu_opt.betatss[ctx], self.gpu_opt.beta1, self.gpu_opt.beta2, ctx)}
+            self.gpu_opt.betatss = {self.gpu_ctx: ht.init.constant(
+                (2,), 1.0, f'adam_betats_gpu', False, self.gpu_ctx)}
+            self.gpu_opt.betats_update_ops = {self.gpu_ctx: ht.optim.betats_update_op(
+                self.gpu_opt.betatss[self.gpu_ctx], self.gpu_opt.beta1, self.gpu_opt.beta2, self.gpu_ctx)}
         self.input_shapes = input_shapes
         ctensors = []
         cparams = []
@@ -113,12 +115,12 @@ class HetuOptimizerTester(HetuTester):
         gparams = []
         for i, shape in enumerate(input_shapes):
             cur_value = self.random_float(shape)
-            ctensors.append(ht.array(cur_value, ht.cpu()))
-            gtensors.append(ht.array(cur_value, ht.gpu(0)))
+            ctensors.append(ht.array(cur_value, self.cpu_ctx))
+            gtensors.append(ht.array(cur_value, self.gpu_ctx))
             cparams.append(ht.Variable(
-                'ctemp{}'.format(i), value=ctensors[-1], ctx=ht.cpu()))
+                'ctemp{}'.format(i), value=ctensors[-1], ctx=self.cpu_ctx))
             gparams.append(ht.Variable(
-                'gtemp{}'.format(i), value=gtensors[-1], ctx=ht.gpu(0)))
+                'gtemp{}'.format(i), value=gtensors[-1], ctx=self.gpu_ctx))
             cparams[-1].on_cpu = gparams[-1].on_gpu = True
             cparams[-1].on_gpu = gparams[-1].on_cpu = False
         self.cparams = cparams
@@ -162,30 +164,40 @@ class HetuOptimizerTester(HetuTester):
         for i in range(num_inputs):
             if i == ind:
                 cpu_ind_op = ht.Variable(
-                    name='cpu_indices', ctx=ht.cpu())
-                cpu_val_op = ht.Variable(name='cpu_values', ctx=ht.cpu())
+                    name='cpu_indices', dtype=np.int32, ctx=self.cpu_ctx)
+                cpu_val_op = ht.Variable(name='cpu_values', ctx=self.cpu_ctx)
                 cpu_lookup_op = ht.embedding_lookup_op(
-                    self.cparams[ind], cpu_ind_op, ctx=ht.cpu())
+                    self.cparams[ind], cpu_ind_op, ctx=self.cpu_ctx)
                 gpu_ind_op = ht.Variable(
-                    name='gpu_indices', ctx=ht.gpu(0))
-                gpu_val_op = ht.Variable(name='gpu_values', ctx=ht.gpu(0))
+                    name='gpu_indices', dtype=np.int32, ctx=self.gpu_ctx)
+                gpu_val_op = ht.Variable(name='gpu_values', ctx=self.gpu_ctx)
                 gpu_lookup_op = ht.embedding_lookup_op(
-                    self.gparams[ind], gpu_ind_op, ctx=ht.gpu(0))
-                cpu_grad_wlookup = ht.embedding_lookup_gradient_with_lookup_op(
-                    cpu_val_op, cpu_ind_op, cpu_lookup_op, input_shapes[i], ctx=ht.cpu())
-                cpu_grad_dgrad = ht.embedding_lookup_gradient_dedupgrad_op(
-                    cpu_grad_wlookup, cpu_val_op, ctx=ht.cpu())
-                gpu_grad_wlookup = ht.embedding_lookup_gradient_with_lookup_op(
-                    gpu_val_op, gpu_ind_op, gpu_lookup_op, input_shapes[i], ctx=ht.gpu(0))
-                gpu_grad_dgrad = ht.embedding_lookup_gradient_dedupgrad_op(
-                    gpu_grad_wlookup, gpu_val_op, ctx=ht.gpu(0))
-                self.cpu_inputs.append(cpu_grad_dgrad)
-                self.gpu_inputs.append(gpu_grad_dgrad)
+                    self.gparams[ind], gpu_ind_op, ctx=self.gpu_ctx)
+
+                cpu_unique = ht.unique_indices_op(cpu_ind_op, ctx=self.cpu_ctx)
+                cpu_idoffsets = ht.unique_indices_offsets_op(
+                    cpu_unique, ctx=self.cpu_ctx)
+                cpu_dedup_lookup = ht.deduplicate_lookup_op(
+                    cpu_lookup_op, cpu_idoffsets, ctx=self.cpu_ctx)
+                cpu_dedup_grad = ht.deduplicate_grad_op(
+                    cpu_val_op, cpu_idoffsets, ctx=self.cpu_ctx)
+
+                gpu_unique = ht.unique_indices_op(gpu_ind_op, ctx=self.gpu_ctx)
+                gpu_idoffsets = ht.unique_indices_offsets_op(
+                    gpu_unique, ctx=self.gpu_ctx)
+                gpu_dedup_lookup = ht.deduplicate_lookup_op(
+                    gpu_lookup_op, gpu_idoffsets, ctx=self.gpu_ctx)
+                gpu_dedup_grad = ht.deduplicate_grad_op(
+                    gpu_val_op, gpu_idoffsets, ctx=self.gpu_ctx)
+                self.cpu_inputs.append(
+                    (cpu_unique, cpu_dedup_lookup, cpu_dedup_grad))
+                self.gpu_inputs.append(
+                    (gpu_unique, gpu_dedup_lookup, gpu_dedup_grad))
                 self.cpu_feeds.extend([cpu_ind_op, cpu_val_op])
                 self.gpu_feeds.extend([gpu_ind_op, gpu_val_op])
             else:
-                cpu_op = ht.Variable(name='input%d' % i, ctx=ht.cpu())
-                gpu_op = ht.Variable(name='input%d' % i, ctx=ht.gpu(0))
+                cpu_op = ht.Variable(name='input%d' % i, ctx=self.cpu_ctx)
+                gpu_op = ht.Variable(name='input%d' % i, ctx=self.gpu_ctx)
                 self.cpu_inputs.append(cpu_op)
                 self.gpu_inputs.append(gpu_op)
                 self.cpu_feeds.append(cpu_op)
@@ -195,15 +207,15 @@ class HetuOptimizerTester(HetuTester):
     def make_ops(self):
         self.cpu_op = [
             self.cpu_opt.opt_op_type(param, grad, self.cpu_opt)
-            if grad.op_type == 'PlaceholderOp'
-            else ht.assign_with_indexedslices_op(param, self.cpu_opt.sparse_opt_op_type(
-                param, grad.inputs[0], grad, self.cpu_opt))
+            if not isinstance(grad, tuple)
+            else ht.assign_with_indexedslices_op(param, grad[0], self.cpu_opt.sparse_opt_op_type(
+                self.cpu_opt, param, *grad))
             for param, grad in zip(self.cparams, self.cpu_inputs)]
         self.gpu_op = [
             self.gpu_opt.opt_op_type(param, grad, self.gpu_opt)
-            if grad.op_type == 'PlaceholderOp'
-            else ht.assign_with_indexedslices_op(param, self.gpu_opt.sparse_opt_op_type(
-                param, grad.inputs[0], grad, self.gpu_opt))
+            if not isinstance(grad, tuple)
+            else ht.assign_with_indexedslices_op(param, grad[0], self.gpu_opt.sparse_opt_op_type(
+                self.gpu_opt, param, *grad))
             for param, grad in zip(self.gparams, self.gpu_inputs)]
 
     def test(self, iters=5, rtol=1e-7, atol=0):

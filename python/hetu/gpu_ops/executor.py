@@ -20,8 +20,9 @@ from .Sum import sum_op
 from .StopGradient import StopGradientOp
 from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp
 from ..communicator.mpi_nccl_comm import ncclDataType_t, GroupStart, GroupEnd
-from .EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient, EmbeddingLookUp_Gradient_With_Lookup, EmbeddingLookUp_Gradient_DedupGrad
-from ..optimizer import OptimizerOp, OptimizerSparseOp
+from .EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient
+from .Unique import UniqueIndicesOffsetsOp
+from ..optimizer import OptimizerOp
 from . import OnesLike
 from ..stream import create_stream_handle, Event
 from ..context import get_current_context, get_launch_config_by_traverse_nodes, DeviceGroup, GraphStatus
@@ -792,7 +793,7 @@ class SubExecutor(object):
 
         ln_bn_grad_nodes = (Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp,
                             Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp,
-                            EmbeddingLookUp_Gradient_DedupGrad)
+                            UniqueIndicesOffsetsOp,)
         no_compute_nodes = ln_bn_grad_nodes + (StopGradientOp,)
 
         for node in self.topo_order:
@@ -1002,8 +1003,6 @@ class SubExecutor(object):
         grouping_nodes = []
         cur_ind = -1
         for node in self.topo_order:
-            if isinstance(node, OptimizerSparseOp):
-                self.indexed_slices_shape[node] = self.indexed_slices_shape[node.inputs[1]]
             if isinstance(node, EmbeddingLookUp_Gradient):
                 if len(node.inputs) == 2:
                     self.indexed_slices_shape[node] = (
@@ -1011,9 +1010,6 @@ class SubExecutor(object):
                 else:
                     self.indexed_slices_shape[node] = (
                         node.index.shape, self.node_to_shape_map[node.inputs[0]])
-            elif isinstance(node, EmbeddingLookUp_Gradient_With_Lookup):
-                self.indexed_slices_shape[node] = (
-                    self.node_to_shape_map[node.inputs[1]], self.node_to_shape_map[node.inputs[0]])
             elif isinstance(node, (DataD2HSparseOp, PipelineSendOp)) and node.use_indexed_slices:
                 self.indexed_slices_shape[node] = self.indexed_slices_shape[node.inputs[0]]
             elif isinstance(node, AllReduceCommunicateOp) and node.use_indexed_slices:
@@ -1598,6 +1594,8 @@ def sum_node_list(node_list: OP_LIST, ctx: Optional[DeviceGroup]) -> Tuple[Optio
     elif len(node_list) == 1:
         return node_list[0], False
     else:
+        assert all([not isinstance(n, tuple) for n in node_list]
+                   ), "Embedding gradients not addable now."
         return sum_op(node_list, ctx=ctx), True
 
 

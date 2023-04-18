@@ -712,3 +712,6 @@ class IndexedSlices(object):
         if self.dense_arr is None:
             self.dense_arr = empty(
                 shape, ctx=self.values.ctx, dtype=self.values.dtype)
+
+    def asnumpy(self):
+        return (self.indices.asnumpy(), self.values.asnumpy())

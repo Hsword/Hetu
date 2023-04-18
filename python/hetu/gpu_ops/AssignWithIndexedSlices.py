@@ -7,16 +7,17 @@ from ..gpu_links import assign_embedding_with_indexedslices, assign_quantized_em
 
 
 class AssignWithIndexedSlicesOp(Op):
-    def __init__(self, embed, newparam, ctx=None):
-        super().__init__(AssignWithIndexedSlicesOp, [embed, newparam], ctx)
+    def __init__(self, embed, unique, newparam, ctx=None):
+        super().__init__(AssignWithIndexedSlicesOp,
+                         [embed, unique, newparam], ctx)
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
             cpu_assign_embedding_with_indexedslices(
-                input_vals[0], input_vals[1])
+                input_vals[0], input_vals[1], input_vals[2])
         else:
             assign_embedding_with_indexedslices(
-                input_vals[0], input_vals[1], stream_handle)
+                input_vals[0], input_vals[1], input_vals[2], stream_handle)
 
     def gradient(self, output_grad):
         raise NotImplementedError
@@ -32,13 +33,13 @@ class AssignWithIndexedSlicesOp(Op):
             self.event = create_event_handle(self.ctx)
 
 
-def assign_with_indexedslices_op(embed, newparam, ctx=None):
-    return AssignWithIndexedSlicesOp(embed, newparam, ctx=ctx)
+def assign_with_indexedslices_op(embed, unique, newparam, ctx=None):
+    return AssignWithIndexedSlicesOp(embed, unique, newparam, ctx=ctx)
 
 
 class AssignQuantizedEmbeddingOp(Op):
-    def __init__(self, embed, newparam, digit, scale=None, minele=None, middle=None, qparam=None, ctx=None):
-        inputs = [embed, newparam]
+    def __init__(self, embed, unique, newparam, digit, scale=None, minele=None, middle=None, qparam=None, ctx=None):
+        inputs = [embed, unique, newparam]
         self.digit = digit
         if qparam is not None:
             inputs.append(qparam)
@@ -51,18 +52,18 @@ class AssignQuantizedEmbeddingOp(Op):
         super().__init__(AssignQuantizedEmbeddingOp, inputs, ctx)
 
     def compute(self, input_vals, output_val, stream_handle=None):
-        if len(input_vals) == 3:
+        if len(input_vals) == 4:
             if self.on_cpu:
                 raise NotImplementedError
             else:
                 assign_quantized_embedding(
-                    input_vals[0], input_vals[1], input_vals[2], self.digit, stream_handle)
+                    input_vals[0], input_vals[1], input_vals[2], input_vals[3], self.digit, stream_handle)
         else:
             if self.on_cpu:
                 raise NotImplementedError
             else:
                 assign_quantized_embedding_unified(
-                    input_vals[0], input_vals[1], self.scale, self.minele, self.digit, stream_handle)
+                    input_vals[0], input_vals[1], input_vals[2], self.scale, self.minele, self.digit, stream_handle)
 
     def gradient(self, output_grad):
         raise NotImplementedError
@@ -78,5 +79,5 @@ class AssignQuantizedEmbeddingOp(Op):
             self.event = create_event_handle(self.ctx)
 
 
-def assign_quantized_embedding_op(embed, newparam, digit, scale=None, minele=None, middle=None, qparam=None, ctx=None):
-    return AssignQuantizedEmbeddingOp(embed, newparam, digit, scale=scale, minele=minele, middle=middle, qparam=qparam, ctx=ctx)
+def assign_quantized_embedding_op(embed, unique, newparam, digit, scale=None, minele=None, middle=None, qparam=None, ctx=None):
+    return AssignQuantizedEmbeddingOp(embed, unique, newparam, digit, scale=scale, minele=minele, middle=middle, qparam=qparam, ctx=ctx)

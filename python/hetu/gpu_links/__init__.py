@@ -90,6 +90,7 @@ from .PruneLink import *
 from .QuantizeLink import *
 from .QuantizeEmbeddingLink import *
 from .AssignWithIndexedSlicesLink import *
+from .UniqueIndicesLink import *
 
 __all__ = [
     'matrix_elementwise_add_by_const',
@@ -273,4 +274,8 @@ __all__ = [
     'assign_embedding_with_indexedslices',
     'assign_quantized_embedding_unified',
     'assign_quantized_embedding',
+    'unique_indices',
+    'get_unique_workspace_size',
+    'deduplicate_lookup',
+    'deduplicate_grad',
 ]

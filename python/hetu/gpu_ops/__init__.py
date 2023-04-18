@@ -52,7 +52,7 @@ from .Tanh import tanh_op, tanh_gradient_op
 from .Transpose import transpose_op
 from .Variable import Variable, placeholder_op
 from .ZerosLike import zeroslike_op
-from .EmbeddingLookUp import embedding_lookup_op, embedding_lookup_gradient_op, embedding_lookup_gradient_with_lookup_op, embedding_lookup_gradient_dedupgrad_op
+from .EmbeddingLookUp import embedding_lookup_op
 from .SparseEmbeddingLookUp import sparse_embedding_lookup_op
 from .Where import where_op, where_const_op
 from .BatchMatrixMult import batch_matmul_op
@@ -108,6 +108,7 @@ from .QuantizeALPTEmb import alpt_embedding_lookup_op, alpt_rounding_op, alpt_sc
 from .QuantizeEmbedding import quantized_embedding_lookup_op, unified_quantized_embedding_lookup_op
 from .AssignWithIndexedSlices import assign_with_indexedslices_op, assign_quantized_embedding_op
 from .Sample import uniform_sample_op, normal_sample_op, truncated_normal_sample_op, gumbel_sample_op
+from .Unique import unique_indices_op, unique_indices_offsets_op, deduplicate_lookup_op, deduplicate_grad_op
 
 __all__ = [
     'Executor',
@@ -204,9 +205,6 @@ __all__ = [
     'placeholder_op',
     'zeroslike_op',
     "embedding_lookup_op",
-    "embedding_lookup_gradient_op",
-    "embedding_lookup_gradient_with_lookup_op",
-    "embedding_lookup_gradient_dedupgrad_op",
     "sparse_embedding_lookup_op",
     'where_op',
     'where_const_op',
@@ -287,4 +285,8 @@ __all__ = [
     'normal_sample_op',
     'truncated_normal_sample_op',
     'gumbel_sample_op',
+    'unique_indices_op',
+    'unique_indices_offsets_op',
+    'deduplicate_lookup_op',
+    'deduplicate_grad_op',
 ]
