@@ -549,7 +549,18 @@ class Executor(object):
     def get_batch_num(self, name: str = 'default') -> int:
         return self.subexecutor[name].batch_num
 
+    def sync_all_streams(self):
+        if self.config.comp_stream is not None:
+            self.config.comp_stream.sync()
+        if self.config.h2d_stream is not None:
+            self.config.h2d_stream.sync()
+        if self.config.d2h_stream is not None:
+            self.config.d2h_stream.sync()
+        if self.config.nccl_stream is not None:
+            self.config.nccl_stream.sync()
+
     def save(self, file_path: str, file_name: str, others: Optional[dict] = None) -> None:
+        self.sync_all_streams()
         assert os.path.isdir(
             file_path), 'Need to specify a work directory to save parameters.'
         assert others is None or 'state_dict' not in others
@@ -604,6 +615,7 @@ class Executor(object):
         file_path: str = None,
         consider_splits: bool = False
     ) -> None:
+        self.sync_all_streams()
         if self.comm_mode in (None, 'AllReduce'):
             for node in self.config.placeholder_to_arr_map:
                 if node.name in state_dict:
@@ -703,14 +715,7 @@ class Executor(object):
             k.tensor_value = v
 
     def __del__(self) -> None:
-        if self.config.comp_stream is not None:
-            self.config.comp_stream.sync()
-        if self.config.h2d_stream is not None:
-            self.config.h2d_stream.sync()
-        if self.config.d2h_stream is not None:
-            self.config.d2h_stream.sync()
-        if self.config.nccl_stream is not None:
-            self.config.nccl_stream.sync()
+        self.sync_all_streams()
         for node in self.param_nodes:
             if node.event:
                 node.event.sync()
