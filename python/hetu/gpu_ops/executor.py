@@ -588,8 +588,8 @@ class Executor(object):
         else:
             assert 'state_dict' not in others
         others['state_dict'] = state_dic
-        from ..random import get_seed, get_seed_seqnum
-        others['seed'] = (get_seed(), get_seed_seqnum())
+        from ..random import get_seed_status
+        others['seed'] = get_seed_status()
         with open(os.path.join(file_path, file_name), "wb") as writer:
             pickle.dump(others, writer)
 

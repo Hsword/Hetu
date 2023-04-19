@@ -96,3 +96,7 @@ class ALPTEmbTrainer(EmbeddingTrainer):
         assign_alpt_embedding(var2arr[self.embed_layer.embedding_table], unique_indices,
                               updated_emb, updated_scale, self.embed_layer.middle, self.embed_layer.digit, stream)
         return loss_val.asnumpy(), predict_y.asnumpy(), y_val.asnumpy()
+
+    def init_executor(self, eval_nodes):
+        super().init_executor(eval_nodes)
+        self.executor.subexecutor['train_scale'].inference = False

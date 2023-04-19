@@ -24,6 +24,10 @@ def get_seed_seqnum():
     return _LIB.GetSeedSeqNum()
 
 
+def get_seed_status():
+    return (get_seed(), get_seed_seqnum())
+
+
 def step_seqnum(seqnum):
     seqnum = to_ull(seqnum)
     check_call(_LIB.StepSeqNum(seqnum))
@@ -32,5 +36,4 @@ def step_seqnum(seqnum):
 def get_np_rand(step=None):
     if step is not None:
         step_seqnum(step)
-    seqnum = get_seed_seqnum()
-    return RandomState(MT19937(SeedSequence((get_seed(), seqnum))))
+    return RandomState(MT19937(SeedSequence(get_seed_status())))
