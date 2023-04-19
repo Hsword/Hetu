@@ -1,4 +1,5 @@
 from __future__ import absolute_import
+from .AbsLink import *
 from .AddConstLink import *
 from .AddElewiseLink import *
 from .Argmax import *
@@ -7,6 +8,7 @@ from .AutoDimLink import *
 from .AvgPoolLink import *
 from .BroadcastLink import *
 from .BinaryCrossEntropyLink import *
+from .Bool import *
 from .ConcatLink import *
 from .ConcatenateLink import *
 from .Conv2dBroadcastLink import *
@@ -27,6 +29,7 @@ from .ReduceSumAxisZeroLink import *
 from .ReluLink import *
 from .LeakyReluLink import *
 from .ReshapeLink import *
+from .SignLink import *
 from .SoftmaxCrossEntropyLink import *
 from .SoftmaxCrossEntropySparseLink import *
 from .SoftmaxLink import *
@@ -93,6 +96,7 @@ from .AssignWithIndexedSlicesLink import *
 from .UniqueIndicesLink import *
 
 __all__ = [
+    'abs_func',
     'matrix_elementwise_add_by_const',
     'matrix_elementwise_add',
     'matrix_elementwise_add_simple',
@@ -143,6 +147,7 @@ __all__ = [
     'leaky_relu',
     'leaky_relu_gradient',
     'array_reshape',
+    'sign_func',
     'softmax_cross_entropy',
     'softmax_cross_entropy_gradient',
     'softmax',
@@ -214,6 +219,7 @@ __all__ = [
     'binary_cross_entropy_with_logits',
     'binary_cross_entropy_gradient',
     'binary_cross_entropy_with_logits_gradient',
+    'bool_func',
     'matrix_dot',
     'gelu',
     'gelu_gradient',

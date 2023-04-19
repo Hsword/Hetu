@@ -607,6 +607,80 @@ class DeepLightEmbedding(Embedding):
             return ht.sparse_embedding_lookup_op(self.sparse_embedding_table, embed_input)
 
 
+class PEPEmbedding(Embedding):
+    def __init__(self, num_embeddings, embedding_dim, threshold_type, threshold_init, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.name = name
+        self.ctx = ctx
+        self.embedding_table = initializer(
+            shape=(self.num_embeddings, self.embedding_dim), name=self.name, ctx=ctx)
+        assert threshold_type in (
+            'dimension', 'feature', 'global', 'feature_dimension')
+        self.threshold_type = threshold_type
+        if threshold_type == 'feature_dimension':
+            th_shape = (self.num_embeddings, self.embedding_dim)
+        elif threshold_type == 'dimension':
+            th_shape = (self.embedding_dim,)
+        elif threshold_type == 'feature':
+            th_shape = (self.num_embeddings, 1)
+        else:
+            th_shape = (1,)
+        self.threshold = ht.init.constant(
+            th_shape, threshold_init, name=f'{name}_threshold')
+
+    def __call__(self, x):
+        with ht.context(self.ctx):
+            raw_embeddings = ht.embedding_lookup_op(self.embedding_table, x)
+            if self.threshold_type.startswith('feature'):
+                cur_threshold = ht.embedding_lookup_op(self.threshold, x)
+            else:
+                cur_threshold = self.threshold
+            cur_threshold = ht.sigmoid_op(cur_threshold)
+            if self.threshold_type != 'feature_dimension':
+                cur_threshold = ht.broadcastto_op(
+                    cur_threshold, raw_embeddings)
+            embeddings = ht.mul_op(ht.sign_op(raw_embeddings), ht.relu_op(
+                ht.minus_op(ht.abs_op(raw_embeddings), cur_threshold)))
+            return embeddings
+
+    # def make_adaptive_rate(self, batch_num):
+    #     ignore_iter = self.warm * batch_num
+
+    #     def updater(n_iter):
+    #         if n_iter <= ignore_iter:
+    #             adaptive_sparse = 0
+    #         else:
+    #             real_niter = n_iter - ignore_iter
+    #             if real_niter % 10 == 0 or real_niter % batch_num == 0:
+    #                 adaptive_sparse = self.prune_rate * \
+    #                     (1 - 0.99**(real_niter / 100.))
+    #             else:
+    #                 adaptive_sparse = 0
+    #         return adaptive_sparse
+    #     return updater
+
+    # def make_prune_op(self, y_):
+    #     batch_num = y_.get_batch_num('train')
+    #     rate_updater = self.make_adaptive_rate(batch_num)
+    #     return ht.prune_low_magnitude_op(self.embedding_table, rate_updater)
+
+    # def make_inference(self, embed_input, load_value=True):
+    #     with ht.context(self.ctx):
+    #         # not for validate; convert to csr format for inference
+    #         if load_value:
+    #             from ..ndarray import dense_to_sparse
+    #             embeddings = dense_to_sparse(
+    #                 self.embedding_table.tensor_value, form=self.form)
+    #         else:
+    #             from ..ndarray import ND_Sparse_Array
+    #             embeddings = ND_Sparse_Array(
+    #                 self.num_embeddings, self.embedding_dim, ctx=self.ctx)
+    #         self.sparse_embedding_table = ht.Variable(
+    #             'sparse_embedding', value=embeddings)
+    #         return ht.sparse_embedding_lookup_op(self.sparse_embedding_table, embed_input)
+
+
 class QuantizedEmbedding(Embedding):
     def __init__(self, num_embeddings, embedding_dim, digit, scale=0.01, middle=0, use_qparam=False, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         assert digit in (8, 16)

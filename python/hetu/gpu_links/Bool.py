@@ -5,7 +5,7 @@ from .._base import _LIB
 from .. import ndarray as _nd
 
 
-def bool(input, output, stream=None):
+def bool_func(input, output, stream=None):
     assert isinstance(input, _nd.NDArray)
     assert isinstance(output, _nd.NDArray)
     _LIB.DLGpuBool(

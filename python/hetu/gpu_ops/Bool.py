@@ -2,7 +2,7 @@ from __future__ import absolute_import
 import numpy as np
 from .Node import Op
 from .._base import DNNL_LIB
-from ..gpu_links import bool
+from ..gpu_links import bool_func
 
 class BoolOp(Op):
     def __init__(self, node, ctx=None):
@@ -12,7 +12,7 @@ class BoolOp(Op):
         if self.on_cpu:
             raise NotImplementedError
         else:
-            bool(input_vals[0], output_val, stream_handle)
+            bool_func(input_vals[0], output_val, stream_handle)
 
     def gradient(self, output_grad):
         return [None]

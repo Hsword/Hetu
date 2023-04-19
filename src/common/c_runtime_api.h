@@ -722,6 +722,11 @@ HETUSYS_EXTERN_C {
     int DLGpuTrilLookupGradient(const DLArrayHandle input, DLArrayHandle output,
                                 int offset, DLStreamHandle stream_handle);
 
+    int DLGpuAbs(const DLArrayHandle input, DLArrayHandle output,
+                 DLStreamHandle stream_handle);
+    int DLGpuSign(const DLArrayHandle input, DLArrayHandle output,
+                  DLStreamHandle stream_handle);
+
     // Initializers
     int DLGpuNormalInit(DLArrayHandle arr, const float mean, const float stddev,
                         DLStreamHandle stream_handle);

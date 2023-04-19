@@ -9,7 +9,8 @@ from .compressed_embedding import HashEmbedding, \
     DeepHashEmbedding, RobeEmbedding, \
     DPQEmbedding, MGQEmbedding, AdaptiveEmbedding, \
     MDEmbedding, AutoDimEmbedding, AutoDimRetrainEmbedding, \
-    DeepLightEmbedding, QuantizedEmbedding, ALPTEmbedding
+    DeepLightEmbedding, PEPEmbedding, \
+    QuantizedEmbedding, ALPTEmbedding
 from .identity import Identity
 from .linear import Linear
 from .normalization import BatchNorm, LayerNorm

@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from .executor import wrapped_mpi_nccl_init, Executor, gradients, scheduler_init,\
     scheduler_finish, get_worker_communicate, worker_init, worker_finish, server_init, server_finish, HetuConfig, new_group_comm
 
+from .Abs import abs_op
 from .AddConst import addbyconst_op
 from .AddElewise import add_op
 from .Argmax import argmax_op
@@ -36,6 +37,7 @@ from .LeakyRelu import leaky_relu_op, leaky_relu_gradient_op
 from .Reshape import array_reshape_op, array_reshape_gradient_op
 from .ReshapeTo import reshape_to_op
 from .Sigmoid import sigmoid_op
+from .Sign import sign_op
 from .Slice import slice_op, slice_gradient_op
 from .Softmax import softmax_func, softmax_op, softmax_gradient_op
 from .LogSoftmax import log_softmax_op, log_softmax_gradient_op
@@ -124,6 +126,7 @@ __all__ = [
     'HetuConfig',
     'new_group_comm',
 
+    'abs_op',
     'addbyconst_op',
     'add_op',
     'argmax_op',
@@ -174,6 +177,7 @@ __all__ = [
     'array_reshape_gradient_op',
     'reshape_to_op',
     'sigmoid_op',
+    'sign_op',
     'slice_op',
     'slice_gradient_op',
     'softmax_func',
