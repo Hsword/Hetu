@@ -381,6 +381,30 @@ def test_argmax_partial():
     tester.test([(89, 93, 71, 13, 1, 2), (89,)])
 
 
+def test_abs():
+    tester = HetuTester(ht.abs_op, 1)
+    tester.test([(3, 4)])
+    tester.test([(89, 93, 71)])
+
+
+def test_sign():
+    tester = HetuTester(ht.sign_op, 1)
+    tester.test([(3, 4)])
+    tester.test([(89, 93, 71)])
+
+
+def test_mask():
+    tester = HetuTester(ht.mask_op, 2, in_dtype=['f', 'ui'])
+    tester.test([(3, 4), (3, 4)])
+    tester.test([(89, 93, 71), (89, 93, 71)])
+
+
+def test_log():
+    tester = HetuTester(ht.log_op, 1, in_dtype='uf')
+    tester.test([(3, 4)])
+    tester.test([(89, 93, 71)], rtol=1e-6)
+
+
 def test_optimizers():
     test_shapes = [
         (1000, 8),
@@ -468,4 +492,8 @@ test_log_softmax()
 test_softmax()
 test_exp()
 test_argmax_partial()
+test_abs()
+test_sign()
+test_mask()
+test_log()
 test_optimizers()

@@ -12,7 +12,7 @@ class LogOp(Op):
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
-            raise NotImplementedError
+            output_val[:] = np.log(np.maximum(input_vals[0].asnumpy(), self.eps))
         else:
             log_link(input_vals[0], output_val, self.eps, stream_handle)
 

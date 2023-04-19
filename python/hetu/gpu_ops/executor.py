@@ -284,9 +284,9 @@ class HetuConfig(object):
             init_p2p_stream = len(devices) != ctx.worker_num
 
         # variables initialization
-        self.seed = seed if seed is not None else np.int64(time())
-        from ..random import set_random_seed
-        set_random_seed(self.seed)
+        seed = seed if seed is not None else np.int64(time())
+        from ..random import set_random_seed, get_seed
+        set_random_seed(seed)
 
         # get attribute of communication mode
         self.ps_comm = None
@@ -302,7 +302,7 @@ class HetuConfig(object):
             ps_nrank = int(
                 os.environ['DMLC_NUM_WORKER']) if 'DMLC_NUM_WORKER' in os.environ else 1
             topo_sort_register_ps(
-                eval_node_list, self.ps_comm, self.comm_mode, self.seed, cstable_policy)
+                eval_node_list, self.ps_comm, self.comm_mode, get_seed(), cstable_policy)
         if self.comm_mode == "Hybrid" or self.comm_mode == "AllReduce":
             self.nccl_comm = wrapped_mpi_nccl_init(devices=local_gpu_devices)
         elif context_launch:
@@ -537,10 +537,6 @@ class Executor(object):
         return self.config.context
 
     @property
-    def seed(self) -> int:
-        return self.config.seed
-
-    @property
     def batch_num(self) -> int:
         assert len(
             self.subexecutor) == 1, 'Batch num should be used with only 1 subexecutor.'
@@ -605,9 +601,10 @@ class Executor(object):
         self.load_dict(variables, file_path, consider_splits)
 
     def load_seeds(self, seeds):
-        from ..random import set_random_seed, get_seed_seqnum, step_seqnum
+        from ..random import set_random_seed, reset_seed_seqnum, step_seqnum
         set_random_seed(seeds[0])
-        step_seqnum(seeds[1] - get_seed_seqnum())
+        reset_seed_seqnum()
+        step_seqnum(seeds[1])
 
     def load_dict(
         self,

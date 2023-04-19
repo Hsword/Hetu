@@ -1,17 +1,30 @@
 import os
 
+from ..layers import SparseEmbedding
 from .base import EmbeddingTrainer
 from ..gpu_ops import Executor
 
 
 class SwitchInferenceTrainer(EmbeddingTrainer):
+    def __init__(self, dataset, model, opt, args, **kargs):
+        super().__init__(dataset, model, opt, args, **kargs)
+        from .deeplight import DeepLightTrainer
+        from .pep import PEPEmbTrainer
+        self.use_sparse = isinstance(self, (DeepLightTrainer, PEPEmbTrainer))
+
     def fit(self):
         self.save_dir = self.args['save_dir']
         super().fit()
         self.executor.config.comp_stream.sync()
         self.executor.return_tensor_values()
+        self.check_inference()
+
+    def check_inference(self):
         # check inference; use sparse embedding
-        infer_eval_nodes = self.get_eval_nodes_inference()
+        if self.use_sparse:
+            infer_eval_nodes = self.get_eval_nodes_test_inference()
+        else:
+            infer_eval_nodes = self.get_eval_nodes_inference()
         infer_executor = Executor(infer_eval_nodes, ctx=self.ctx,
                                   seed=self.seed, log_path=self.log_dir)
         del self.executor
@@ -37,12 +50,13 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
             print(printstr, file=log_file, flush=True)
 
     def test(self):
-        assert self.load_ckpt is not None, 'Checkpoint should be given in testing.'
-        from ..layers import DeepLightEmbedding
-        if isinstance(self.embed_layer, DeepLightEmbedding):
-            eval_nodes = self.get_eval_nodes_inference(False)
+        if self.use_sparse:
+            self.embed_layer = self.get_embed_layer_inference()
         else:
-            eval_nodes = self.get_eval_nodes_inference()
+            self.embed_layer = self.get_embed_layer()
+        self.log_func(f'Embedding layer: {self.embed_layer}')
+        assert self.load_ckpt is not None, 'Checkpoint should be given in testing.'
+        eval_nodes = self.get_eval_nodes_inference()
         self.init_executor(eval_nodes)
 
         self.try_load_ckpt()
@@ -63,3 +77,31 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
         self.log_func(printstr)
         if log_file is not None:
             print(printstr, file=log_file, flush=True)
+
+    @property
+    def form(self):
+        raise NotImplementedError
+
+    @property
+    def sparse_name(self):
+        raise NotImplementedError
+
+    def get_eval_nodes_test_inference(self):
+        assert self.use_sparse
+        # check inference; use sparse embedding
+        embed_input, dense_input, y_ = self.data_ops
+        test_embed_input = self.embed_layer.make_inference(embed_input)
+        test_loss, test_prediction = self.model(
+            test_embed_input, dense_input, y_)
+        eval_nodes = {'validate': [test_loss, test_prediction, y_]}
+        return eval_nodes
+
+    def get_embed_layer_inference(self):
+        assert self.use_sparse
+        return SparseEmbedding(
+            self.num_embed,
+            self.embedding_dim,
+            self.form,
+            name=self.sparse_name,
+            ctx=self.ectx,
+        )

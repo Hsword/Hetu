@@ -19,3 +19,11 @@ def set_less_than(arr, threshold, stream=None):
     assert isinstance(arr, _nd.NDArray)
     _LIB.DLGpuSetLessThan(arr.handle, ctypes.c_float(threshold),
                           stream.handle if stream else None)
+
+
+def get_larget_than(in_arr, threshold, mask, stream=None):
+    assert isinstance(in_arr, _nd.NDArray)
+    assert isinstance(threshold, _nd.NDArray)
+    assert isinstance(mask, _nd.NDArray)
+    _LIB.DLGpuGetLargerThan(in_arr.handle, threshold.handle,
+                            mask.handle, stream.handle if stream else None)

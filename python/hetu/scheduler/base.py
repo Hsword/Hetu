@@ -78,10 +78,7 @@ class EmbeddingTrainer(object):
         self.check_auc = self.monitor == 'auc'
         self.result_file = self.args.get('result_file', None)
 
-        real_save_topk = max(1, self.save_topk)
-        init_value = float('-inf')
-        self.best_results = [init_value for _ in range(real_save_topk)]
-        self.best_ckpts = [None for _ in range(real_save_topk)]
+        self.init_ckpts()
 
         if self.early_stop_steps > 0:
             self.early_stop_counter = 0
@@ -91,8 +88,12 @@ class EmbeddingTrainer(object):
         self.start_ep = 0
         self.dataset = dataset
         self.data_ops = self.get_data()
-        self.embed_layer = self.get_embed_layer()
-        self.log_func(f'Embedding layer: {self.embed_layer}')
+
+    def init_ckpts(self):
+        real_save_topk = max(1, self.save_topk)
+        init_value = float('-inf')
+        self.best_results = [init_value for _ in range(real_save_topk)]
+        self.best_ckpts = [None for _ in range(real_save_topk)]
 
     def set_use_multi(self, new_use_multi):
         self.use_multi = new_use_multi
@@ -164,6 +165,26 @@ class EmbeddingTrainer(object):
             self.ectx,
             **self.embedding_args,
         )
+
+    def run_once(self):
+        self.total_epoch = int(self.nepoch * self.num_test_every_epoch)
+        train_batch_num = self.executor.get_batch_num('train')
+        npart = self.num_test_every_epoch
+        self.base_batch_num = train_batch_num // npart
+        self.residual = train_batch_num % npart
+        log_file = open(self.result_file,
+                        'w') if self.result_file is not None else None
+        for ep in range(self.start_ep, self.total_epoch):
+            real_ep = ep // npart
+            real_part = ep % npart
+            self.log_func(f"Epoch {real_ep}({real_part})")
+            _, early_stopping = self.run_epoch(
+                self.base_batch_num + (real_part < self.residual), real_ep, real_part, log_file)
+            self.cur_ep = real_ep
+            self.cur_part = real_part
+            if early_stopping:
+                self.log_func('Early stop!')
+                break
 
     def run_epoch(self, train_batch_num, epoch, part, log_file=None):
         with self.timing():
@@ -371,31 +392,17 @@ class EmbeddingTrainer(object):
         self.executor = executor
 
     def fit(self):
+        self.embed_layer = self.get_embed_layer()
+        self.log_func(f'Embedding layer: {self.embed_layer}')
         eval_nodes = self.get_eval_nodes()
         self.init_executor(eval_nodes)
 
-        self.total_epoch = int(self.nepoch * self.num_test_every_epoch)
-        train_batch_num = self.executor.get_batch_num('train')
-        npart = self.num_test_every_epoch
-        self.base_batch_num = train_batch_num // npart
-        self.residual = train_batch_num % npart
         self.try_load_ckpt()
-
-        log_file = open(self.result_file,
-                        'w') if self.result_file is not None else None
-        for ep in range(self.start_ep, self.total_epoch):
-            real_ep = ep // npart
-            real_part = ep % npart
-            self.log_func(f"Epoch {real_ep}({real_part})")
-            _, early_stopping = self.run_epoch(
-                self.base_batch_num + (real_part < self.residual), real_ep, real_part, log_file)
-            self.cur_ep = real_ep
-            self.cur_part = real_part
-            if early_stopping:
-                self.log_func('Early stop!')
-                break
+        self.run_once()
 
     def test(self):
+        self.embed_layer = self.get_embed_layer()
+        self.log_func(f'Embedding layer: {self.embed_layer}')
         assert self.load_ckpt is not None, 'Checkpoint should be given in testing.'
         eval_nodes = self.get_eval_nodes_inference()
         self.init_executor(eval_nodes)

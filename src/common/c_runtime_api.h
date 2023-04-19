@@ -1158,6 +1158,9 @@ HETUSYS_EXTERN_C {
                      DLArrayHandle input_grad, float eps,
                      DLStreamHandle stream_handle = NULL);
 
+    int DLGpuMask(const DLArrayHandle input, const DLArrayHandle mask,
+                  DLArrayHandle output, DLStreamHandle stream_handle = NULL);
+
     int DLGpuExp(const DLArrayHandle input, DLArrayHandle output,
                  DLStreamHandle stream_handle);
 
@@ -1229,6 +1232,9 @@ HETUSYS_EXTERN_C {
                          int num_ax, DLStreamHandle stream_handle);
     int DLGpuSetLessThan(const DLArrayHandle arr, float threshold,
                          DLStreamHandle stream_handle);
+    int DLGpuGetLargerThan(const DLArrayHandle input,
+                           const DLArrayHandle threshold, DLArrayHandle mask,
+                           DLStreamHandle stream_handle);
 
     int DLGpuDequantize(const DLArrayHandle input, DLArrayHandle output,
                         int digit, float scale, float minele,

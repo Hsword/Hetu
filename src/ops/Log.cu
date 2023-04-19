@@ -3,7 +3,7 @@
 __global__ void log_kernel(const float *input_data, float *output_data,
                            float eps, int size) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i > size) {
+    if (i >= size) {
         return;
     }
     output_data[i] = log(max(input_data[i], eps));
@@ -13,7 +13,7 @@ __global__ void log_grad_kernel(const float *output_grad_data,
                                 float *input_data, float *input_grad_data,
                                 float eps, int size) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i > size) {
+    if (i >= size) {
         return;
     }
     float tmp = output_grad_data[i] / max(input_data[i], eps);

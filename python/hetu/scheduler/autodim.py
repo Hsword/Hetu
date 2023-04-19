@@ -4,8 +4,7 @@ import numpy as np
 
 from .base import EmbeddingTrainer
 from ..layers import AutoDimEmbedding, AutoDimRetrainEmbedding
-from ..gpu_ops import Executor
-from ..ndarray import empty, IndexedSlices
+from ..ndarray import empty
 from ..gpu_links import all_fro_norm, matrix_elementwise_divide_const, \
     all_add_, div_n_mul_, matrix_elementwise_minus, matrix_elementwise_add_simple, \
     sgd_update, assign_embedding_with_indexedslices
@@ -20,6 +19,8 @@ class AutoDimTrainer(EmbeddingTrainer):
         assert self.use_multi == self.separate_fields == int(self.retraining)
 
     def fit(self):
+        self.embed_layer = self.get_embed_layer()
+        self.log_func(f'Embedding layer: {self.embed_layer}')
         self.alpha = self.embed_layer.alpha
         self.r = self.embedding_args['r']
         self.alpha_lr = self.embedding_args['alpha_lr']
@@ -32,37 +33,17 @@ class AutoDimTrainer(EmbeddingTrainer):
         self.executor.subexecutor['allgrads'].inference = False
         self.get_arch_params(self.executor.config.placeholder_to_arr_map)
 
-        self.total_epoch = int(self.nepoch * self.num_test_every_epoch)
-        train_batch_num = self.executor.get_batch_num('train')
-        npart = self.num_test_every_epoch
-        self.base_batch_num = train_batch_num // npart
-        self.residual = train_batch_num % npart
         self.try_load_ckpt()
         self.train_step = self.first_stage_train_step
 
-        log_file = open(self.result_file,
-                        'w') if self.result_file is not None else None
-        for ep in range(self.start_ep, self.total_epoch):
-            real_ep = ep // npart
-            real_part = ep % npart
-            self.log_func(f"Epoch {real_ep}({real_part})")
-            _, early_stopping = self.run_epoch(
-                self.base_batch_num + (real_part < self.residual), real_ep, real_part, log_file)
-            self.cur_ep = real_ep
-            self.cur_part = real_part
-            if early_stopping:
-                self.log_func('Early stop!')
-                break
+        self.run_once()
 
         self.log_func('Switch to re-training stage!!!')
         # re-init save topk
         if self.save_topk > 0:
             self.save_dir = self.save_dir + '_retrain'
             os.makedirs(self.save_dir)
-        real_save_topk = max(1, self.save_topk)
-        init_value = float('-inf')
-        self.best_results = [init_value for _ in range(real_save_topk)]
-        self.best_ckpts = [None for _ in range(real_save_topk)]
+        self.init_ckpts()
 
         # re-init executor
         self.executor.return_tensor_values()
@@ -79,41 +60,13 @@ class AutoDimTrainer(EmbeddingTrainer):
         resf_parts = osp.split(self.result_file)
         self.result_file = osp.join(resf_parts[0], 'retrain_' + resf_parts[1])
 
-        run_name = osp.split(self.result_file)[1][:-4]
-        executor = Executor(
-            eval_nodes,
-            ctx=self.ctx,
-            seed=self.seed + 1,  # use a different seed
-            log_path=self.log_dir,
-            logger=self.logger,
-            project=self.proj_name,
-            run_name=run_name,
-            run_id=self.run_id,
-        )
-        executor.set_config(self.args)
-        self.executor = executor
+        self.seed += 1  # use a different seed
+
+        self.init_executor(eval_nodes)
         self.train_step = super().train_step
 
         # re-run
-        self.total_epoch = int(self.nepoch * self.num_test_every_epoch)
-        train_batch_num = self.executor.get_batch_num('train')
-        npart = self.num_test_every_epoch
-        self.base_batch_num = train_batch_num // npart
-        self.residual = train_batch_num % npart
-
-        log_file = open(self.result_file,
-                        'w') if self.result_file is not None else None
-        for ep in range(self.start_ep, self.total_epoch):
-            real_ep = ep // npart
-            real_part = ep % npart
-            self.log_func(f"Epoch {real_ep}({real_part})")
-            _, early_stopping = self.run_epoch(
-                self.base_batch_num + (real_part < self.residual), real_ep, real_part, log_file)
-            self.cur_ep = real_ep
-            self.cur_part = real_part
-            if early_stopping:
-                self.log_func('Early stop!')
-                break
+        self.run_once()
 
     @property
     def all_train_names(self):

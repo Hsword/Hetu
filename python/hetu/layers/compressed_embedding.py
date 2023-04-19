@@ -380,18 +380,6 @@ class MGQEmbedding(DPQEmbedding):
                 outputs_final, (-1, self.embedding_dim))
             return outputs_final
 
-    def make_inference(self, embed_input):
-        with ht.context(self.ctx):
-            codes = ht.embedding_lookup_op(self.codebooks, embed_input)
-            # (bs, slot, npart)
-            if not self.share_weights:
-                codes = ht.add_op(codes, ht.reshape_to_op(self.dbase, codes))
-            outputs = ht.embedding_lookup_op(self.value_matrix, codes)
-            # (bs, slot, npart, pdim)
-            outputs = ht.array_reshape_op(outputs, (-1, self.embedding_dim))
-            # (bs * slot, dim)
-            return outputs
-
 
 class AdaptiveEmbedding(Embedding):
     def __init__(self, num_freq_emb, num_rare_emb, remap_indices, embedding_dim, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
@@ -553,7 +541,37 @@ class AutoDimRetrainEmbedding(Embedding):
         return f'{self.name}({self.num_embeddings},{self.compressed_dim},{self.embedding_dim})'
 
 
-class DeepLightEmbedding(Embedding):
+class SparseEmbedding(Embedding):
+    def __init__(self, num_embeddings, embedding_dim, form, name='embedding', ctx=None):
+        # only for inference
+        self.form = form
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.name = name
+        self.ctx = ctx
+        from ..ndarray import ND_Sparse_Array
+        embeddings = ND_Sparse_Array(
+            self.num_embeddings, self.embedding_dim, ctx=self.ctx)
+        self.sparse_embedding_table = ht.Variable(
+            f'{self.name}_sparse', value=embeddings)
+
+    def __call__(self, x):
+        with ht.context(self.ctx):
+            return ht.sparse_embedding_lookup_op(self.sparse_embedding_table, x)
+
+    def make_inference(self, embed_input):
+        # here from train to inference
+        with ht.context(self.ctx):
+            # not for validate; convert to csr format for inference
+            from ..ndarray import dense_to_sparse
+            embeddings = dense_to_sparse(
+                self.embedding_table.tensor_value, form=self.form)
+            self.sparse_embedding_table = ht.Variable(
+                f'{self.name}_sparse', value=embeddings)
+            return ht.sparse_embedding_lookup_op(self.sparse_embedding_table, embed_input)
+
+
+class DeepLightEmbedding(SparseEmbedding):
     def __init__(self, num_embeddings, embedding_dim, prune_rate, form, warm=2, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         assert form in ('coo', 'csr')
         self.num_embeddings = num_embeddings
@@ -590,21 +608,6 @@ class DeepLightEmbedding(Embedding):
         batch_num = y_.get_batch_num('train')
         rate_updater = self.make_adaptive_rate(batch_num)
         return ht.prune_low_magnitude_op(self.embedding_table, rate_updater)
-
-    def make_inference(self, embed_input, load_value=True):
-        with ht.context(self.ctx):
-            # not for validate; convert to csr format for inference
-            if load_value:
-                from ..ndarray import dense_to_sparse
-                embeddings = dense_to_sparse(
-                    self.embedding_table.tensor_value, form=self.form)
-            else:
-                from ..ndarray import ND_Sparse_Array
-                embeddings = ND_Sparse_Array(
-                    self.num_embeddings, self.embedding_dim, ctx=self.ctx)
-            self.sparse_embedding_table = ht.Variable(
-                'sparse_embedding', value=embeddings)
-            return ht.sparse_embedding_lookup_op(self.sparse_embedding_table, embed_input)
 
 
 class PEPEmbedding(Embedding):
@@ -644,41 +647,24 @@ class PEPEmbedding(Embedding):
                 ht.minus_op(ht.abs_op(raw_embeddings), cur_threshold)))
             return embeddings
 
-    # def make_adaptive_rate(self, batch_num):
-    #     ignore_iter = self.warm * batch_num
 
-    #     def updater(n_iter):
-    #         if n_iter <= ignore_iter:
-    #             adaptive_sparse = 0
-    #         else:
-    #             real_niter = n_iter - ignore_iter
-    #             if real_niter % 10 == 0 or real_niter % batch_num == 0:
-    #                 adaptive_sparse = self.prune_rate * \
-    #                     (1 - 0.99**(real_niter / 100.))
-    #             else:
-    #                 adaptive_sparse = 0
-    #         return adaptive_sparse
-    #     return updater
+class PEPRetrainEmbedding(SparseEmbedding):
+    def __init__(self, num_embeddings, embedding_dim, mask, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.name = name
+        self.ctx = ctx
+        self.embedding_table = initializer(
+            shape=(self.num_embeddings, self.embedding_dim), name=self.name, ctx=ctx)
+        self.mask = ht.placeholder_op(
+            f'{name}_mask', value=mask, trainable=False, dtype=np.int32, ctx=self.ctx)
+        self.form = 'csr'
 
-    # def make_prune_op(self, y_):
-    #     batch_num = y_.get_batch_num('train')
-    #     rate_updater = self.make_adaptive_rate(batch_num)
-    #     return ht.prune_low_magnitude_op(self.embedding_table, rate_updater)
-
-    # def make_inference(self, embed_input, load_value=True):
-    #     with ht.context(self.ctx):
-    #         # not for validate; convert to csr format for inference
-    #         if load_value:
-    #             from ..ndarray import dense_to_sparse
-    #             embeddings = dense_to_sparse(
-    #                 self.embedding_table.tensor_value, form=self.form)
-    #         else:
-    #             from ..ndarray import ND_Sparse_Array
-    #             embeddings = ND_Sparse_Array(
-    #                 self.num_embeddings, self.embedding_dim, ctx=self.ctx)
-    #         self.sparse_embedding_table = ht.Variable(
-    #             'sparse_embedding', value=embeddings)
-    #         return ht.sparse_embedding_lookup_op(self.sparse_embedding_table, embed_input)
+    def __call__(self, x):
+        with ht.context(self.ctx):
+            lookups = ht.embedding_lookup_op(self.embedding_table, x)
+            lookup_masks = ht.embedding_lookup_op(self.mask, x)
+            return ht.mask_op(lookups, lookup_masks)
 
 
 class QuantizedEmbedding(Embedding):

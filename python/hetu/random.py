@@ -16,6 +16,10 @@ def set_random_seed(seed):
     check_call(_LIB.SetRandomSeed(seed))
 
 
+def reset_seed_seqnum():
+    step_seqnum(-get_seed_seqnum())
+
+
 def get_seed():
     return _LIB.GetSeed()
 

@@ -96,6 +96,7 @@ from .BalanceAssignment import balance_assignment_op
 from .Indexing import indexing_op
 from .Scatter1D import scatter1d_op, scatter1d_grad_op
 from .LogElewise import log_op, log_grad_op
+from .Mask import mask_op
 from .NllLoss import nll_loss_op, nll_loss_grad_op
 from .ReverseLayoutTransformNoGate import reverse_layout_transform_no_gate_op, reverse_layout_transform_no_gate_gradient_op
 from .HAllToAll import halltoall_op
@@ -185,6 +186,7 @@ __all__ = [
     'softmax_gradient_op',
     'log_softmax_op',
     'log_softmax_gradient_op',
+    'mask_op',
     'softmaxcrossentropy_op',
     'softmaxcrossentropy_sparse_op',
     'sparse_set_op',

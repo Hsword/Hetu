@@ -63,6 +63,11 @@ class PlaceholderOp(Op):
                 self.event = stream.PSEvent(config.ps_comm, self.id)
         else:
             if self.initializer:
+                if self.is_embed:
+                    # save initializer and seed for possible further use
+                    self.used_initializer = self.initializer
+                    from ..random import get_seed_status
+                    self.init_seed = get_seed_status()
                 self.initializer(self, config.comp_stream)
                 self.initializer = None
             elif self.tensor_value is not None:

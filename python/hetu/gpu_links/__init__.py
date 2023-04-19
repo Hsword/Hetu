@@ -82,6 +82,7 @@ from .ReverseLayoutTransform import *
 from .IndexingLink import *
 from .Scatter1DLink import *
 from .LogLink import *
+from .MaskLink import *
 from .NllLossLink import *
 from .HA2ALayoutTransform import *
 from .SamGroupSumLink import *
@@ -248,6 +249,7 @@ __all__ = [
     'reverse_layout_transform_top2_gradient_data',
     'log_link',
     'log_grad_link',
+    'mask_func',
     'nll_loss_link',
     'nll_loss_grad_link',
     'reverse_layout_transform_no_gate',
@@ -266,6 +268,7 @@ __all__ = [
     'learn_hash',
     'num_less_than',
     'set_less_than',
+    'get_larget_than',
     'tensor_quantize',
     'tensor_quantize_signed',
     'tensor_dequantize',
