@@ -649,7 +649,7 @@ class PEPEmbedding(Embedding):
 
 
 class PEPRetrainEmbedding(SparseEmbedding):
-    def __init__(self, num_embeddings, embedding_dim, mask, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+    def __init__(self, num_embeddings, embedding_dim, mask, form, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.name = name
@@ -658,7 +658,7 @@ class PEPRetrainEmbedding(SparseEmbedding):
             shape=(self.num_embeddings, self.embedding_dim), name=self.name, ctx=ctx)
         self.mask = ht.placeholder_op(
             f'{name}_mask', value=mask, trainable=False, dtype=np.int32, ctx=self.ctx)
-        self.form = 'csr'
+        self.form = form
 
     def __call__(self, x):
         with ht.context(self.ctx):

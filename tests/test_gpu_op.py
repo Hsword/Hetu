@@ -1492,6 +1492,66 @@ def test_reduce_indexedslice():
     np.testing.assert_allclose(np_out_val, ht_out_val)
 
 
+def test_num_less_than_tensor():
+    ctx = ht.gpu(0)
+    row_size = 1000
+    dim = 16
+    emb_shape = (row_size, dim)
+    npembedding = np.random.random(size=emb_shape).astype(np.float32)
+    embedding = ht.array(npembedding, ctx=ctx)
+    middle = ht.empty(emb_shape, ctx=ctx)
+    output = ht.empty((1,), ctx=ctx)
+    stream = ht.stream.create_stream_handle(ctx)
+    # fea-dim
+    np_feadim_threshold = np.random.random(size=emb_shape).astype(np.float32)
+    feadim_threshold = ht.array(np_feadim_threshold, ctx=ctx)
+    gpu_op.num_less_than_tensor_threshold(
+        embedding, middle, output, feadim_threshold, stream)
+    stream.sync()
+    htoutput = output.asnumpy()
+    npmiddle = (np.abs(npembedding) < np_feadim_threshold)
+    npoutput = np.sum(npmiddle)
+    np.testing.assert_allclose(npmiddle, middle.asnumpy())
+    print('feadim, ht:', htoutput, ', np:', npoutput)
+    assert htoutput.item() == npoutput.item()
+    # fea
+    np_fea_threshold = np.random.random(size=(row_size, 1)).astype(np.float32)
+    fea_threshold = ht.array(np_fea_threshold, ctx=ctx)
+    gpu_op.num_less_than_tensor_threshold(
+        embedding, middle, output, fea_threshold, stream)
+    stream.sync()
+    htoutput = output.asnumpy()
+    npmiddle = (np.abs(npembedding) < np_fea_threshold)
+    npoutput = np.sum(npmiddle)
+    np.testing.assert_allclose(npmiddle, middle.asnumpy())
+    print('fea, ht:', htoutput, ', np:', npoutput)
+    assert htoutput.item() == npoutput.item()
+    # dim
+    np_dim_threshold = np.random.random(size=(dim,)).astype(np.float32)
+    dim_threshold = ht.array(np_dim_threshold, ctx=ctx)
+    gpu_op.num_less_than_tensor_threshold(
+        embedding, middle, output, dim_threshold, stream)
+    stream.sync()
+    htoutput = output.asnumpy()
+    npmiddle = (np.abs(npembedding) < np_dim_threshold)
+    npoutput = np.sum(npmiddle)
+    np.testing.assert_allclose(npmiddle, middle.asnumpy())
+    print('dim, ht:', htoutput, ', np:', npoutput)
+    assert htoutput.item() == npoutput.item()
+    # global
+    np_threshold = np.random.random(size=(1,)).astype(np.float32)
+    threshold = ht.array(np_threshold, ctx=ctx)
+    gpu_op.num_less_than_tensor_threshold(
+        embedding, middle, output, threshold, stream)
+    stream.sync()
+    htoutput = output.asnumpy()
+    npmiddle = (np.abs(npembedding) < np_threshold)
+    npoutput = np.sum(npmiddle)
+    np.testing.assert_allclose(npmiddle, middle.asnumpy())
+    print('global, ht:', htoutput, ', np:', npoutput)
+    assert htoutput.item() == npoutput.item()
+
+
 test_array_set()
 test_broadcast_to()
 test_reduce_sum_axis_zero()
@@ -1537,3 +1597,4 @@ test_instance_norm2d()
 test_instance_norm2d_gradient()
 test_onehot()
 test_reduce_indexedslice()
+test_num_less_than_tensor()

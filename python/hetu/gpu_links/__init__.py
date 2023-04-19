@@ -269,6 +269,7 @@ __all__ = [
     'num_less_than',
     'set_less_than',
     'get_larget_than',
+    'num_less_than_tensor_threshold',
     'tensor_quantize',
     'tensor_quantize_signed',
     'tensor_dequantize',

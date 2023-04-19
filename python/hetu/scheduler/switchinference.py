@@ -11,6 +11,18 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
         from .deeplight import DeepLightTrainer
         from .pep import PEPEmbTrainer
         self.use_sparse = isinstance(self, (DeepLightTrainer, PEPEmbTrainer))
+        if self.use_sparse:
+            real_dim = self.compress_rate * self.embedding_dim
+            if real_dim >= 3:
+                form = 'csr'
+                real_target_sparse = (real_dim - 1) / 2 / self.embedding_dim
+            else:
+                form = 'coo'
+                real_target_sparse = self.compress_rate / 3
+            self.prune_rate = 1 - real_target_sparse
+            self.form = form
+            self.log_func(
+                f'Use {form} for sparse storage; final prune rate {self.prune_rate}, given target sparse rate {self.compress_rate}.')
 
     def fit(self):
         self.save_dir = self.args['save_dir']
@@ -77,10 +89,6 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
         self.log_func(printstr)
         if log_file is not None:
             print(printstr, file=log_file, flush=True)
-
-    @property
-    def form(self):
-        raise NotImplementedError
 
     @property
     def sparse_name(self):

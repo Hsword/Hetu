@@ -1235,6 +1235,10 @@ HETUSYS_EXTERN_C {
     int DLGpuGetLargerThan(const DLArrayHandle input,
                            const DLArrayHandle threshold, DLArrayHandle mask,
                            DLStreamHandle stream_handle);
+    int DLGpuNumLessThanTensorThreshold(
+        const DLArrayHandle input, DLArrayHandle middle, DLArrayHandle output,
+        const DLArrayHandle threshold, int *axes, int num_ax,
+        DLStreamHandle stream_handle);
 
     int DLGpuDequantize(const DLArrayHandle input, DLArrayHandle output,
                         int digit, float scale, float minele,

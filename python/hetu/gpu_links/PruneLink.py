@@ -21,6 +21,18 @@ def set_less_than(arr, threshold, stream=None):
                           stream.handle if stream else None)
 
 
+def num_less_than_tensor_threshold(in_arr, mid_arr, out_arr, threshold, stream=None):
+    assert isinstance(in_arr, _nd.NDArray)
+    assert isinstance(mid_arr, _nd.NDArray)
+    assert isinstance(out_arr, _nd.NDArray)
+    assert isinstance(threshold, _nd.NDArray)
+    axes = list(range(len(in_arr.shape)))
+    pointer_func = ctypes.c_int * len(axes)
+    pointer = pointer_func(*axes)
+    _LIB.DLGpuNumLessThanTensorThreshold(in_arr.handle, mid_arr.handle, out_arr.handle, threshold.handle,
+                                         pointer, ctypes.c_int(len(axes)), stream.handle if stream else None)
+
+
 def get_larget_than(in_arr, threshold, mask, stream=None):
     assert isinstance(in_arr, _nd.NDArray)
     assert isinstance(threshold, _nd.NDArray)
