@@ -5,12 +5,6 @@ import math
 
 
 class ALPTEmbTrainer(EmbeddingTrainer):
-    def __init__(self, dataset, model, opt, args, **kargs):
-        super().__init__(dataset, model, opt, args, **kargs)
-        self.scale_factor = 1 / \
-            math.sqrt(self.batch_size * self.embedding_dim *
-                      (2 ** (self.embed_layer.digit-1) - 1))
-
     def assert_use_multi(self):
         assert self.use_multi == self.separate_fields == 0
 
@@ -68,8 +62,12 @@ class ALPTEmbTrainer(EmbeddingTrainer):
         dscale = gradients(new_loss, [scale])
 
         scale_unique, scale_deduplookup, scale_dedupgrad = dscale[0]
+
+        scale_factor = 1 / \
+            math.sqrt(self.batch_size * self.embedding_dim *
+                      (2 ** (self.embed_layer.digit-1) - 1))
         scale_dedupgrad = mul_byconst_op(
-            scale_dedupgrad, self.scale_factor, ctx=self.ctx)
+            scale_dedupgrad, scale_factor, ctx=self.ctx)
         scale_update = self.opt.sparse_opt_op_type(
             self.opt, scale, scale_unique, scale_deduplookup, scale_dedupgrad)
         scale_assign = assign_with_indexedslices_op(
