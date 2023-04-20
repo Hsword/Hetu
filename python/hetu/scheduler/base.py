@@ -95,6 +95,13 @@ class EmbeddingTrainer(object):
         self.best_results = [init_value for _ in range(real_save_topk)]
         self.best_ckpts = [None for _ in range(real_save_topk)]
 
+    def reset_for_retrain(self):
+        # reset executor, embed layer, and the parameter of model
+        del self.executor
+        del self.embed_layer
+        self.model.__init__(self.embedding_dim,
+                            self.num_slot, self.dataset.num_dense)
+
     def set_use_multi(self, new_use_multi):
         self.use_multi = new_use_multi
         self.separate_fields = new_use_multi

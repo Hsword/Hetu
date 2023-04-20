@@ -43,6 +43,7 @@ class PEPEmbTrainer(SwitchInferenceTrainer):
         )
 
     def fit(self):
+        self.save_dir = self.args['save_dir']
         # the first stage
         self.run_epoch = self.run_epoch_first_stage
         self.embed_layer = self.get_embed_layer()
@@ -82,14 +83,13 @@ class PEPEmbTrainer(SwitchInferenceTrainer):
             os.makedirs(self.save_dir)
         self.init_ckpts()
 
+        self.reset_for_retrain()
         self.embed_layer = self.get_embed_layer_retrain()
         npmask = self.mask.asnumpy()
         dense = npmask.sum()
         sparse_rate = dense / self.num_embed / self.embedding_dim
         self.log_func(f'Retrain with sparse rate: {sparse_rate}')
         eval_nodes = self.get_eval_nodes()
-
-        del self.executor
 
         resf_parts = osp.split(self.result_file)
         self.result_file = osp.join(resf_parts[0], 'retrain_' + resf_parts[1])

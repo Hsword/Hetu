@@ -51,11 +51,11 @@ class AutoDimTrainer(EmbeddingTrainer):
         self.retraining = True
         self.data_ops = self.get_data()
         dim_choices = self.make_retrain(self.executor.config.comp_stream)
+
+        self.reset_for_retrain()
         self.embed_layer = self.get_embed_layer_retrain(dim_choices)
         self.log_func(f'New embedding layer: {self.embed_layer}')
         eval_nodes = super().get_eval_nodes()
-
-        del self.executor
 
         resf_parts = osp.split(self.result_file)
         self.result_file = osp.join(resf_parts[0], 'retrain_' + resf_parts[1])
