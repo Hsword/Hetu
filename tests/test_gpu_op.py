@@ -1552,6 +1552,21 @@ def test_num_less_than_tensor():
     assert htoutput.item() == npoutput.item()
 
 
+def test_clipping():
+    ctx = ht.gpu(0)
+    shape = (3, 4, 5, 6)
+    min_value = 0.
+    max_value = 0.5
+    nparr = np.random.random(size=shape).astype(np.float32)
+    htarr = ht.array(nparr, ctx=ctx)
+    stream = ht.stream.create_stream_handle(ctx)
+    gpu_op.param_clip_func(htarr, min_value, max_value, stream)
+    stream.sync()
+    htres = htarr.asnumpy()
+    npres = np.clip(nparr, min_value, max_value)
+    assert np.all(htres == npres)
+
+
 test_array_set()
 test_broadcast_to()
 test_reduce_sum_axis_zero()
@@ -1598,3 +1613,4 @@ test_instance_norm2d_gradient()
 test_onehot()
 test_reduce_indexedslice()
 test_num_less_than_tensor()
+test_clipping()

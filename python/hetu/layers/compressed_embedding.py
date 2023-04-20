@@ -140,10 +140,14 @@ class DeepHashEmbedding(Embedding):
         return Sequence(*layers)
 
     def make_primes(self, nprs, name):
-        return ht.Variable(name=name, value=nprs.choice(self.allprimes, size=self.num_hash), trainable=False)
+        primes = ht.placeholder_op(name=name, value=nprs.choice(
+            self.allprimes, size=self.num_hash).astype(np.int32), dtype=np.int32, trainable=False)
+        return primes
 
     def make_random(self, nprs, name):
-        return ht.Variable(name=name, value=nprs.randint(1, self.num_buckets, size=self.num_hash), trainable=False)
+        randoms = ht.placeholder_op(name=name, value=nprs.randint(
+            1, self.num_buckets, size=self.num_hash).astype(np.int32), dtype=np.int32, trainable=False)
+        return randoms
 
     def __call__(self, x):
         # KDD21, DHE
@@ -169,7 +173,7 @@ class RobeEmbedding(Embedding):
         self.embedding_table = initializer(
             shape=(self.robe_array_size, 1), name=self.name, ctx=ctx)
         random_numbers = np.concatenate(
-            [np.array([2038074743]), nprs.randint(1, 2038074743, (9,))])
+            [np.array([2038074743]), nprs.randint(1, 2038074743, (9,))]).astype(np.int32)
         self.random_numbers = ht.placeholder_op(
             'random_numbers', value=random_numbers, dtype=np.int32, trainable=False)
 
@@ -552,7 +556,7 @@ class SparseEmbedding(Embedding):
         from ..ndarray import ND_Sparse_Array
         embeddings = ND_Sparse_Array(
             self.num_embeddings, self.embedding_dim, ctx=self.ctx)
-        self.sparse_embedding_table = ht.Variable(
+        self.sparse_embedding_table = ht.placeholder_op(
             f'{self.name}_sparse', value=embeddings)
 
     def __call__(self, x):
@@ -566,7 +570,7 @@ class SparseEmbedding(Embedding):
             from ..ndarray import dense_to_sparse
             embeddings = dense_to_sparse(
                 self.embedding_table.tensor_value, form=self.form)
-            self.sparse_embedding_table = ht.Variable(
+            self.sparse_embedding_table = ht.placeholder_op(
                 f'{self.name}_sparse', value=embeddings)
             return ht.sparse_embedding_lookup_op(self.sparse_embedding_table, embed_input)
 
@@ -665,6 +669,29 @@ class PEPRetrainEmbedding(SparseEmbedding):
             lookups = ht.embedding_lookup_op(self.embedding_table, x)
             lookup_masks = ht.embedding_lookup_op(self.mask, x)
             return ht.mask_op(lookups, lookup_masks)
+
+
+class AutoSrhEmbedding(SparseEmbedding):
+    def __init__(self, num_embeddings, embedding_dim, nsplit, group_indices, form, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.name = name
+        self.ctx = ctx
+        self.form = form
+        self.nsplit = nsplit
+        self.embedding_table = initializer(
+            shape=(num_embeddings, embedding_dim), name=name, ctx=self.ctx)
+        self.group_indices = ht.placeholder_op(
+            name=f'{name}_groupind', value=group_indices.reshape(-1, 1), trainable=False, dtype=np.int32)
+        self.alpha = ht.init.ones(
+            shape=(self.nsplit, self.embedding_dim), name=f'{name}_alpha')
+
+    def __call__(self, x):
+        with ht.context(self.ctx):
+            embeddings = ht.embedding_lookup_op(self.embedding_table, x)
+            alpha_indices = ht.embedding_lookup_op(self.group_indices, x)
+            alphas = ht.embedding_lookup_op(self.alpha, alpha_indices)
+            return ht.mul_op(embeddings, ht.reshape_to_op(alphas, embeddings))
 
 
 class QuantizedEmbedding(Embedding):

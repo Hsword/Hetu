@@ -93,6 +93,7 @@ class ModHashOp(Op):
     def __init__(self, node, nembed, ctx=None):
         super().__init__(ModHashOp, [node], ctx)
         self.nembed = nembed
+        assert node.dtype == np.int32
         self.dtype = np.int32
 
     def compute(self, input_vals, output_val, stream_handle=None):
@@ -114,6 +115,7 @@ class DivHashOp(Op):
     def __init__(self, node, nembed, ctx=None):
         super().__init__(DivHashOp, [node], ctx)
         self.nembed = nembed
+        assert node.dtype == np.int32
         self.dtype = np.int32
 
     def compute(self, input_vals, output_val, stream_handle=None):
@@ -136,6 +138,7 @@ class CompoHashOp(Op):
         super().__init__(CompoHashOp, [node], ctx)
         self.ntable = ntable
         self.nembed = nembed
+        assert node.dtype == np.int32
         self.dtype = np.int32
 
     def compute(self, input_vals, output_val, stream_handle=None):
@@ -168,6 +171,7 @@ class LearnHashOp(Op):
         self.nbucket = nbucket
         self.dist = dist
         self.eps = 1e-12
+        assert node.dtype == slope.dtype == bias.dtype == prime.dtype == np.int32
 
     def compute(self, input_vals, output_val, stream_handle=None):
         num_hash = input_vals[1].shape[0]

@@ -1,7 +1,7 @@
 from .switchinference import SwitchInferenceTrainer
 from ..layers import PEPEmbedding, PEPRetrainEmbedding
 from ..ndarray import empty
-from ..gpu_links import get_larget_than, sigmoid, num_less_than_tensor_threshold
+from ..gpu_links import get_larger_than, sigmoid, num_less_than_tensor_threshold, mask_func
 from ..random import set_random_seed, reset_seed_seqnum
 import os
 import os.path as osp
@@ -71,7 +71,7 @@ class PEPEmbTrainer(SwitchInferenceTrainer):
         # get mask
         threshold = empty(self.embed_layer.threshold.shape, ctx=self.ectx)
         sigmoid(self.embed_layer.threshold.tensor_value, threshold, stream)
-        get_larget_than(
+        get_larger_than(
             self.embed_layer.embedding_table.tensor_value, threshold, self.mask, stream)
         stream.sync()
 
@@ -103,8 +103,12 @@ class PEPEmbTrainer(SwitchInferenceTrainer):
         self.run_once()
 
         # prune and test
-        self.executor.config.comp_stream.sync()
+        stream = self.executor.config.comp_stream
+        stream.sync()
         self.executor.return_tensor_values()
+        embed_arr = self.embed_layer.embedding_table.tensor_value
+        mask_func(embed_arr, self.embed_layer.mask.tensor_value,
+                  embed_arr, stream)
         self.check_inference()
 
     def run_epoch_first_stage(self, train_batch_num, epoch, part, log_file=None):

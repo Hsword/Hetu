@@ -129,6 +129,16 @@ class CTRDataset(object):
         else:
             return middle
 
+    def get_frequency_counter(self, train_data, num_embed, fpath):
+        if osp.exists(fpath):
+            counter = np.fromfile(fpath, dtype=np.int32)
+        else:
+            counter = np.zeros((num_embed,), dtype=np.int32)
+            for idx in tqdm(train_data.reshape(-1)):
+                counter[idx] += 1
+            counter.tofile(fpath)
+        return counter
+
     def get_single_frequency_split(self, train_data, num_embed, top_percent, fpath):
         fpath_parts = fpath.split('.')
         real_fpath = '.'.join(
@@ -138,13 +148,8 @@ class CTRDataset(object):
         else:
             dirpath, filepath = osp.split(fpath)
             cache_fpath = osp.join(dirpath, 'counter_' + filepath)
-            if osp.exists(cache_fpath):
-                counter = np.fromfile(cache_fpath, dtype=np.int32)
-            else:
-                counter = np.zeros((num_embed,), dtype=np.int32)
-                for idx in tqdm(train_data.reshape(-1)):
-                    counter[idx] += 1
-                counter.tofile(cache_fpath)
+            counter = self.get_frequency_counter(
+                train_data, num_embed, cache_fpath)
             nhigh = len(counter) * top_percent
             kth = self._binary_search_frequency(
                 np.min(counter), np.max(counter) + 1, counter, nhigh)
@@ -217,6 +222,52 @@ class CTRDataset(object):
             for ind, rp in zip(remap_indices, remap_path):
                 ind.tofile(rp)
         return remap_indices
+
+    def get_whole_frequency_grouping(self, train_data, nsplit):
+        cache_path = osp.join(self.path, 'freq_grouping.bin')
+        if osp.exists(cache_path):
+            grouping = np.fromfile(cache_path, dtype=np.int32)
+        else:
+            counter_path = osp.join(self.path, 'counter_freq_split.bin')
+            counter = self.get_frequency_counter(
+                train_data, self.num_embed, counter_path)
+            indices = np.argsort(counter)
+            nignore = 0
+            group_index = 0
+            grouping = np.zeros(counter.shape, dtype=np.int32)
+            cur_nsplit = nsplit
+            while cur_nsplit != 0:
+                threshold = (self.num_embed - nignore) / cur_nsplit
+                assert int(threshold) > 0
+                minvalue = counter[indices[nignore]]
+                places = (counter == minvalue)
+                cnt = places.sum()
+                if cnt >= threshold:
+                    nignore += cnt
+                    grouping[places] = group_index
+                    assert cur_nsplit > 1
+                else:
+                    cur_index = nignore + int(threshold) - 1
+                    target_value = counter[indices[cur_index]]
+                    assert target_value > minvalue
+                    offset = 1
+                    while True:
+                        if cur_index + offset >= self.num_embed or counter[indices[cur_index + offset]] != target_value:
+                            ending = cur_index + offset
+                            break
+                        elif cur_index - offset <= nignore or counter[indices[cur_index - offset]] != target_value:
+                            ending = cur_index - offset + 1
+                            break
+                        offset += 1
+                    assert ending > nignore
+                    grouping[indices[nignore:ending]] = group_index
+                    nignore = ending
+                cur_nsplit -= 1
+                group_index += 1
+            if nignore < self.num_embed:
+                grouping[indices[nignore:self.num_embed]] = value - 1
+            grouping.tofile(cache_path)
+        return grouping
 
     def process_all_data_by_day(self, use_test=True, separate_fields=False):
         path = self.path

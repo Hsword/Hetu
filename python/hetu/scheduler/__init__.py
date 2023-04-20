@@ -13,6 +13,7 @@ from .md import MDETrainer
 from .autodim import AutoDimTrainer
 from .deeplight import DeepLightTrainer
 from .pep import PEPEmbTrainer
+from .autosrh import AutoSrhTrainer
 from .quantize import QuantizeEmbTrainer
 from .alpt import ALPTEmbTrainer
 from ..layers import Embedding, HashEmbedding, \
@@ -20,7 +21,7 @@ from ..layers import Embedding, HashEmbedding, \
     DeepHashEmbedding, RobeEmbedding, \
     DPQEmbedding, MGQEmbedding, AdaptiveEmbedding, \
     MDEmbedding, AutoDimEmbedding, \
-    DeepLightEmbedding, PEPEmbedding, \
+    DeepLightEmbedding, PEPEmbedding, AutoSrhEmbedding, \
     QuantizedEmbedding, ALPTEmbedding
 
 
@@ -38,6 +39,7 @@ _layer2trainer_mapping = {
     AutoDimEmbedding: AutoDimTrainer,
     DeepLightEmbedding: DeepLightTrainer,
     PEPEmbedding: PEPEmbTrainer,
+    AutoSrhEmbedding: AutoSrhTrainer,
     QuantizedEmbedding: QuantizeEmbTrainer,
     ALPTEmbedding: ALPTEmbTrainer,
 }

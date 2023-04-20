@@ -5,6 +5,14 @@ from .._base import _LIB
 from .. import ndarray as _nd
 
 
+def sparse_add_to_dense(indices, values, output, stream=None):
+    assert isinstance(indices, _nd.NDArray)
+    assert isinstance(values, _nd.NDArray)
+    assert isinstance(output, _nd.NDArray)
+    _LIB.IndexedSlicesOneSideAdd(
+        indices.handle, values.handle, output.handle, stream.handle if stream else None)
+
+
 def indexedslice_oneside_add(indslice, output, stream=None):
     assert isinstance(indslice.indices, _nd.NDArray)
     assert isinstance(indslice.values, _nd.NDArray)

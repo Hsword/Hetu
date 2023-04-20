@@ -10,7 +10,9 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
         super().__init__(dataset, model, opt, args, **kargs)
         from .deeplight import DeepLightTrainer
         from .pep import PEPEmbTrainer
-        self.use_sparse = isinstance(self, (DeepLightTrainer, PEPEmbTrainer))
+        from .autosrh import AutoSrhTrainer
+        self.use_sparse = isinstance(
+            self, (DeepLightTrainer, PEPEmbTrainer, AutoSrhTrainer))
         if self.use_sparse:
             real_dim = self.compress_rate * self.embedding_dim
             if real_dim >= 3:

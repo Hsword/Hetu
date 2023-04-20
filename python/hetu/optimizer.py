@@ -93,7 +93,8 @@ class Optimizer(object):
             self.betats_update_ops = {ctx: betats_update_op(
                 betats, self.beta1, self.beta2, ctx) for ctx, betats in self.betatss.items()}
         for param, grad in zip(var_list, grads):
-            if param.is_embed:
+            if isinstance(grad, tuple):
+                assert param.is_embed
                 unique, deduplookup, dedupgrad = grad
                 opt_op = self.sparse_opt_op_type(
                     self, param, unique, deduplookup, dedupgrad)

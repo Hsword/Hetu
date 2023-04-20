@@ -29,6 +29,7 @@ from .MultiplyConst import mul_byconst_op
 from .MultiplyElewise import mul_op
 from .OnesLike import oneslike_op
 from .Opposite import opposite_op
+from .ParamClip import param_clip_op
 from .Pad import pad_op, pad_gradient_op
 from .ReduceSumAxisZero import reducesumaxiszero_op
 from .Relu import relu_op, relu_gradient_op
@@ -50,6 +51,7 @@ from .Split import split_op, split_gradient_op
 from .Sqrt import sqrt_op, rsqrt_op
 from .StopGradient import stop_gradient_op
 from .Sum import sum_op
+from .SumSparseGradient import sum_sparse_gradient_op
 from .Tanh import tanh_op, tanh_gradient_op
 from .Transpose import transpose_op
 from .Variable import Variable, placeholder_op
@@ -165,6 +167,7 @@ __all__ = [
     'mul_op',
     'oneslike_op',
     'opposite_op',
+    'param_clip_op',
     'pad_op',
     'pad_gradient_op',
     'reducesumaxiszero_op',
@@ -197,6 +200,7 @@ __all__ = [
     'sqrt_op',
     'stop_gradient_op',
     'sum_op',
+    'sum_sparse_gradient_op',
     'scheduler_init',
     'scheduler_finish',
     'server_init',

@@ -727,6 +727,9 @@ HETUSYS_EXTERN_C {
     int DLGpuSign(const DLArrayHandle input, DLArrayHandle output,
                   DLStreamHandle stream_handle);
 
+    int DLGpuClipping(DLArrayHandle arr, float min_value, float max_value,
+                      DLStreamHandle stream_handle);
+
     // Initializers
     int DLGpuNormalInit(DLArrayHandle arr, const float mean, const float stddev,
                         DLStreamHandle stream_handle);
@@ -987,6 +990,8 @@ HETUSYS_EXTERN_C {
                                 DLArrayHandle output);
     int cpu_AddL2Regularization(const DLArrayHandle param,
                                 const DLArrayHandle grad, float l2reg);
+    int cpu_SparseAddToDense(const DLArrayHandle indices,
+                             const DLArrayHandle grad, DLArrayHandle output);
     int cpu_SGDOptimizerUpdate(const DLArrayHandle param,
                                const DLArrayHandle grad, float learning_rate);
     int cpu_SGDOptimizerSparseUpdate(DLArrayHandle param,
@@ -1238,6 +1243,14 @@ HETUSYS_EXTERN_C {
     int DLGpuNumLessThanTensorThreshold(
         const DLArrayHandle input, DLArrayHandle middle, DLArrayHandle output,
         const DLArrayHandle threshold, int *axes, int num_ax,
+        DLStreamHandle stream_handle);
+    int DLGpuNumLessThanGroupingThreshold(
+        DLArrayHandle middle, DLArrayHandle output,
+        const DLArrayHandle grouping, const DLArrayHandle alpha,
+        float threshold, int *axes, int num_ax, DLStreamHandle stream_handle);
+    int DLGpuNumSetLessThanGroupingThreshold(
+        DLArrayHandle arr, const DLArrayHandle grouping,
+        const DLArrayHandle alpha, float threshold,
         DLStreamHandle stream_handle);
 
     int DLGpuDequantize(const DLArrayHandle input, DLArrayHandle output,

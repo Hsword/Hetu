@@ -405,6 +405,28 @@ def test_log():
     tester.test([(89, 93, 71)], rtol=1e-6)
 
 
+def test_sum_sparse_gradient():
+    def build_op(*ops, is_sparses=None, dense_shape=None, dtype=None):
+        pairs_or_denses = []
+        cur_ind = 0
+        for sp in is_sparses:
+            if sp:
+                pairs_or_denses.append((ops[cur_ind], ops[cur_ind + 1]))
+                cur_ind += 2
+            else:
+                pairs_or_denses.append(ops[cur_ind])
+                cur_ind += 1
+        assert cur_ind == len(ops)
+        return ht.sum_sparse_gradient_op(dense_shape, *pairs_or_denses, dtype=dtype)
+    tester = HetuTester(build_op, 3, in_dtype=['f', 'ui', 'f'], is_sparses=[
+                        False, True], dense_shape=(100, 7), dtype=np.float32)
+    tester.test([(100, 7), (3, 4), (3, 4, 7)])
+    tester = HetuTester(build_op, 7, in_dtype=['f', 'ui', 'f', 'f', 'f', 'ui', 'f'], is_sparses=[
+                        False, True, False, False, True], dense_shape=(1000, 13), dtype=np.float32)
+    tester.test([(1000, 13), (3, 4, 5), (3, 4, 5, 13),
+                (1000, 13), (1000, 13), (17, ), (17, 13)])
+
+
 def test_optimizers():
     test_shapes = [
         (1000, 8),
@@ -496,4 +518,5 @@ test_abs()
 test_sign()
 test_mask()
 test_log()
+test_sum_sparse_gradient()
 test_optimizers()

@@ -1,6 +1,6 @@
 #include "gpu_runtime.h"
 
-__global__ void sparse_set(const float *data, const int *indices, float *table,
+__global__ void sparse_set(const int *data, const int *indices, int *table,
                            size_t size, size_t length) {
     size_t thread_ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (thread_ind >= size)
@@ -10,33 +10,23 @@ __global__ void sparse_set(const float *data, const int *indices, float *table,
     int id = indices[index];
     if (id < 0)
         return;
-    const float cur_data = data[thread_ind];
-    float *table_ptr = table + length * id + offset;
+    const int cur_data = data[thread_ind];
+    int *table_ptr = table + length * id + offset;
     atomicExch(table_ptr, cur_data);
 }
 
 int DLGpuSparseSet(DLArrayHandle table, const DLArrayHandle indices,
                    const DLArrayHandle data,
                    DLStreamHandle stream_handle = NULL) {
-    size_t size = 1;
+    size_t size = ArrSize(data);
     size_t length = table->shape[1];
-    for (int i = 0; i < data->ndim; i++) {
-        size *= data->shape[i];
-    }
 
     dim3 blocks;
     dim3 threads;
-    const float *datavalue = (const float *)data->data;
-    float *tablevalue = (float *)table->data;
+    ThreadBlock1D(threads, blocks, size);
+    const int *datavalue = (const int *)data->data;
+    int *tablevalue = (int *)table->data;
     const int *indvalue = (const int *)indices->data;
-
-    if (size <= 1024) {
-        threads.x = size;
-        blocks.x = 1;
-    } else {
-        threads.x = 1024;
-        blocks.x = (size + 1023) / 1024;
-    }
 
     if (stream_handle)
         sparse_set<<<blocks, threads, 0,

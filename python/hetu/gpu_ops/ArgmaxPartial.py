@@ -11,6 +11,7 @@ class ArgmaxPartialOp(Op):
         super().__init__(ArgmaxPartialOp, [node, use_full], ctx)
         self.topk = topk
         self.dim = dim
+        assert use_full.dtype == np.int32
         self.dtype = np.int32
 
     def compute(self, input_vals, output_val, stream_handle=None):

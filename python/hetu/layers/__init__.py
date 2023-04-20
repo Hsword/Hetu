@@ -9,7 +9,7 @@ from .compressed_embedding import HashEmbedding, \
     DeepHashEmbedding, RobeEmbedding, \
     DPQEmbedding, MGQEmbedding, AdaptiveEmbedding, \
     MDEmbedding, AutoDimEmbedding, AutoDimRetrainEmbedding, \
-    SparseEmbedding, DeepLightEmbedding, PEPEmbedding, PEPRetrainEmbedding, \
+    SparseEmbedding, DeepLightEmbedding, PEPEmbedding, PEPRetrainEmbedding, AutoSrhEmbedding, \
     QuantizedEmbedding, ALPTEmbedding
 from .identity import Identity
 from .linear import Linear

@@ -67,6 +67,32 @@ extern "C" int cpu_AddL2Regularization(const DLArrayHandle param,
     return 0;
 }
 
+extern "C" int cpu_SparseAddToDense(const DLArrayHandle indices,
+                                    const DLArrayHandle values,
+                                    DLArrayHandle output) {
+    size_t num = arrSize(indices);
+    assert(output->ndim == 2);
+    size_t nrow = output->shape[0];
+    size_t width = output->shape[1];
+
+    float *output_data = (float *)(output->data);
+    const int *indices_data = (const int *)(indices->data);
+    const float *value_data = (const float *)(values->data);
+
+#pragma omp parallel for
+    for (size_t i = 0; i < num; ++i) {
+        int index = indices_data[i];
+        if (index < 0 || index >= nrow)
+            continue;
+        float *cur_output_data = output_data + index * width;
+        const float *cur_input_data = value_data + i * width;
+        for (size_t j = 0; j < width; ++j) {
+            cur_output_data[j] += cur_input_data[j];
+        }
+    }
+    return 0;
+}
+
 extern "C" int cpu_SGDOptimizerUpdate(const DLArrayHandle param,
                                       const DLArrayHandle grad,
                                       float learning_rate) {

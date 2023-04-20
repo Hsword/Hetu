@@ -320,6 +320,10 @@ def add_l2_regularization(param, grad, l2reg):
     return grad
 
 
+def sparse_add_to_dense(indices, grad, output):
+    _LIB.cpu_SparseAddToDense(indices.handle, grad.handle, output.handle)
+
+
 def sgd_update(param, grad, lr, l2reg):
     assert isinstance(param, NDArray)
     assert isinstance(grad, (NDArray, IndexedSlices))

@@ -74,6 +74,13 @@ class HetuTester(object):
                     cur_val = self.random_int(shape, -10, 10)
                 else:
                     cur_val = self.random_int(shape, 1, 1000)
+                if self.cpu_op.op_type == 'SumSparseGradientOp' and dt == 'ui':
+                    cur_val = self.random_int(shape, 0, 100)
+                    cur_val = np.unique(cur_val)
+                    size = np.prod(shape).item()
+                    real_val = np.full(size, -1, dtype=np.int32)
+                    real_val[:len(cur_val)] = cur_val
+                    cur_val = real_val
                 input_vals.append(cur_val)
         cpu_result, gpu_result = self.run(input_vals)
         assert not np.any(np.logical_or(np.isnan(cpu_result), np.isinf(

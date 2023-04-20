@@ -87,6 +87,14 @@ def worker(args):
             'threshold_type': 'feature_dimension',
             'threshold_init': -150,
         }
+    elif args.method == 'autosrh':
+        embed_layer_type = htl.AutoSrhEmbedding
+        embedding_args = {
+            'nsplit': 10,
+            'warm_start_epochs': 1,
+            'alpha_l1': 0.00001,
+            'alpha_lr': 0.001,
+        }
     elif args.method == 'quantize':
         embed_layer_type = htl.QuantizedEmbedding
         embedding_args = {
@@ -137,7 +145,7 @@ if __name__ == '__main__':
                         choices=['full', 'hash', 'compo', 'tt',
                                  'dhe', 'robe', 'dpq', 'mgqe', 'adapt',
                                  'md', 'autodim',
-                                 'deeplight', 'pep',
+                                 'deeplight', 'pep', 'autosrh',
                                  'quantize', 'alpt',])
     parser.add_argument("--phase", type=str, default='train',
                         help='train or test',
@@ -185,7 +193,7 @@ if __name__ == '__main__':
     if args.ectx is None:
         args.ectx = args.ctx
 
-    if args.method in ('robe', 'deeplight', 'pep', 'quantize', 'alpt', 'autodim'):
+    if args.method in ('robe', 'deeplight', 'pep', 'autosrh', 'quantize', 'alpt', 'autodim'):
         # autodim not use multi in the first stage, use multi in the second stage.
         args.use_multi = 0
     elif args.method in ('compo', 'md', 'tt', 'dhe', 'mgqe', 'adapt'):

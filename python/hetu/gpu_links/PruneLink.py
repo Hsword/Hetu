@@ -33,9 +33,29 @@ def num_less_than_tensor_threshold(in_arr, mid_arr, out_arr, threshold, stream=N
                                          pointer, ctypes.c_int(len(axes)), stream.handle if stream else None)
 
 
-def get_larget_than(in_arr, threshold, mask, stream=None):
+def get_larger_than(in_arr, threshold, mask, stream=None):
     assert isinstance(in_arr, _nd.NDArray)
     assert isinstance(threshold, _nd.NDArray)
     assert isinstance(mask, _nd.NDArray)
     _LIB.DLGpuGetLargerThan(in_arr.handle, threshold.handle,
                             mask.handle, stream.handle if stream else None)
+
+
+def num_less_than_grouping_threshold(mid_arr, out_arr, grouping, alpha, threshold, stream=None):
+    assert isinstance(mid_arr, _nd.NDArray)
+    assert isinstance(out_arr, _nd.NDArray)
+    assert isinstance(grouping, _nd.NDArray)
+    assert isinstance(alpha, _nd.NDArray)
+    axes = list(range(len(mid_arr.shape)))
+    pointer_func = ctypes.c_int * len(axes)
+    pointer = pointer_func(*axes)
+    _LIB.DLGpuNumLessThanGroupingThreshold(mid_arr.handle, out_arr.handle, grouping.handle, alpha.handle, ctypes.c_float(
+        threshold), pointer, ctypes.c_int(len(axes)), stream.handle if stream else None)
+
+
+def set_less_than_grouping_threshold(arr, grouping, alpha, threshold, stream=None):
+    assert isinstance(arr, _nd.NDArray)
+    assert isinstance(grouping, _nd.NDArray)
+    assert isinstance(alpha, _nd.NDArray)
+    _LIB.DLGpuNumSetLessThanGroupingThreshold(arr.handle, grouping.handle, alpha.handle, ctypes.c_float(
+        threshold), stream.handle if stream else None)

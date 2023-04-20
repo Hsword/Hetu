@@ -17,6 +17,7 @@ from .BroadcastCommunicate import BroadcastCommunicateOp
 from .AllToAll import AllToAllOp
 from .ParameterServerCommunicate import ParameterServerCommunicateOp, ParameterServerSparsePullOp, parameterServerSparsePull_op
 from .Sum import sum_op
+from .SumSparseGradient import sum_sparse_gradient_op
 from .StopGradient import StopGradientOp
 from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp
 from ..communicator.mpi_nccl_comm import ncclDataType_t, GroupStart, GroupEnd
@@ -1318,8 +1319,12 @@ def gradients(
                 output_grad, is_new = sum_node_list(
                     node_to_output_grads_list[node], node_to_output_grads_list[node][0].raw_ctx)
         else:
+            if isinstance(node, PlaceholderOp):
+                shape = node.shape
+            else:
+                shape = None
             output_grad, is_new = sum_node_list(
-                node_to_output_grads_list[node], node.raw_ctx)
+                node_to_output_grads_list[node], node.raw_ctx, shape)
         if output_grad is None:
             for n in node.inputs:
                 if n not in node_to_output_grads_list:
@@ -1588,7 +1593,7 @@ def fetch_dense_parameter_value(node_list: OP_LIST, config: HetuConfig) -> None:
         node.event.update()
 
 
-def sum_node_list(node_list: OP_LIST, ctx: Optional[DeviceGroup]) -> Tuple[Optional[Op], bool, bool]:
+def sum_node_list(node_list: OP_LIST, ctx: Optional[DeviceGroup], shape: Optional[Tuple[int]] = None) -> Tuple[Optional[Op], bool, bool]:
     """Custom sum func to avoid creating redundant nodes in Python sum func."""
     node_list = [n for n in node_list if n is not None]
     if node_list == []:
@@ -1596,9 +1601,21 @@ def sum_node_list(node_list: OP_LIST, ctx: Optional[DeviceGroup]) -> Tuple[Optio
     elif len(node_list) == 1:
         return node_list[0], False
     else:
-        assert all([not isinstance(n, tuple) for n in node_list]
-                   ), "Embedding gradients not addable now."
-        return sum_op(node_list, ctx=ctx), True
+        if any([isinstance(n, tuple) for n in node_list]):
+            inputs = []
+            dtype = None
+            for n in node_list:
+                if isinstance(n, tuple):
+                    inputs.append((n[0], n[2]))
+                    assert dtype in (None, n[2].dtype)
+                    dtype = n[2].dtype
+                else:
+                    inputs.append(n)
+                    assert dtype in (None, n.dtype)
+                    dtype = n.dtype
+            return sum_sparse_gradient_op(shape, *inputs, dtype=dtype, ctx=ctx), True
+        else:
+            return sum_op(node_list, ctx=ctx), True
 
 
 def reorder_for_group(topo_order: OP_LIST, layer_indices: Optional[Dict[Op, Union[int, float]]]) -> OP_LIST:

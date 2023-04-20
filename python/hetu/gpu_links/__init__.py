@@ -40,6 +40,7 @@ from .MatrixSqrtLink import *
 from .MatrixRsqrtLink import *
 from .MatrixTransLink import *
 from .OppositeLink import *
+from .ParamClipLink import *
 from .SigmoidLink import *
 from .SparseSetLink import *
 from .TanhLink import *
@@ -155,6 +156,7 @@ __all__ = [
     'matrix_elementwise_divide_const',
     'matrix_elementwise_divide',
     'matrix_opposite',
+    'param_clip_func',
     'matrix_sqrt',
     'matrix_rsqrt',
     'CuSparse_Csrmv',
@@ -206,6 +208,7 @@ __all__ = [
     'reversed_truncated_normal_init',
     'gumbel_init',
 
+    'sparse_add_to_dense',
     'sgd_update',
     'momentum_update',
     'adagrad_update',
@@ -268,8 +271,10 @@ __all__ = [
     'learn_hash',
     'num_less_than',
     'set_less_than',
-    'get_larget_than',
+    'get_larger_than',
     'num_less_than_tensor_threshold',
+    'num_less_than_grouping_threshold',
+    'set_less_than_grouping_threshold',
     'tensor_quantize',
     'tensor_quantize_signed',
     'tensor_dequantize',
