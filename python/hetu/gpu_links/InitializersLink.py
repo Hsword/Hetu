@@ -34,3 +34,9 @@ def reversed_truncated_normal_init(arr, mean, stddev, stream=None):
 def gumbel_init(arr, stream=None):
     assert isinstance(arr, _nd.NDArray)
     _LIB.DLGpuGumbelInit(arr.handle, stream.handle if stream else None)
+
+
+def randint_init(arr, lb, ub, stream=None):
+    assert isinstance(arr, _nd.NDArray)
+    _LIB.DLGpuRandomInt(arr.handle, ctypes.c_int(lb), ctypes.c_int(
+        ub), stream.handle if stream else None)

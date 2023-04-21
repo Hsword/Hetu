@@ -80,8 +80,8 @@ class ALPTEmbTrainer(EmbeddingTrainer):
         return eval_nodes
 
     def train_step(self):
-        var2arr = self.executor.config.placeholder_to_arr_map
-        stream = self.executor.config.comp_stream
+        var2arr = self.var2arr
+        stream = self.stream
         first_stage_results = self.executor.run(
             self.train_name, dataloader_step=False)
         loss_val, predict_y, y_val = first_stage_results[:3]

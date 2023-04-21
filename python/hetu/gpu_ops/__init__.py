@@ -29,6 +29,7 @@ from .MultiplyConst import mul_byconst_op
 from .MultiplyElewise import mul_op
 from .OnesLike import oneslike_op
 from .Opposite import opposite_op
+from .OptEmbedBinaryStep import binary_step_op, binary_step_gradient_op
 from .ParamClip import param_clip_op
 from .Pad import pad_op, pad_gradient_op
 from .ReduceSumAxisZero import reducesumaxiszero_op
@@ -68,6 +69,8 @@ from .ReduceSum import reduce_sum_op
 from .ReduceMean import reduce_mean_op
 from .ReduceMin import reduce_min_op
 from .ReduceMul import reduce_mul_op
+from .ReduceNorm1 import reduce_norm1_op
+from .ReduceNorm2 import reduce_norm2_op
 from .OneHot import one_hot_op
 from .Linear import linear_op
 from .Conv2dAddBias import conv2d_add_bias_op
@@ -112,7 +115,7 @@ from .Quantize import quantize_op, dequantize_op
 from .QuantizeALPTEmb import alpt_embedding_lookup_op, alpt_rounding_op, alpt_scale_gradient_op
 from .QuantizeEmbedding import quantized_embedding_lookup_op, unified_quantized_embedding_lookup_op
 from .AssignWithIndexedSlices import assign_with_indexedslices_op, assign_quantized_embedding_op
-from .Sample import uniform_sample_op, normal_sample_op, truncated_normal_sample_op, gumbel_sample_op
+from .Sample import uniform_sample_op, normal_sample_op, truncated_normal_sample_op, gumbel_sample_op, randint_sample_op
 from .Unique import unique_indices_op, unique_indices_offsets_op, deduplicate_lookup_op, deduplicate_grad_op
 
 __all__ = [
@@ -167,6 +170,8 @@ __all__ = [
     'mul_op',
     'oneslike_op',
     'opposite_op',
+    'binary_step_op',
+    'binary_step_gradient_op',
     'param_clip_op',
     'pad_op',
     'pad_gradient_op',
@@ -227,6 +232,8 @@ __all__ = [
     'reduce_mean_op',
     'reduce_min_op',
     'reduce_mul_op',
+    'reduce_norm1_op',
+    'reduce_norm2_op',
     'one_hot_op',
     'linear_op',
     'conv2d_add_bias_op',
@@ -295,6 +302,7 @@ __all__ = [
     'normal_sample_op',
     'truncated_normal_sample_op',
     'gumbel_sample_op',
+    'randint_sample_op',
     'unique_indices_op',
     'unique_indices_offsets_op',
     'deduplicate_lookup_op',

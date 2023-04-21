@@ -103,6 +103,13 @@ int DLGpuReduceMin(const DLArrayHandle in_arr, DLArrayHandle out_arr, int *axes,
                               num_ax, stream_handle);
 }
 
+int DLGpuReduceNorm1(const DLArrayHandle in_arr, DLArrayHandle out_arr,
+                     int *axes, int num_ax,
+                     DLStreamHandle stream_handle = NULL) {
+    return DLGpuReduceGeneral(CUDNN_REDUCE_TENSOR_NORM1, in_arr, out_arr, axes,
+                              num_ax, stream_handle);
+}
+
 int DLGpuReduceNorm2(const DLArrayHandle in_arr, DLArrayHandle out_arr,
                      int *axes, int num_ax,
                      DLStreamHandle stream_handle = NULL) {

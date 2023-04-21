@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 from ._base import _LIB, check_call
 import ctypes
-from numpy.random import RandomState, MT19937, SeedSequence
+from numpy.random import RandomState, MT19937, SeedSequence, mtrand
 
 
 def to_ull(seed):
@@ -37,7 +37,7 @@ def step_seqnum(seqnum):
     check_call(_LIB.StepSeqNum(seqnum))
 
 
-def get_np_rand(step=None):
+def get_np_rand(step=None) -> mtrand.RandomState:
     if step is not None:
         step_seqnum(step)
     return RandomState(MT19937(SeedSequence(get_seed_status())))

@@ -89,6 +89,14 @@ class EmbeddingTrainer(object):
         self.dataset = dataset
         self.data_ops = self.get_data()
 
+    @property
+    def var2arr(self):
+        return self.executor.config.placeholder_to_arr_map
+
+    @property
+    def stream(self):
+        return self.executor.config.comp_stream
+
     def init_ckpts(self):
         real_save_topk = max(1, self.save_topk)
         init_value = float('-inf')
@@ -101,6 +109,13 @@ class EmbeddingTrainer(object):
         del self.embed_layer
         self.model.__init__(self.embedding_dim,
                             self.num_slot, self.dataset.num_dense)
+
+    def prepare_path_for_retrain(self):
+        if self.save_topk > 0:
+            self.save_dir = self.save_dir + '_retrain'
+            os.makedirs(self.save_dir)
+        resf_parts = osp.split(self.result_file)
+        self.result_file = osp.join(resf_parts[0], 'retrain_' + resf_parts[1])
 
     def set_use_multi(self, new_use_multi):
         self.use_multi = new_use_multi

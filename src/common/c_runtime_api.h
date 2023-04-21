@@ -182,6 +182,11 @@ HETUSYS_EXTERN_C {
     int DLGpuOpposite(const DLArrayHandle input, DLArrayHandle output,
                       DLStreamHandle stream_handle);
 
+    int DLGpuIsPositive(const DLArrayHandle input, DLArrayHandle output,
+                        DLStreamHandle stream_handle);
+    int DLGpuBinaryStepBackward(const DLArrayHandle input, DLArrayHandle output,
+                                DLStreamHandle stream_handle);
+
     /*!
      * \brief Matrix multiply two matrices and store to output.
      * \param matA The left input array.
@@ -622,6 +627,8 @@ HETUSYS_EXTERN_C {
     int DLGpuReduceMul(const DLArrayHandle in_arr, DLArrayHandle out_arr,
                        int *axes, int num_ax, DLStreamHandle stream_handle);
 
+    int DLGpuReduceNorm1(const DLArrayHandle in_arr, DLArrayHandle out_arr,
+                         int *axes, int num_ax, DLStreamHandle stream_handle);
     int DLGpuReduceNorm2(const DLArrayHandle in_arr, DLArrayHandle out_arr,
                          int *axes, int num_ax, DLStreamHandle stream_handle);
     int DLGpuReduceNorm2Raw(const DLArrayHandle in_arr, DLArrayHandle out_ptr,
@@ -746,6 +753,9 @@ HETUSYS_EXTERN_C {
                                          DLStreamHandle stream_handle);
 
     int DLGpuGumbelInit(DLArrayHandle arr, DLStreamHandle stream_handle);
+
+    int DLGpuRandomInt(DLArrayHandle arr, const int lb, const int ub,
+                       DLStreamHandle stream_handle);
 
     // Optimizer Ops
     int DLGpuSparseSet(DLArrayHandle table, const DLArrayHandle indices,

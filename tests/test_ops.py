@@ -427,6 +427,50 @@ def test_sum_sparse_gradient():
                 (1000, 13), (1000, 13), (17, ), (17, 13)])
 
 
+def test_reduce_norm1():
+    tester = HetuTester(ht.reduce_norm1_op, 1, axes=[1], keepdims=True)
+    tester.test([(7, 9)], rtol=1e-6)
+    tester.test([(1, 13, 2, 4)], rtol=1e-6)
+    tester.test([(5, 1)], rtol=1e-6)
+    tester = HetuTester(ht.reduce_norm1_op, 1, axes=[0, 2], keepdims=False)
+    tester.test([(7, 9, 3, 4)], rtol=1e-6)
+    tester.test([(1, 13, 2)], rtol=1e-6)
+    tester.test([(2, 2, 2, 2)], rtol=1e-6)
+
+
+def test_reduce_sum():
+    tester = HetuTester(ht.reduce_sum_op, 1, axes=[1], keepdims=True)
+    tester.test([(7, 9)], rtol=1e-6)
+    tester.test([(1, 13, 2, 4)], rtol=1e-6)
+    tester.test([(5, 1)], rtol=1e-6)
+    tester = HetuTester(ht.reduce_sum_op, 1, axes=[0, 2], keepdims=False)
+    tester.test([(7, 9, 3, 4)], rtol=1e-5)
+    tester.test([(1, 13, 2)], rtol=1e-5)
+    tester.test([(2, 2, 2, 2)], rtol=1e-5)
+
+
+def test_reduce_norm2():
+    tester = HetuTester(ht.reduce_norm2_op, 1, axes=[1], keepdims=True)
+    tester.test([(7, 9)], rtol=1e-6)
+    tester.test([(1, 13, 2, 4)], rtol=1e-6)
+    tester.test([(5, 1)], rtol=1e-6)
+    tester = HetuTester(ht.reduce_norm2_op, 1, axes=[0, 2], keepdims=False)
+    tester.test([(7, 9, 3, 4)], rtol=1e-6)
+    tester.test([(1, 13, 2)], rtol=1e-6)
+    tester.test([(2, 2, 2, 2)], rtol=1e-6)
+
+
+def test_binary_step():
+    tester = HetuTester(ht.binary_step_op, 1)
+    tester.test([(7, 9)], rtol=1e-6)
+    tester.test([(1, 13, 2, 4)], rtol=1e-6)
+    tester.test([(5, 1)], rtol=1e-6)
+    tester = HetuTester(ht.binary_step_gradient_op, 1)
+    tester.test([(7, 9, 3, 4)], rtol=1e-6)
+    tester.test([(1, 13, 2)], rtol=1e-6)
+    tester.test([(2, 2, 2, 2)], rtol=1e-6)
+
+
 def test_optimizers():
     test_shapes = [
         (1000, 8),
@@ -519,4 +563,8 @@ test_sign()
 test_mask()
 test_log()
 test_sum_sparse_gradient()
+test_reduce_norm1()
+test_reduce_sum()
+test_reduce_norm2()
+test_binary_step()
 test_optimizers()

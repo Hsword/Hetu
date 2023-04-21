@@ -3,8 +3,6 @@ from ..layers import PEPEmbedding, PEPRetrainEmbedding
 from ..ndarray import empty
 from ..gpu_links import get_larger_than, sigmoid, num_less_than_tensor_threshold, mask_func
 from ..random import set_random_seed, reset_seed_seqnum
-import os
-import os.path as osp
 import numpy as np
 
 
@@ -78,9 +76,7 @@ class PEPEmbTrainer(SwitchInferenceTrainer):
         # the second stage
         self.log_func('Switch to re-training stage!!!')
         # re-init save topk
-        if self.save_topk > 0:
-            self.save_dir = self.save_dir + '_retrain'
-            os.makedirs(self.save_dir)
+        self.prepare_path_for_retrain()
         self.init_ckpts()
 
         self.reset_for_retrain()
@@ -90,9 +86,6 @@ class PEPEmbTrainer(SwitchInferenceTrainer):
         sparse_rate = dense / self.num_embed / self.embedding_dim
         self.log_func(f'Retrain with sparse rate: {sparse_rate}')
         eval_nodes = self.get_eval_nodes()
-
-        resf_parts = osp.split(self.result_file)
-        self.result_file = osp.join(resf_parts[0], 'retrain_' + resf_parts[1])
 
         reset_seed_seqnum()
         self.init_executor(eval_nodes)
@@ -115,8 +108,8 @@ class PEPEmbTrainer(SwitchInferenceTrainer):
         results, early_stop = super().run_epoch(train_batch_num, epoch, part, log_file)
         # the stop condition is whether reach the parameter limit
         early_stop = False
-        var2arr = self.executor.config.placeholder_to_arr_map
-        stream = self.executor.config.comp_stream
+        var2arr = self.var2arr
+        stream = self.stream
         sigmoid(var2arr[self.embed_layer.threshold],
                 self.sigmoid_threshold, stream)
         num_less_than_tensor_threshold(var2arr[self.embed_layer.embedding_table],

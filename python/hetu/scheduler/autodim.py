@@ -1,5 +1,3 @@
-import os
-import os.path as osp
 import numpy as np
 
 from .base import EmbeddingTrainer
@@ -40,9 +38,7 @@ class AutoDimTrainer(EmbeddingTrainer):
 
         self.log_func('Switch to re-training stage!!!')
         # re-init save topk
-        if self.save_topk > 0:
-            self.save_dir = self.save_dir + '_retrain'
-            os.makedirs(self.save_dir)
+        self.prepare_path_for_retrain()
         self.init_ckpts()
 
         # re-init executor
@@ -56,9 +52,6 @@ class AutoDimTrainer(EmbeddingTrainer):
         self.embed_layer = self.get_embed_layer_retrain(dim_choices)
         self.log_func(f'New embedding layer: {self.embed_layer}')
         eval_nodes = super().get_eval_nodes()
-
-        resf_parts = osp.split(self.result_file)
-        self.result_file = osp.join(resf_parts[0], 'retrain_' + resf_parts[1])
 
         self.seed += 1  # use a different seed
 
@@ -124,8 +117,8 @@ class AutoDimTrainer(EmbeddingTrainer):
                 var2arr[node.inputs[0]], self.copy_unique_indices[node], self.copy_dedup_lookups[node], stream)
 
     def first_stage_train_step(self):
-        var2arr = self.executor.config.placeholder_to_arr_map
-        stream = self.executor.config.comp_stream
+        var2arr = self.var2arr
+        stream = self.stream
         # copy original parameters (if embedding, copy lookuped ones) and update using train data to get temp model
         self.copy_from(stream)
         lookups = self.executor.run(

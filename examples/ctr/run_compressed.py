@@ -76,6 +76,16 @@ def worker(args):
             'alpha_lr': 0.001,
             'r': 1e-2,
         }
+    elif args.method == 'optembed':
+        embed_layer_type = htl.OptEmbedding
+        embedding_args = {
+            'alpha': 1e-5,  # the coef of regularization
+            'keep_num': 0,
+            'mutation_num': 10,
+            'crossover_num': 10,
+            'm_prob': 0.1,
+            'nepoch_search': 30,
+        }
     elif args.method == 'deeplight':
         embed_layer_type = htl.DeepLightEmbedding
         embedding_args = {
@@ -144,7 +154,7 @@ if __name__ == '__main__':
                         help="method to be used",
                         choices=['full', 'hash', 'compo', 'tt',
                                  'dhe', 'robe', 'dpq', 'mgqe', 'adapt',
-                                 'md', 'autodim',
+                                 'md', 'autodim', 'optembed',
                                  'deeplight', 'pep', 'autosrh',
                                  'quantize', 'alpt',])
     parser.add_argument("--phase", type=str, default='train',
@@ -193,7 +203,7 @@ if __name__ == '__main__':
     if args.ectx is None:
         args.ectx = args.ctx
 
-    if args.method in ('robe', 'deeplight', 'pep', 'autosrh', 'quantize', 'alpt', 'autodim'):
+    if args.method in ('robe', 'deeplight', 'pep', 'autosrh', 'quantize', 'alpt', 'autodim', 'optembed'):
         # autodim not use multi in the first stage, use multi in the second stage.
         args.use_multi = 0
     elif args.method in ('compo', 'md', 'tt', 'dhe', 'mgqe', 'adapt'):

@@ -8,7 +8,7 @@ from .compressed_embedding import HashEmbedding, \
     CompositionalEmbedding, TensorTrainEmbedding, \
     DeepHashEmbedding, RobeEmbedding, \
     DPQEmbedding, MGQEmbedding, AdaptiveEmbedding, \
-    MDEmbedding, AutoDimEmbedding, AutoDimRetrainEmbedding, \
+    MDEmbedding, AutoDimEmbedding, AutoDimRetrainEmbedding, OptEmbedding, OptEmbeddingAfterRowPruning, \
     SparseEmbedding, DeepLightEmbedding, PEPEmbedding, PEPRetrainEmbedding, AutoSrhEmbedding, \
     QuantizedEmbedding, ALPTEmbedding
 from .identity import Identity

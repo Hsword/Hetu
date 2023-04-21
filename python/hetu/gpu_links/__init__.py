@@ -40,6 +40,7 @@ from .MatrixSqrtLink import *
 from .MatrixRsqrtLink import *
 from .MatrixTransLink import *
 from .OppositeLink import *
+from .OptEmbedBinaryStepLink import *
 from .ParamClipLink import *
 from .SigmoidLink import *
 from .SparseSetLink import *
@@ -58,6 +59,7 @@ from .ReduceSumLink import *
 from .ReduceMeanLink import *
 from .ReduceMinLink import *
 from .ReduceMulLink import *
+from .ReduceNormLink import *
 from .OptimizerLink import *
 from .IndexedSliceLink import *
 from .DropoutLink import *
@@ -106,7 +108,6 @@ __all__ = [
     'argmax',
     'argmax_partial',
     'array_set',
-    'reduce_norm2',
     'reduce_norm2_raw',
     'all_fro_norm',
     'all_add_',
@@ -156,6 +157,8 @@ __all__ = [
     'matrix_elementwise_divide_const',
     'matrix_elementwise_divide',
     'matrix_opposite',
+    'binary_step_forward',
+    'binary_step_backward',
     'param_clip_func',
     'matrix_sqrt',
     'matrix_rsqrt',
@@ -188,6 +191,8 @@ __all__ = [
     'reduce_mean',
     'reduce_min',
     'reduce_mul',
+    'reduce_norm1',
+    'reduce_norm2',
     'dropout',
     'dropout_gradient',
     'CuDNN_softmax',
@@ -207,6 +212,7 @@ __all__ = [
     'truncated_normal_init',
     'reversed_truncated_normal_init',
     'gumbel_init',
+    'randint_init',
 
     'sparse_add_to_dense',
     'sgd_update',

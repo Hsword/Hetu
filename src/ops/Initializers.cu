@@ -189,3 +189,37 @@ int DLGpuGumbelInit(DLArrayHandle arr, DLStreamHandle stream_handle = NULL) {
 
     return 0;
 }
+
+__global__ void random_int_kernel(int *arr, const int lb, const int ub,
+                                  HetuRandomState cudars, size_t size) {
+    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
+    if (ind >= size)
+        return;
+    curandStatePhilox4_32_10_t state;
+    curand_init(cudars.seed, cudars.seqnum, ind, &state);
+    float temp = curand_uniform(&state) * (ub - lb) + lb;
+    int result = (int)temp;
+    result = min(result, ub - 1);
+    result = max(result, lb);
+    arr[ind] = result;
+}
+
+int DLGpuRandomInt(DLArrayHandle arr, const int lb, const int ub,
+                   DLStreamHandle stream_handle = NULL) {
+    size_t size = ArrSize(arr);
+    int *arr_data = (int *)arr->data;
+
+    dim3 blocks;
+    dim3 threads;
+    ThreadBlock1D(threads, blocks, size);
+    HetuRandomState &cudars = GetRandomState(1);
+    if (stream_handle) {
+        random_int_kernel<<<blocks, threads, 0,
+                            *(cudaStream_t *)stream_handle->handle>>>(
+            arr_data, lb, ub, cudars, size);
+    } else {
+        random_int_kernel<<<blocks, threads>>>(arr_data, lb, ub, cudars, size);
+    }
+
+    return 0;
+}
