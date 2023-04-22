@@ -67,7 +67,6 @@ def worker(args):
     elif args.method == 'md':
         embed_layer_type = htl.MDEmbedding
         embedding_args = {
-            'alpha': 0.3,
             'round_dim': True,
         }
     elif args.method == 'autodim':
