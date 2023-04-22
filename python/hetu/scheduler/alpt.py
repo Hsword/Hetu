@@ -76,6 +76,7 @@ class ALPTEmbTrainer(EmbeddingTrainer):
             self.train_name: [loss, prediction, y_, updated_emb_op, idoffsets_op, dense_param_opt],
             'train_scale': [scale_unique, scale_update, scale_assign],
             self.validate_name: [loss, prediction, y_],
+            self.test_name: [loss, prediction, y_],
         }
         return eval_nodes
 
@@ -97,4 +98,5 @@ class ALPTEmbTrainer(EmbeddingTrainer):
 
     def init_executor(self, eval_nodes):
         super().init_executor(eval_nodes)
-        self.executor.subexecutor['train_scale'].inference = False
+        if self.phase == 'train':
+            self.executor.subexecutor['train_scale'].inference = False

@@ -44,8 +44,7 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
         del self.executor
         self.executor = infer_executor
         with self.timing():
-            test_loss, test_metric, _ = self.validate_once(
-                infer_executor.get_batch_num('validate'))
+            test_loss, test_metric, _ = self.validate_once()
         test_time = self.temp_time[0]
         os.makedirs(self.save_dir, exist_ok=True)
         infer_executor.save(self.save_dir, f'final_ep{self.cur_ep}_{self.cur_part}.pkl', {
@@ -78,8 +77,7 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
         log_file = open(self.result_file,
                         'w') if self.result_file is not None else None
         with self.timing():
-            test_loss, test_metric, _ = self.validate_once(
-                self.executor.get_batch_num('validate'))
+            test_loss, test_metric, _ = self.test_once()
         test_time = self.temp_time[0]
         results = {
             'test_loss': test_loss,

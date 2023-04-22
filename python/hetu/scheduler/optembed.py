@@ -171,8 +171,7 @@ class OptEmbedTrainer(EmbeddingTrainer):
 
     def eval_one_candidate(self, cand):
         self.set_candidate(cand)
-        loss, auc, _ = self.validate_once(
-            self.executor.get_batch_num('validate'))
+        loss, auc, _ = self.validate_once()
         return auc, loss
 
     def eval_all_candidates(self):

@@ -196,6 +196,10 @@ if __name__ == '__main__':
                         help="ckpt to be used")
     parser.add_argument("--save_topk", type=int, default=0,
                         help="number of ckpts to be saved")
+    parser.add_argument("--check_val", type=int, default=0,
+                        help="whether check validation data during training", choices=[0, 1])
+    parser.add_argument("--check_test", type=int, default=1,
+                        help="whether check test data during training", choices=[0, 1])
     args = parser.parse_args()
 
     args.opt = args.opt.lower()

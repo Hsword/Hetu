@@ -272,6 +272,7 @@ __all__ = [
     'robe_hash',
     'robe_sign',
     'mod_hash',
+    'mod_hash_positive',
     'div_hash',
     'compo_hash',
     'learn_hash',

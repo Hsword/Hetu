@@ -265,11 +265,11 @@ class CTRDataset(object):
                 cur_nsplit -= 1
                 group_index += 1
             if nignore < self.num_embed:
-                grouping[indices[nignore:self.num_embed]] = value - 1
+                grouping[indices[nignore:self.num_embed]] = group_index - 1
             grouping.tofile(cache_path)
         return grouping
 
-    def process_all_data_by_day(self, use_test=True, separate_fields=False):
+    def process_all_data_by_day(self, separate_fields=False):
         path = self.path
         all_data_path = [
             [osp.join(path, f'kaggle_processed_{ph}_{k}.bin') for k in self.keys] for ph in self.phases]
@@ -321,12 +321,9 @@ class CTRDataset(object):
             return memmap_data
 
         training_data = get_data('train')
-        if use_test:
-            testing_data = get_data('test')
-            return tuple(zip(training_data, testing_data))
-        else:
-            validation_data = get_data('val')
-            return tuple(zip(training_data, validation_data))
+        validation_data = get_data('val')
+        testing_data = get_data('test')
+        return tuple(zip(training_data, validation_data, testing_data))
 
 
 class CriteoDataset(CTRDataset):

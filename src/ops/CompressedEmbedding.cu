@@ -55,6 +55,19 @@ __global__ void mod_hash_kernel(const int *input, int *output, int nembed,
     output[ind] = input[ind] % nembed;
 }
 
+__global__ void mod_hash_positive_kernel(const int *input, int *output,
+                                         int nembed, size_t size) {
+    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
+    if (ind >= size)
+        return;
+    if (input[ind] >= 0) {
+        output[ind] = input[ind] % nembed;
+
+    } else {
+        output[ind] = input[ind];
+    }
+}
+
 __global__ void div_hash_kernel(const int *input, int *output, int nembed,
                                 size_t size) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
@@ -173,6 +186,23 @@ int DLGpuModHash(const DLArrayHandle input, DLArrayHandle output, int nembed,
     else
         mod_hash_kernel<<<blocks, threads>>>(input_data, output_data, nembed,
                                              size);
+    return 0;
+}
+
+int DLGpuModHashPositive(const DLArrayHandle input, DLArrayHandle output,
+                         int nembed, DLStreamHandle stream_handle = NULL) {
+    size_t size = ArrSize(input);
+    const int *input_data = (const int *)input->data;
+    int *output_data = (int *)output->data;
+    dim3 blocks, threads;
+    ThreadBlock1D(threads, blocks, size);
+    if (stream_handle)
+        mod_hash_positive_kernel<<<blocks, threads, 0,
+                                   *(cudaStream_t *)stream_handle->handle>>>(
+            input_data, output_data, nembed, size);
+    else
+        mod_hash_positive_kernel<<<blocks, threads>>>(input_data, output_data,
+                                                      nembed, size);
     return 0;
 }
 

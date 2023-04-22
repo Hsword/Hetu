@@ -407,7 +407,8 @@ class AdaptiveEmbedding(Embedding):
             remap = ht.embedding_lookup_op(self.remap_indices, x)
             high_freq = ht.embedding_lookup_op(self.freq_emb, remap)
             low_freq_inds = ht.opposite_op(remap)
-            low_freq_inds = ht.mod_hash_op(low_freq_inds, self.num_rare_emb)
+            low_freq_inds = ht.mod_hash_positive_op(
+                low_freq_inds, self.num_rare_emb)
             low_freq = ht.embedding_lookup_op(self.rare_emb, low_freq_inds)
             return ht.add_op(high_freq, low_freq)
 

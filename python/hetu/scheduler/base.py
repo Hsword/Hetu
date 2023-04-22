@@ -29,6 +29,8 @@ class EmbeddingTrainer(object):
         self.args = args
         self.args.update(kargs)
 
+        self.phase = self.args['phase']
+        assert self.phase in ('train', 'test')
         self.num_embed = dataset.num_embed
         self.num_embed_separate = dataset.num_embed_separate
         self.num_slot = dataset.num_sparse
@@ -64,6 +66,9 @@ class EmbeddingTrainer(object):
         self.load_ckpt = self.args.get('load_ckpt', False)
         self.train_name = self.args.get('train_name', 'train')
         self.validate_name = self.args.get('validate_name', 'validate')
+        self.test_name = self.args.get('test_name', 'test')
+        self.check_val = self.args.get('check_val', 1)
+        self.check_test = self.args.get('check_test', 0)
         self.monitor = self.args.get('monitor', 'auc')
         assert self.monitor in (
             'auc', 'acc', 'loss'), f'monitor should be in (auc, acc, loss); got {self.monitor}'
@@ -132,41 +137,43 @@ class EmbeddingTrainer(object):
     def all_validate_names(self):
         return self.validate_name
 
-    def make_dataloader_op(self, tr_data, va_data, dtype=np.float32):
+    def make_dataloader_op(self, tr_data, va_data, te_data, dtype=np.float32):
         train_dataloader = Dataloader(
             tr_data, self.batch_size, self.all_train_names, dtype=dtype)
         valid_dataloader = Dataloader(
             va_data, self.batch_size, self.all_validate_names, dtype=dtype)
+        test_dataloader = Dataloader(
+            te_data, self.batch_size, self.test_name, dtype=dtype)
         data_op = dataloader_op(
-            [train_dataloader, valid_dataloader], dtype=dtype)
+            [train_dataloader, valid_dataloader, test_dataloader], dtype=dtype)
         return data_op
 
     def get_data(self):
         self.assert_use_multi()
         all_data = self.dataset.process_all_data_by_day(
-            use_test=True, separate_fields=self.separate_fields)
+            separate_fields=self.separate_fields)
 
         # define models for criteo
-        tr_sparse, va_sparse = all_data[-2]
-        tr_labels, va_labels = all_data[-1]
+        tr_sparse, va_sparse, te_sparse = all_data[-2]
+        tr_labels, va_labels, te_labels = all_data[-1]
         tr_labels = tr_labels.reshape((-1, 1))
         va_labels = va_labels.reshape((-1, 1))
+        te_labels = te_labels.reshape((-1, 1))
         if len(all_data) == 3:
-            tr_dense, va_dense = all_data[0]
-            dense_input = self.make_dataloader_op(tr_dense, va_dense)
+            dense_input = self.make_dataloader_op(*all_data[0])
         else:
             dense_input = None
-        y_ = self.make_dataloader_op(tr_labels, va_labels)
+        y_ = self.make_dataloader_op(tr_labels, va_labels, te_labels)
         if self.use_multi:
             new_sparse_ops = []
             for i in range(tr_sparse.shape[1]):
                 cur_data = self.make_dataloader_op(
-                    tr_sparse[:, i], None if va_sparse is None else va_sparse[:, i], dtype=np.int32)
+                    tr_sparse[:, i], va_sparse[:, i], te_sparse[:, i], dtype=np.int32)
                 new_sparse_ops.append(cur_data)
             embed_input = new_sparse_ops
         else:
             embed_input = self.make_dataloader_op(
-                tr_sparse, va_sparse, dtype=np.int32)
+                tr_sparse, va_sparse, te_sparse, dtype=np.int32)
         self.log_func("Data loaded.")
         return embed_input, dense_input, y_
 
@@ -190,7 +197,7 @@ class EmbeddingTrainer(object):
 
     def run_once(self):
         self.total_epoch = int(self.nepoch * self.num_test_every_epoch)
-        train_batch_num = self.executor.get_batch_num('train')
+        train_batch_num = self.executor.get_batch_num(self.train_name)
         npart = self.num_test_every_epoch
         self.base_batch_num = train_batch_num // npart
         self.residual = train_batch_num % npart
@@ -213,23 +220,40 @@ class EmbeddingTrainer(object):
             train_loss, train_metric = self.train_once(
                 train_batch_num, epoch, part)
         train_time = self.temp_time[0]
-        with self.timing():
-            test_loss, test_metric, early_stop = self.validate_once(
-                self.executor.get_batch_num('validate'), epoch, part)
-        test_time = self.temp_time[0]
         results = {
-            'train_loss': train_loss,
+            'avg_train_loss': train_loss,
             f'train_{self.monitor}': train_metric,
             'train_time': train_time,
-            'test_loss': test_loss,
-            f'test_{self.monitor}': test_metric,
-            'test_time': test_time,
         }
+        early_stop = False
+        if self.check_val:
+            with self.timing():
+                val_loss, val_metric, early_stop = self.validate_once(
+                    epoch, part)
+            val_time = self.temp_time[0]
+            results.update({
+                'avg_val_loss': val_loss,
+                f'val_{self.monitor}': val_metric,
+                'val_time': val_time,
+            })
+        if self.check_test:
+            test_epoch, test_part = epoch, part
+            if self.check_val:
+                test_epoch, test_part = None, None
+            with self.timing():
+                test_loss, test_metric, test_early_stop = self.test_once(
+                    test_epoch, test_part)
+            if not self.check_val:
+                early_stop = test_early_stop
+            test_time = self.temp_time[0]
+            results.update({
+                'avg_test_loss': test_loss,
+                f'test_{self.monitor}': test_metric,
+                'test_time': test_time,
+            })
         printstr = ', '.join(
             [f'{key}: {value:.4f}' for key, value in results.items()])
         results.update({'epoch': epoch, 'part': part, })
-        results['avg_train_loss'] = results.pop('train_loss')
-        results['avg_test_loss'] = results.pop('test_loss')
         self.executor.multi_log(results)
         self.executor.step_logger()
         self.log_func(printstr)
@@ -273,7 +297,8 @@ class EmbeddingTrainer(object):
             result = train_acc
         return train_loss, result
 
-    def validate_once(self, step_num, epoch=None, part=None):
+    def evaluate_once(self, name, epoch=None, part=None):
+        step_num = self.executor.get_batch_num(name)
         localiter = range(step_num)
         if self.tqdm_enabled:
             localiter = tqdm(localiter)
@@ -285,7 +310,7 @@ class EmbeddingTrainer(object):
             test_acc = []
         for it in localiter:
             loss_value, test_y_predicted, y_test_value = self.executor.run(
-                self.validate_name, convert_to_numpy_ret_vals=True)
+                name, convert_to_numpy_ret_vals=True)
             correct_prediction = self.get_acc(y_test_value, test_y_predicted)
             test_loss.append(loss_value[0])
             if self.check_auc:
@@ -306,6 +331,12 @@ class EmbeddingTrainer(object):
         else:
             early_stopping = False
         return test_loss, new_result, early_stopping
+
+    def validate_once(self, epoch=None, part=None):
+        return self.evaluate_once(self.validate_name, epoch=epoch, part=part)
+
+    def test_once(self, epoch=None, part=None):
+        return self.evaluate_once(self.test_name, epoch=epoch, part=part)
 
     def try_save_ckpt(self, new_result, cur_meta):
         new_result = self.monitor_type * new_result
@@ -414,6 +445,7 @@ class EmbeddingTrainer(object):
         self.executor = executor
 
     def fit(self):
+        assert self.phase == 'train'
         self.embed_layer = self.get_embed_layer()
         self.log_func(f'Embedding layer: {self.embed_layer}')
         eval_nodes = self.get_eval_nodes()
@@ -423,6 +455,7 @@ class EmbeddingTrainer(object):
         self.run_once()
 
     def test(self):
+        assert self.phase == 'test'
         self.embed_layer = self.get_embed_layer()
         self.log_func(f'Embedding layer: {self.embed_layer}')
         assert self.load_ckpt is not None, 'Checkpoint should be given in testing.'
@@ -434,11 +467,10 @@ class EmbeddingTrainer(object):
         log_file = open(self.result_file,
                         'w') if self.result_file is not None else None
         with self.timing():
-            test_loss, test_metric, _ = self.validate_once(
-                self.executor.get_batch_num('validate'))
+            test_loss, test_metric, _ = self.test_once()
         test_time = self.temp_time[0]
         results = {
-            'test_loss': test_loss,
+            'avg_test_loss': test_loss,
             f'test_{self.monitor}': test_metric,
             'test_time': test_time,
         }
@@ -464,8 +496,9 @@ class EmbeddingTrainer(object):
             embeddings, dense_input, y_)
         train_op = self.opt.minimize(loss)
         eval_nodes = {
-            'train': [loss, prediction, y_, train_op],
-            'validate': [loss, prediction, y_],
+            self.train_name: [loss, prediction, y_, train_op],
+            self.validate_name: [loss, prediction, y_],
+            self.test_name: [loss, prediction, y_],
         }
         return eval_nodes
 
@@ -475,7 +508,7 @@ class EmbeddingTrainer(object):
         loss, prediction = self.model(
             embeddings, dense_input, y_)
         eval_nodes = {
-            'validate': [loss, prediction, y_],
+            self.test_name: [loss, prediction, y_],
         }
         return eval_nodes
 
