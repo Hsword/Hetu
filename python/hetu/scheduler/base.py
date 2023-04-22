@@ -490,3 +490,14 @@ class EmbeddingTrainer(object):
             elif mid_score > 0:
                 right = middle
         return left, right
+    
+    @staticmethod
+    def md_binary_search(left, right, evaluator):
+        while right - left > 1e-2:
+            middle = (left + right) / 2
+            mid_score = evaluator(middle)
+            if mid_score < 0:
+                right = middle
+            elif mid_score > 0:
+                left = middle
+        return middle
