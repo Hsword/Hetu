@@ -6,6 +6,7 @@ import numpy as np
 class MDETrainer(EmbeddingTrainer):
     def assert_use_multi(self):
         assert self.use_multi == self.separate_fields == 1
+
     def _md_solver(self, alpha, mem_cap=None, round_dim=True, freq=None):
         # inherited from dlrm repo
         num_dim = self.embedding_dim
@@ -32,25 +33,30 @@ class MDETrainer(EmbeddingTrainer):
             undo_sort[v] = i
         return d[undo_sort]
 
+    def get_dims_from_compress_rate(self):
 
-    def _get_alpha(self):
-
-        def multi_evaluate(x):
-            num_fields=[1460, 583, 10131227, 2202608, 305, 24, 12517, 633, 3, 93145, 5683,8351593, 3194, 27, 14992, 5461306, 10, 5652, 2173, 4, 7046547, 18, 15, 286181, 105, 142572]
-            cur_memory = 0
-            for item in num_fields:
-                if self.embedding_dim*(num_fields[0]**x)*(item**(1-x))>=1:
-                    cur_memory+=self.embedding_dim*(num_fields[0]**x)*(item**(1-x))
-                else:
-                    cur_memory+=1
-            return cur_memory - target_memory
+        def evaluate(x):
+            cur_dims = self._md_solver(x, round_dim=round_dim)
+            cur_memory = sum(
+                [nemb * ndim for nemb, ndim in zip(self.num_embed_separate, cur_dims)])
+            return target_memory - cur_memory
+        round_dim = self.embedding_args['round_dim']
         target_memory = self.num_embed * self.embedding_dim * self.compress_rate
-        evaluate = multi_evaluate
-        res = self.md_binary_search(0, 1, evaluate)
+        left, right = self.binary_search(0., 1., evaluate, 1e-3)
+        # test how close is left
+        dims = self._md_solver(left, round_dim=round_dim)
+        real_compress_rate = sum(
+            [nemb * ndim for nemb, ndim in zip(self.num_embed_separate, dims)]) / self.num_embed / self.embedding_dim
+        if real_compress_rate < self.compress_rate + 1e-3:
+            alpha = left
+        else:
+            alpha = right
+            dims = self._md_solver(alpha, round_dim=round_dim)
+            real_compress_rate = sum(
+                [nemb * ndim for nemb, ndim in zip(self.num_embed_separate, dims)]) / self.num_embed / self.embedding_dim
         self.log_func(
-            f'Alpha {res} given compression rate {self.compress_rate}.')
-        return res
-
+            f'Get alpha {alpha} with compression rate {real_compress_rate}({self.compress_rate})')
+        return dims
 
     def get_single_embed_layer(self, nemb, cdim, name):
         return MDEmbedding(
@@ -63,9 +69,7 @@ class MDETrainer(EmbeddingTrainer):
         )
 
     def get_embed_layer(self):
-        alpha=self._get_alpha()
-        dims = self._md_solver(
-            alpha, round_dim=self.embedding_args['round_dim'])
+        dims = self.get_dims_from_compress_rate()
         assert max(dims) == self.embedding_dim
         emb = []
         for i, (nemb, cdim) in enumerate(zip(self.num_embed_separate, dims)):
