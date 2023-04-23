@@ -8,12 +8,14 @@ from .gpu_ops.AssignWithIndexedSlices import assign_with_indexedslices_op, assig
 from .gpu_ops.ParameterServerCommunicate import ParameterServerCommunicateOp
 from .gpu_ops.Variable import PlaceholderOp
 from .gpu_links.OptimizerLink import sgd_update, sgd_update_indexedslices, \
-    momentum_update, adagrad_update, adam_update, adam_update_indexedslices, \
+    momentum_update, adagrad_update, adagrad_update_indexedslices, \
+    adam_update, adam_update_indexedslices, \
     adamw_update, lamb_update, betats_update
 from .cpu_links.dnnl_op import sgd_update as cpu_sgd_update, \
     sgd_update_indexedslices as cpu_sgd_update_indexedslices, \
     momentum_update as cpu_momentum_update, \
     adagrad_update as cpu_adagrad_update, \
+    adagrad_update_indexedslices as cpu_adagrad_update_indexedslices,\
     adam_update as cpu_adam_update, \
     adam_update_indexedslices as cpu_adam_update_indexedslices, \
     betats_update as cpu_betats_update
@@ -381,6 +383,38 @@ class AdaGradUpdateOp(OptimizerOp):
                             accum.asnumpy()) + self.eps)
 
 
+class AdaGradSparseUpdateOp(OptimizerSparseOp):
+    def __init__(self, optimizer, param, unique, dedup_lookup, dedup_grad):
+        from .initializers import constant
+        accum = _init_states(param, 'adagrad_accum', constant,
+                             fill_value=optimizer.initial_accumulator_value)
+        self.eps = optimizer.eps
+        states = [accum]
+        super().__init__(optimizer, param, unique, dedup_lookup, dedup_grad, *states)
+
+    def compute(self, input_vals, output_val, stream_handle=None):
+        _, unique, dedup_lookup, dedup_grad, accum = input_vals
+        if self.on_gpu:
+            adagrad_update_indexedslices(
+                unique, dedup_grad,
+                dedup_lookup, output_val,
+                self.learning_rate, accum, self.eps, stream_handle)
+        else:
+            if DNNL_LIB['cpu_AdaGradUpdateIndexedSlices']:
+                cpu_adagrad_update_indexedslices(
+                    unique, dedup_grad,
+                    dedup_lookup, output_val,
+                    self.learning_rate, accum, self.eps)
+            else:
+                grad = dedup_grad.asnumpy()
+                accum[:] = accum.asnumpy(
+                ) + np.power(grad, 2)
+                output_val[:] = \
+                    dedup_lookup.asnumpy() - self.learning_rate * grad / \
+                    (np.sqrt(
+                        accum.asnumpy()) + self.eps)
+
+
 class AdaGradOptimizer(Optimizer):
     def __init__(self, learning_rate=0.01, initial_accumulator_value=0.0, eps=1e-7, l2reg=0):
         assert initial_accumulator_value >= 0.0, \
@@ -391,6 +425,7 @@ class AdaGradOptimizer(Optimizer):
         self.initial_accumulator_value = initial_accumulator_value
         self.eps = eps
         self.opt_op_type = AdaGradUpdateOp
+        self.sparse_opt_op_type = AdaGradSparseUpdateOp
 
     def get_config(self):
         return (ctypes.c_int(3), (ctypes.c_float * 3)(self.learning_rate, self.initial_accumulator_value, self.eps), ctypes.c_int(3))
@@ -562,7 +597,11 @@ class AdamSparseUpdateOp(OptimizerSparseOp):
                 mc = m.asnumpy() / (1 - cur_betats[0])
                 vc = v.asnumpy() / (1 - cur_betats[1])
                 if self.amsgrad:
-                    raise NotImplementedError
+                    cur_maxv = np.maximum(vc, maxv.asnumpy())
+                    output_val[:] = dedup_lookup.asnumpy() - \
+                        self.learning_rate * mc / \
+                        (np.sqrt(cur_maxv) + self.epsilon)
+                    maxv[:] = cur_maxv
                 else:
                     output_val[:] = dedup_lookup.asnumpy() - \
                         self.learning_rate * mc / (np.sqrt(vc) + self.epsilon)

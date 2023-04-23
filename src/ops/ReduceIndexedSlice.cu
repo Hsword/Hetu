@@ -233,6 +233,48 @@ int DLGpuSGDUpdateIndexedSlices(const DLArrayHandle indices,
     return 0;
 }
 
+__global__ void adagrad_update_indexedslices_kernel(
+    const int *indices, const float *grads, const float *params, float *output,
+    float lr, float *accum, float eps, size_t dim, size_t size) {
+    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
+    if (ind >= size)
+        return;
+    int index = indices[ind / dim];
+    if (index < 0)
+        return;
+    int offset = index * dim + ind % dim;
+    accum[offset] = accum[offset] + grads[ind] * grads[ind];
+    output[ind] = params[ind] - lr * grads[ind] / (sqrtf(accum[offset]) + eps);
+}
+
+int DLGpuAdaGradUpdateIndexedSlices(const DLArrayHandle indices,
+                                    const DLArrayHandle grads,
+                                    const DLArrayHandle params,
+                                    DLArrayHandle output, float lr,
+                                    DLArrayHandle accum, float epsilon,
+                                    DLStreamHandle stream_handle = NULL) {
+    size_t size = ArrSize(grads);
+    size_t dim = grads->shape[grads->ndim - 1];
+    const int *indices_data = (const int *)indices->data;
+    const float *grads_data = (const float *)grads->data;
+    const float *params_data = (const float *)params->data;
+    float *output_data = (float *)output->data;
+    float *accum_data = (float *)accum->data;
+    dim3 threads, blocks;
+    ThreadBlock1D(threads, blocks, size);
+    if (stream_handle) {
+        adagrad_update_indexedslices_kernel<<<
+            blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
+            indices_data, grads_data, params_data, output_data, lr, accum_data,
+            epsilon, dim, size);
+    } else {
+        adagrad_update_indexedslices_kernel<<<blocks, threads>>>(
+            indices_data, grads_data, params_data, output_data, lr, accum_data,
+            epsilon, dim, size);
+    }
+    return 0;
+}
+
 __global__ void adam_update_indexedslices_kernel(
     const int *indices, const float *grads, const float *params, float *output,
     float lr, float *m, float *v, const float *betats, float beta1, float beta2,
@@ -249,6 +291,26 @@ __global__ void adam_update_indexedslices_kernel(
     float m_local = m[offset] / (1 - betats[0]);
     float v_local = v[offset] / (1 - betats[1]);
     output[ind] = params[ind] - lr * m_local / (sqrtf(v_local) + eps);
+}
+
+__global__ void amsgrad_update_indexedslices_kernel(
+    const int *indices, const float *grads, const float *params, float *output,
+    float lr, float *m, float *v, float *maxv, const float *betats, float beta1,
+    float beta2, float eps, size_t dim, size_t size) {
+    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
+    if (ind >= size)
+        return;
+    int index = indices[ind / dim];
+    if (index < 0)
+        return;
+    int offset = index * dim + ind % dim;
+    m[offset] = beta1 * m[offset] + (1 - beta1) * grads[ind];
+    v[offset] = beta2 * v[offset] + (1 - beta2) * grads[ind] * grads[ind];
+    float m_local = m[offset] / (1 - betats[0]);
+    float v_local = v[offset] / (1 - betats[1]);
+    float cur_maxv = fmaxf(v_local, maxv[offset]);
+    maxv[offset] = cur_maxv;
+    output[ind] = params[ind] - lr * m_local / (sqrtf(cur_maxv) + eps);
 }
 
 int DLGpuAdamUpdateIndexedSlices(
@@ -279,8 +341,19 @@ int DLGpuAdamUpdateIndexedSlices(
                 v_data, betats_data, beta1, beta2, epsilon, dim, size);
         }
     } else {
-        // not implemented amsgrad now
-        assert(false);
+        float *maxv_data = (float *)maxv->data;
+        if (stream_handle) {
+            amsgrad_update_indexedslices_kernel<<<
+                blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
+                indices_data, grads_data, params_data, output_data, lr, m_data,
+                v_data, maxv_data, betats_data, beta1, beta2, epsilon, dim,
+                size);
+        } else {
+            amsgrad_update_indexedslices_kernel<<<blocks, threads>>>(
+                indices_data, grads_data, params_data, output_data, lr, m_data,
+                v_data, maxv_data, betats_data, beta1, beta2, epsilon, dim,
+                size);
+        }
     }
     return 0;
 }

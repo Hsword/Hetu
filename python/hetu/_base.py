@@ -59,6 +59,7 @@ DNNL_LIB = {
     'cpu_MomentumOptimizerUpdate': False,  # c++
     'cpu_AdaGradOptimizerUpdate': False,  # c++
     'cpu_AdaGradOptimizerSparseUpdate': False,  # c++
+    'cpu_AdaGradUpdateIndexedSlices': False,
     'cpu_BetatsUpdate': False,  # c++
     'cpu_AdamOptimizerUpdate': False,  # c++
     'cpu_AdamOptimizerSparseUpdate': False,

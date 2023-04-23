@@ -224,6 +224,7 @@ __all__ = [
     'reduce_indexedslice_get_workspace_size',
     'reduce_indexedslice_with_embedding',
     'sgd_update_indexedslices',
+    'adagrad_update_indexedslices',
     'adam_update_indexedslices',
     'binary_cross_entropy',
     'binary_cross_entropy_with_logits',

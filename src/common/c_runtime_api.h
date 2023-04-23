@@ -669,6 +669,11 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle params, DLArrayHandle output, float lr,
         DLStreamHandle stream_handle);
 
+    int DLGpuAdaGradUpdateIndexedSlices(
+        const DLArrayHandle indices, const DLArrayHandle grads,
+        const DLArrayHandle params, DLArrayHandle output, float lr,
+        DLArrayHandle accum, float epsilon, DLStreamHandle stream_handle);
+
     int DLGpuAdamUpdateIndexedSlices(
         const DLArrayHandle indices, const DLArrayHandle grads,
         const DLArrayHandle params, DLArrayHandle output, float lr,
@@ -1044,6 +1049,11 @@ HETUSYS_EXTERN_C {
     int cpu_SGDUpdateIndexedSlices(
         const DLArrayHandle indices, const DLArrayHandle grads,
         const DLArrayHandle params, DLArrayHandle output, float lr);
+
+    int cpu_AdaGradUpdateIndexedSlices(
+        const DLArrayHandle indices, const DLArrayHandle grads,
+        const DLArrayHandle params, DLArrayHandle output, float lr,
+        DLArrayHandle accum, float epsilon);
 
     int cpu_AdamUpdateIndexedSlices(
         const DLArrayHandle indices, const DLArrayHandle grads,

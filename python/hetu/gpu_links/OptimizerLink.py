@@ -64,6 +64,19 @@ def adagrad_update(param, grad, accumulation, lr, eps, l2reg, stream=None):
             lr), ctypes.c_float(eps), stream.handle if stream else None)
 
 
+def adagrad_update_indexedslices(indices, grads, params, output, lr, accum, epsilon, stream=None):
+    assert isinstance(indices, NDArray)
+    assert isinstance(grads, NDArray)
+    assert isinstance(params, NDArray)
+    assert isinstance(output, NDArray)
+    assert isinstance(accum, NDArray)
+    _LIB.DLGpuAdaGradUpdateIndexedSlices(
+        indices.handle, grads.handle, params.handle,
+        output.handle, ctypes.c_float(lr),
+        accum.handle, ctypes.c_float(epsilon),
+        stream.handle if stream else None)
+
+
 def betats_update(betats, beta1, beta2, stream=None):
     assert isinstance(betats, NDArray)
     _LIB.BetatsUpdate(betats.handle, ctypes.c_float(beta1),

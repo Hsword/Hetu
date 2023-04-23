@@ -433,6 +433,19 @@ def sgd_update_indexedslices(indices, grads, params, output, lr):
         indices.handle, grads.handle, params.handle, output.handle, ctypes.c_float(lr))
 
 
+def adagrad_update_indexedslices(indices, grads, params, output, lr,
+                                 accum, epsilon):
+    assert isinstance(indices, NDArray)
+    assert isinstance(grads, NDArray)
+    assert isinstance(params, NDArray)
+    assert isinstance(output, NDArray)
+    assert isinstance(accum, NDArray)
+    _LIB.cpu_AdaGradUpdateIndexedSlices(
+        indices.handle, grads.handle, params.handle,
+        output.handle, ctypes.c_float(lr),
+        accum.handle, ctypes.c_float(epsilon))
+
+
 def adam_update_indexedslices(indices, grads, params, output, lr,
                               m, v, maxv, beta1, beta2, betats, epsilon):
     assert isinstance(indices, NDArray)

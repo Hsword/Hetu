@@ -171,6 +171,40 @@ int cpu_SGDUpdateIndexedSlices(const DLArrayHandle indices,
     return 0;
 }
 
+int cpu_AdaGradUpdateIndexedSlices(const DLArrayHandle indices,
+                                   const DLArrayHandle grads,
+                                   const DLArrayHandle params,
+                                   DLArrayHandle output, float lr,
+                                   DLArrayHandle accum, float eps) {
+    size_t index_size = 1;
+    for (int i = 0; i < indices->ndim; ++i) {
+        index_size *= indices->shape[i];
+    }
+    size_t width = grads->shape[grads->ndim - 1];
+    const int *ind_data = (const int *)indices->data;
+    const float *grad_data = (const float *)grads->data;
+    const float *param_data = (const float *)params->data;
+    float *output_data = (float *)output->data;
+    float *accum_data = (float *)accum->data;
+
+#pragma omp parallel for
+    for (size_t i = 0; i < index_size; ++i) {
+        if (ind_data[i] < 0)
+            continue;
+        size_t offset = i * width;
+        size_t state_offset = ind_data[i] * width;
+        for (size_t k = 0; k < width; ++k) {
+            float cur_grad = grad_data[offset + k];
+            size_t cur_state_offset = state_offset + k;
+            accum_data[cur_state_offset] += cur_grad * cur_grad;
+            output_data[offset + k] =
+                param_data[offset + k]
+                - lr * cur_grad / (sqrtf(accum_data[cur_state_offset]) + eps);
+        }
+    }
+    return 0;
+}
+
 int cpu_AdamUpdateIndexedSlices(const DLArrayHandle indices,
                                 const DLArrayHandle grads,
                                 const DLArrayHandle params,
@@ -213,8 +247,28 @@ int cpu_AdamUpdateIndexedSlices(const DLArrayHandle indices,
             }
         }
     } else {
-        // not implemented amsgrad now
-        assert(false);
+        float *maxv_data = (float *)maxv->data;
+#pragma omp parallel for
+        for (size_t i = 0; i < index_size; ++i) {
+            if (ind_data[i] < 0)
+                continue;
+            size_t offset = i * width;
+            size_t state_offset = ind_data[i] * width;
+            for (size_t k = 0; k < width; ++k) {
+                float cur_grad = grad_data[offset + k];
+                size_t cur_state_offset = state_offset + k;
+                m_data[cur_state_offset] =
+                    beta1 * m_data[cur_state_offset] + (1 - beta1) * cur_grad;
+                v_data[cur_state_offset] = beta2 * v_data[cur_state_offset]
+                                           + (1 - beta2) * cur_grad * cur_grad;
+                float m_local = m_data[cur_state_offset] / (1 - betats_data[0]);
+                float v_local = v_data[cur_state_offset] / (1 - betats_data[1]);
+                float cur_maxv = max(v_local, maxv_data[cur_state_offset]);
+                output_data[offset + k] =
+                    param_data[offset + k]
+                    - lr * m_local / (sqrtf(cur_maxv) + eps);
+            }
+        }
     }
     return 0;
 }
