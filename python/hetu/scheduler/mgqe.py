@@ -88,12 +88,13 @@ class MGQETrainer(SwitchInferenceTrainer):
         else:
             train_nodes.append(self.embed_layer.codebook_update)
         eval_nodes = {
-            'train': train_nodes,
+            self.train_name: train_nodes,
         }
         test_embed_input = self._get_inference_embeddings(embed_input)
         test_loss, test_prediction = self.model(
             test_embed_input, dense_input, y_)
-        eval_nodes['validate'] = [test_loss, test_prediction, y_]
+        eval_nodes[self.validate_name] = [test_loss, test_prediction, y_]
+        eval_nodes[self.test_name] = [test_loss, test_prediction, y_]
         return eval_nodes
 
     def get_eval_nodes_inference(self):
@@ -102,6 +103,6 @@ class MGQETrainer(SwitchInferenceTrainer):
         test_loss, test_prediction = self.model(
             test_embed_input, dense_input, y_)
         eval_nodes = {
-            'validate': [test_loss, test_prediction, y_],
+            self.test_name: [test_loss, test_prediction, y_],
         }
         return eval_nodes

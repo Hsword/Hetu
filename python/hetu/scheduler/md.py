@@ -47,7 +47,7 @@ class MDETrainer(EmbeddingTrainer):
         dims = self._md_solver(left, round_dim=round_dim)
         real_compress_rate = sum(
             [nemb * ndim for nemb, ndim in zip(self.num_embed_separate, dims)]) / self.num_embed / self.embedding_dim
-        if real_compress_rate < self.compress_rate + 1e-3:
+        if real_compress_rate < self.compress_rate * (1 + 1e-3):
             alpha = left
         else:
             alpha = right

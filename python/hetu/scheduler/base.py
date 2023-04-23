@@ -115,16 +115,18 @@ class EmbeddingTrainer(object):
         self.model.__init__(self.embedding_dim,
                             self.num_slot, self.dataset.num_dense)
 
-    def prepare_path_for_retrain(self):
+    def prepare_path_for_retrain(self, key='retrain'):
         if self.save_topk > 0:
-            self.save_dir = self.save_dir + '_retrain'
-            os.makedirs(self.save_dir)
+            self.save_dir = self.save_dir + f'_{key}'
+            os.makedirs(self.save_dir, exist_ok=True)
         resf_parts = osp.split(self.result_file)
-        self.result_file = osp.join(resf_parts[0], 'retrain_' + resf_parts[1])
+        self.result_file = osp.join(resf_parts[0], f'{key}_' + resf_parts[1])
 
     def set_use_multi(self, new_use_multi):
         self.use_multi = new_use_multi
         self.separate_fields = new_use_multi
+        self.args['use_multi'] = new_use_multi
+        self.args['separate_fields'] = new_use_multi
 
     def assert_use_multi(self):
         assert self.use_multi == self.separate_fields
@@ -196,11 +198,8 @@ class EmbeddingTrainer(object):
         )
 
     def run_once(self):
-        self.total_epoch = int(self.nepoch * self.num_test_every_epoch)
-        train_batch_num = self.executor.get_batch_num(self.train_name)
         npart = self.num_test_every_epoch
-        self.base_batch_num = train_batch_num // npart
-        self.residual = train_batch_num % npart
+        self.init_base_batch_num()
         log_file = open(self.result_file,
                         'w') if self.result_file is not None else None
         for ep in range(self.start_ep, self.total_epoch):
@@ -338,6 +337,11 @@ class EmbeddingTrainer(object):
     def test_once(self, epoch=None, part=None):
         return self.evaluate_once(self.test_name, epoch=epoch, part=part)
 
+    def get_args_for_saving(self):
+        args_for_saving = self.args.copy()
+        args_for_saving['model'] = args_for_saving['model'].__name__
+        return args_for_saving
+
     def try_save_ckpt(self, new_result, cur_meta):
         new_result = self.monitor_type * new_result
         if self.save_topk > 0 and new_result >= self.best_results[-1]:
@@ -351,7 +355,7 @@ class EmbeddingTrainer(object):
                 self.best_ckpts.insert(idx, cur_meta)
                 ep, part = cur_meta
                 self.executor.save(self.save_dir, f'ep{ep}_{part}.pkl', {
-                    'epoch': ep, 'part': part, 'npart': self.num_test_every_epoch})
+                    'epoch': ep, 'part': part, 'npart': self.num_test_every_epoch, 'args': self.get_args_for_saving()})
                 rm_res = self.best_results.pop()
                 rm_meta = self.best_ckpts.pop()
                 self.log_func(
@@ -406,20 +410,58 @@ class EmbeddingTrainer(object):
         arr[np.isinf(arr)] = 0
         return arr
 
+    def init_base_batch_num(self):
+        self.total_epoch = int(self.nepoch * self.num_test_every_epoch)
+        train_batch_num = self.executor.get_batch_num(self.train_name)
+        npart = self.num_test_every_epoch
+        self.base_batch_num = train_batch_num // npart
+        self.residual = train_batch_num % npart
+
+    def assert_load_args(self, load_args):
+        assert self.args['model'].__name__ == load_args['model']
+        for k in ['method', 'dim', 'dataset', 'separate_fields', 'use_multi', 'compress_rate', 'embedding_args']:
+            assert load_args[k] == self.args[
+                k], f'Current argument({k}) {self.args[k]} different from loaded {load_args[k]}'
+        for k in ['bs', 'opt', 'lr', 'num_test_every_epoch', 'seed']:
+            if load_args[k] != self.args[k]:
+                self.log_func(
+                    f'Warning: current argument({k}) {self.args[k]} different from loaded {load_args[k]}')
+
     def try_load_ckpt(self):
         if self.load_ckpt is not None:
             with open(self.load_ckpt, 'rb') as fr:
                 meta = pickle.load(fr)
-            self.executor.load_dict(meta['state_dict'])
-            self.executor.load_seeds(meta['seed'])
+            self.assert_load_args(meta['args'])
             start_epoch = meta['epoch']
             start_part = meta['part'] + 1
             assert meta['npart'] == self.num_test_every_epoch
             self.start_ep = start_epoch * self.num_test_every_epoch + start_part
+            self.log_func(f'Load ckpt from {osp.split(self.load_ckpt)[-1]}.')
+            return meta
+        else:
+            return None
+
+    def load_into_executor(self, meta):
+        if meta is not None:
+            self.executor.load_dict(meta['state_dict'])
+            self.executor.load_seeds(meta['seed'])
+            start_part = meta['part'] + 1
             if self.train_name in self.executor.subexecutor:
+                self.init_base_batch_num()
                 self.executor.set_dataloader_batch_index(
                     self.train_name, start_part * self.base_batch_num)
-            self.log_func(f'Load ckpt from {osp.split(self.load_ckpt)[-1]}.')
+
+    def load_best_ckpt(self):
+        if self.save_topk > 0:
+            # load the best ckpt for inference
+            best_meta = self.best_ckpts[0]
+            ep, part = best_meta
+            with open(osp.join(self.save_dir, f'ep{ep}_{part}.pkl'), 'rb') as fr:
+                cur_meta = pickle.load(fr)
+            self.executor.load_dict(cur_meta['state_dict'])
+            self.executor.load_seeds(cur_meta['seed'])
+            self.log_func(
+                f'For switching, load ckpt from ep{ep}_{part}.pkl.')
 
     def get_ctx(self, idx):
         if idx < 0:
@@ -451,7 +493,7 @@ class EmbeddingTrainer(object):
         eval_nodes = self.get_eval_nodes()
         self.init_executor(eval_nodes)
 
-        self.try_load_ckpt()
+        self.load_into_executor(self.try_load_ckpt())
         self.run_once()
 
     def test(self):
@@ -462,7 +504,7 @@ class EmbeddingTrainer(object):
         eval_nodes = self.get_eval_nodes_inference()
         self.init_executor(eval_nodes)
 
-        self.try_load_ckpt()
+        self.load_into_executor(self.try_load_ckpt())
 
         log_file = open(self.result_file,
                         'w') if self.result_file is not None else None

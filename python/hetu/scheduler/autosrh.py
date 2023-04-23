@@ -47,45 +47,65 @@ class AutoSrhTrainer(SwitchInferenceTrainer):
 
     def fit(self):
         self.save_dir = self.args['save_dir']
+        meta = self.try_load_ckpt()
         # warming up
         warm_up_eps = self.embedding_args['warm_start_epochs']
         warmed_up_embeddings = None
-        if warm_up_eps > 0:
-            self.log_func(f'Warming up {warm_up_eps} epooch')
+        if warm_up_eps > 0 and (meta is None or meta['args']['stage'] == 1):
+            self.args['stage'] = 1
+            assert self.save_topk > 0, 'Need to load the best ckpt for dimension selection; please set save_topk a positive integer.'
+            self.log_func(f'Warming up {warm_up_eps} epoch')
             self.embed_layer = super().get_embed_layer()
             eval_nodes = super().get_eval_nodes()
             self.init_executor(eval_nodes)
+            self.load_into_executor(meta)
 
-            self.try_load_ckpt()
             self._original_nepoch = self.nepoch
             self.nepoch = warm_up_eps
             self.run_once()
             self.nepoch = self._original_nepoch
+            self.load_best_ckpt()
             self.executor.return_tensor_values()
             del self.executor
             warmed_up_embeddings = self.embed_layer.embedding_table
             del self.embed_layer
 
-        # start training
-        self.log_func('Start training...')
-        self.train_step = self.first_stage_train_step
-        self.embed_layer = self.get_embed_layer()
-        if warmed_up_embeddings is not None:
-            self.embed_layer.embedding_table = warmed_up_embeddings
-        eval_nodes = self.get_eval_nodes()
-        self.init_executor(eval_nodes)
+        if meta is None or meta['args']['stage'] <= 2:
+            # start training
+            self.log_func('Start training...')
+            self.args['stage'] = 2
+            assert self.save_topk > 0, 'Need to load the best ckpt for dimension selection; please set save_topk a positive integer.'
+            self.train_step = self.first_stage_train_step
+            self.embed_layer = self.get_embed_layer()
+            if warmed_up_embeddings is not None:
+                self.embed_layer.embedding_table = warmed_up_embeddings
+            eval_nodes = self.get_eval_nodes()
+            self.init_executor(eval_nodes)
 
-        self.try_load_ckpt()
-        self.run_once()
+            if meta is None or meta['args']['stage'] == 2:
+                self.load_into_executor(meta)
+            self.prepare_path_for_retrain('main')
+            self.init_ckpts()
+            self.run_once()
+            self.load_best_ckpt()
+        else:
+            self.embed_layer = self.get_embed_layer()
+            eval_nodes = self.get_eval_nodes()
+            self.init_executor(eval_nodes)
+            self.load_into_executor(meta)
 
         # re-train
+        self.args['stage'] = 3
         self.log_func('Start retraining...')
+        self.prepare_path_for_retrain('retrain')
+        self.init_ckpts()
         self.train_step = super().train_step
         self.run_once()
 
         # prune and test
         stream = self.executor.config.comp_stream
         stream.sync()
+        self.load_best_ckpt()
         self.executor.return_tensor_values()
         workspace = empty((self.num_embed, self.embedding_dim),
                           ctx=self.ectx, dtype=np.int32)
@@ -120,7 +140,6 @@ class AutoSrhTrainer(SwitchInferenceTrainer):
         self.check_inference()
 
     def get_eval_nodes(self):
-        # TODO: use different opt and lr for alpha
         from ..gpu_ops import add_op, reduce_sum_op, mul_byconst_op, abs_op, param_clip_op
         from ..gpu_ops import div_op, broadcastto_op, reduce_mean_op, addbyconst_op
         embed_input, dense_input, y_ = self.data_ops
@@ -153,10 +172,11 @@ class AutoSrhTrainer(SwitchInferenceTrainer):
             self.embed_layer.alpha, alpha_update, 0., 1., self.ctx)
         # train here is for warm-up and re-train
         eval_nodes = {
-            'train': [loss, prediction, y_, embed_update, *dense_param_updates],
+            self.train_name: [loss, prediction, y_, embed_update, *dense_param_updates],
             'alpha': [alpha_clip_op],
             'embed': [loss, prediction, y_, embed_update],
-            'validate': [loss, prediction, y_],
+            self.validate_name: [loss, prediction, y_],
+            self.test_name: [loss, prediction, y_],
         }
         return eval_nodes
 

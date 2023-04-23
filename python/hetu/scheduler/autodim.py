@@ -16,39 +16,65 @@ class AutoDimTrainer(EmbeddingTrainer):
     def assert_use_multi(self):
         assert self.use_multi == self.separate_fields == int(self.retraining)
 
+    def assert_load_args(self, load_args):
+        assert self.args['model'].__name__ == load_args['model']
+        for k in ['method', 'dim', 'dataset', 'compress_rate', 'embedding_args']:
+            assert load_args[k] == self.args[
+                k], f'Current argument({k}) {self.args[k]} different from loaded {load_args[k]}'
+        for k in ['bs', 'opt', 'lr', 'num_test_every_epoch', 'seed']:
+            if load_args[k] != self.args[k]:
+                self.log_func(
+                    f'Warning: current argument({k}) {self.args[k]} different from loaded {load_args[k]}')
+
     def fit(self):
-        self.embed_layer = self.get_embed_layer()
-        self.log_func(f'Embedding layer: {self.embed_layer}')
-        self.alpha = self.embed_layer.alpha
+        self.save_dir = self.args['save_dir']
         self.r = self.embedding_args['r']
         self.alpha_lr = self.embedding_args['alpha_lr']
-        eval_nodes = self.get_eval_nodes()
-        self.lookups = self.embed_layer.lookups
-        self.init_executor(eval_nodes)
+        meta = self.try_load_ckpt()
 
-        self.executor.subexecutor['alpha'].inference = False
-        self.executor.subexecutor['lookups'].inference = False
-        self.executor.subexecutor['allgrads'].inference = False
-        self.get_arch_params(self.executor.config.placeholder_to_arr_map)
+        if meta is None or meta['args']['stage'] == 1:
+            # first stage
+            self.args['stage'] = 1
+            assert self.save_topk > 0, 'Need to load the best ckpt for dimension selection; please set save_topk a positive integer.'
+            self.log_func('Training the first stage')
+            self.embed_layer = self.get_embed_layer()
+            self.alpha = self.embed_layer.alpha
+            self.log_func(f'Embedding layer: {self.embed_layer}')
+            eval_nodes = self.get_eval_nodes()
+            self.lookups = self.embed_layer.lookups
+            self.init_executor(eval_nodes)
+            self.load_into_executor(meta)
 
-        self.try_load_ckpt()
-        self.train_step = self.first_stage_train_step
+            self.executor.subexecutor['alpha'].inference = False
+            self.executor.subexecutor['lookups'].inference = False
+            self.executor.subexecutor['allgrads'].inference = False
+            self.get_arch_params(self.executor.config.placeholder_to_arr_map)
 
-        self.run_once()
+            self.train_step = self.first_stage_train_step
 
+            self.run_once()
+
+            self.load_best_ckpt()
+
+            # re-init executor
+            self.executor.return_tensor_values()
+            dim_choices = self.make_retrain(self.executor.config.comp_stream)
+            self.args['dim_choices'] = dim_choices
+
+            self.reset_for_retrain()
+
+        else:
+            dim_choices = meta['args']['dim_choices']
+
+        self.set_use_multi(1)
+        self.retraining = True
+        self.args['stage'] = 2
         self.log_func('Switch to re-training stage!!!')
+        # TODO: test re-train from first stage, if current not good enough
         # re-init save topk
         self.prepare_path_for_retrain()
         self.init_ckpts()
-
-        # re-init executor
-        self.executor.return_tensor_values()
-        self.set_use_multi(1)
-        self.retraining = True
         self.data_ops = self.get_data()
-        dim_choices = self.make_retrain(self.executor.config.comp_stream)
-
-        self.reset_for_retrain()
         self.embed_layer = self.get_embed_layer_retrain(dim_choices)
         self.log_func(f'New embedding layer: {self.embed_layer}')
         eval_nodes = super().get_eval_nodes()
@@ -56,6 +82,8 @@ class AutoDimTrainer(EmbeddingTrainer):
         self.seed += 1  # use a different seed
 
         self.init_executor(eval_nodes)
+        if meta is not None and meta['args']['stage'] == 2:
+            self.load_into_executor(meta)
         self.train_step = super().train_step
 
         # re-run
@@ -177,7 +205,34 @@ class AutoDimTrainer(EmbeddingTrainer):
         return results[:3]
 
     def test(self):
-        raise NotImplementedError
+        assert self.phase == 'test' and self.load_ckpt is not None, 'Checkpoint should be given in testing.'
+        meta = self.try_load_ckpt()
+        assert meta['args']['stage'] == 2, 'Not support test the first stage.'
+        self.set_use_multi(1)
+        self.retraining = True
+        self.embed_layer = self.get_embed_layer_retrain(
+            meta['args']['dim_choices'])
+        self.data_ops = self.get_data()
+        self.log_func(f'Embedding layer: {self.embed_layer}')
+        eval_nodes = self.get_eval_nodes_inference()
+        self.init_executor(eval_nodes)
+        self.load_into_executor(meta)
+
+        log_file = open(self.result_file,
+                        'w') if self.result_file is not None else None
+        with self.timing():
+            test_loss, test_metric, _ = self.test_once()
+        test_time = self.temp_time[0]
+        results = {
+            'avg_test_loss': test_loss,
+            f'test_{self.monitor}': test_metric,
+            'test_time': test_time,
+        }
+        printstr = ', '.join(
+            [f'{key}: {value:.4f}' for key, value in results.items()])
+        self.log_func(printstr)
+        if log_file is not None:
+            print(printstr, file=log_file, flush=True)
 
     def get_embed_layer(self):
         self.dim_candidates = [2]
@@ -250,9 +305,10 @@ class AutoDimTrainer(EmbeddingTrainer):
         alpha_grad = gradients(new_loss, [self.alpha])
 
         eval_nodes = {
-            'train': [loss, prediction, y_, param_opts],
+            self.train_name: [loss, prediction, y_, param_opts],
             'lookups': lookups + dedup_lookups + unique_indices + param_opts,
-            'validate': [loss, prediction, y_],
+            self.validate_name: [loss, prediction, y_],
+            self.test_name: [loss, prediction, y_],
             'allgrads': [dalpha_op] + dup_dembed_ops + dembed_ops + dparam_ops,
             'alpha': [alpha_grad],
         }

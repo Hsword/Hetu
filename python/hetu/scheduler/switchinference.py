@@ -30,6 +30,7 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
         self.save_dir = self.args['save_dir']
         super().fit()
         self.executor.config.comp_stream.sync()
+        self.load_best_ckpt()
         self.executor.return_tensor_values()
         self.check_inference()
 
@@ -44,13 +45,19 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
         del self.executor
         self.executor = infer_executor
         with self.timing():
-            test_loss, test_metric, _ = self.validate_once()
+            test_loss, test_metric, _ = self.test_once()
         test_time = self.temp_time[0]
         os.makedirs(self.save_dir, exist_ok=True)
-        infer_executor.save(self.save_dir, f'final_ep{self.cur_ep}_{self.cur_part}.pkl', {
-            'epoch': self.cur_ep, 'part': self.cur_part, 'npart': self.num_test_every_epoch})
+        if self.save_topk > 0:
+            # load the best ckpt for inference
+            best_meta = self.best_ckpts[0]
+            ep, part = best_meta
+        else:
+            ep, part = self.cur_ep, self.cur_part
+        infer_executor.save(self.save_dir, f'final_ep{ep}_{part}.pkl', {
+            'epoch': ep, 'part': part, 'npart': self.num_test_every_epoch, 'args': self.get_args_for_saving()})
         results = {
-            'test_loss': test_loss,
+            'avg_test_loss': test_loss,
             f'test_{self.monitor}': test_metric,
             'test_time': test_time,
         }
@@ -64,31 +71,8 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
 
     def test(self):
         if self.use_sparse:
-            self.embed_layer = self.get_embed_layer_inference()
-        else:
-            self.embed_layer = self.get_embed_layer()
-        self.log_func(f'Embedding layer: {self.embed_layer}')
-        assert self.load_ckpt is not None, 'Checkpoint should be given in testing.'
-        eval_nodes = self.get_eval_nodes_inference()
-        self.init_executor(eval_nodes)
-
-        self.try_load_ckpt()
-
-        log_file = open(self.result_file,
-                        'w') if self.result_file is not None else None
-        with self.timing():
-            test_loss, test_metric, _ = self.test_once()
-        test_time = self.temp_time[0]
-        results = {
-            'test_loss': test_loss,
-            f'test_{self.monitor}': test_metric,
-            'test_time': test_time,
-        }
-        printstr = ', '.join(
-            [f'{key}: {value:.4f}' for key, value in results.items()])
-        self.log_func(printstr)
-        if log_file is not None:
-            print(printstr, file=log_file, flush=True)
+            self.get_embed_layer = self.get_embed_layer_inference
+        super().test()
 
     @property
     def sparse_name(self):
@@ -101,7 +85,7 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
         test_embed_input = self.embed_layer.make_inference(embed_input)
         test_loss, test_prediction = self.model(
             test_embed_input, dense_input, y_)
-        eval_nodes = {'validate': [test_loss, test_prediction, y_]}
+        eval_nodes = {self.test_name: [test_loss, test_prediction, y_]}
         return eval_nodes
 
     def get_embed_layer_inference(self):
