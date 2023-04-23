@@ -1,8 +1,9 @@
 import hetu as ht
 import hetu.layers as htl
+from .base import CTRModel_Head
 
 
-class DLRM_Head(object):
+class DLRM_Head(CTRModel_Head):
     # DLRM model without embedding layer
     # by default, use kaggle criteo dataset
     def __init__(
@@ -13,9 +14,7 @@ class DLRM_Head(object):
         ln_bot=[512, 256, 64],
         ln_top=[512, 256],
     ):
-        self.sparse_slot = sparse_slot
-        self.dense_slot = dense_slot
-        self.embed_dim = embed_dim
+        super().__init__(embed_dim, sparse_slot, dense_slot)
         if dense_slot > 0:
             # for criteo, criteo-TBs
             ln_bot = [dense_slot, ] + ln_bot + [embed_dim, ]
@@ -26,24 +25,6 @@ class DLRM_Head(object):
             # for avazu
             ln_top = [sparse_slot * (sparse_slot - 1) // 2, ] + ln_top + [1, ]
         self.top_mlp = self.create_mlp(ln_top, len(ln_top) - 2, name='top_mlp')
-        self.loss_fn = htl.BCEWithLogitsLoss()
-
-    def create_mlp(self, ln, sigmoid_layer=-1, name='mlp'):
-        layers = []
-        for i in range(len(ln) - 1):
-            n = ln[i]
-            m = ln[i + 1]
-
-            if i == sigmoid_layer:
-                # use bce loss with logits, no sigmoid here
-                act = None
-            else:
-                act = ht.relu_op
-            LL = htl.Linear(int(n), int(m), initializer=ht.init.GenXavierNormal(
-            ), activation=act, name=f'{name}_{i*2}')
-            layers.append(LL)
-
-        return htl.Sequence(*layers)
 
     def interact_features(self, sparse_vec, dense_vec):
         # dense: (bs, dim); sparse: (bs, sp_slot, dim)
@@ -80,4 +61,4 @@ class DLRM_Head(object):
             x = self.interact_features(sparse_input, None)
         self.inter = x
         x = self.top_mlp(x)
-        return self.loss_fn(x, label), ht.sigmoid_op(x)
+        return self.output(x, label)

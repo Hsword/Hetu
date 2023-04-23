@@ -252,9 +252,19 @@ if __name__ == '__main__':
             assert osp.isfile(args.load_ckpt)
 
     print(f'Use {args.model} on {args.dataset}.')
-    if args.model.lower().startswith('dlrm'):
+    model_name = args.model.lower()
+    if model_name.startswith('dlrm'):
         from models import DLRM_Head
         model = DLRM_Head
+    elif model_name.startswith('wdl'):
+        from models import WDL_Head
+        model = WDL_Head
+    elif model_name.startswith('dcn'):
+        from models import DCN_Head
+        model = DCN_Head
+    elif model_name.startswith('deepfm'):
+        from models import DeepFM_Head
+        model = DeepFM_Head
     else:
         raise NotImplementedError
     args.model = model
