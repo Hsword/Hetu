@@ -30,7 +30,6 @@ class BinaryCrossEntropyWithLogitsOp(Op):
 
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 2
-        assert len(input_shapes[0]) >= 2
         assert input_shapes[0] == input_shapes[1]
         return input_shapes[0]
 

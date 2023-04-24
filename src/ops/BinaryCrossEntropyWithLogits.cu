@@ -64,7 +64,7 @@ int DLGpuBinaryCrossEntropyWithLogits_Gradient(
     const DLArrayHandle output_grad, DLArrayHandle output,
     DLStreamHandle stream_handle = NULL) {
     size_t indim = prediction->ndim;
-    assert(indim >= 2 && indim == label->ndim && indim == output_grad->ndim
+    assert(indim == label->ndim && indim == output_grad->ndim
            && indim == output->ndim);
     int nrow = 1;
     for (int i = 0; i < indim - 1; ++i) {

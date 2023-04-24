@@ -344,8 +344,8 @@ class EmbeddingTrainer(object):
 
     def try_save_ckpt(self, new_result, cur_meta):
         new_result = self.monitor_type * new_result
+        idx = None
         if self.save_topk > 0 and new_result >= self.best_results[-1]:
-            idx = None
             for i, res in enumerate(self.best_results):
                 if new_result >= res:
                     idx = i
@@ -368,12 +368,9 @@ class EmbeddingTrainer(object):
                         osp.join(self.save_dir, f'ep{ep}_{part}.pkl'))
                     self.log_func(
                         f'Remove ep{ep}_{part}.pkl with {self.monitor}:{rm_res}.')
-        elif self.save_topk <= 0:
-            if new_result >= self.best_results[0]:
-                idx = 0
-                self.best_results[0] = new_result
-            else:
-                idx = None
+        elif self.save_topk <= 0 and new_result >= self.best_results[0]:
+            idx = 0
+            self.best_results[0] = new_result
         early_stopping = False
         if self.early_stop_steps > 0:
             if idx == 0:
