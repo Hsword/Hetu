@@ -368,9 +368,15 @@ class EmbeddingTrainer(object):
                         osp.join(self.save_dir, f'ep{ep}_{part}.pkl'))
                     self.log_func(
                         f'Remove ep{ep}_{part}.pkl with {self.monitor}:{rm_res}.')
+        elif self.save_topk <= 0:
+            if new_result >= self.best_results[0]:
+                idx = 0
+                self.best_results[0] = new_result
+            else:
+                idx = None
         early_stopping = False
         if self.early_stop_steps > 0:
-            if new_result >= self.best_results[0]:
+            if idx == 0:
                 self.early_stop_counter = 0
             else:
                 self.early_stop_counter += 1

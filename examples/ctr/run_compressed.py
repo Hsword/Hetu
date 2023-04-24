@@ -200,6 +200,8 @@ if __name__ == '__main__':
                         help="whether check validation data during training", choices=[0, 1])
     parser.add_argument("--check_test", type=int, default=1,
                         help="whether check test data during training", choices=[0, 1])
+    parser.add_argument("--early_stop_steps", type=int, default=10,
+                        help="early stopping if no improvement over steps")
     args = parser.parse_args()
 
     args.opt = args.opt.lower()
