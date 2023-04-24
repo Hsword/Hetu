@@ -11,7 +11,7 @@ from .AvgPool import avg_pool2d_op, avg_pool2d_gradient_op
 from .BatchNorm import batch_normalization_op, batch_normalization_gradient_op, batch_normalization_gradient_of_data_op, batch_normalization_gradient_of_scale_op, batch_normalization_gradient_of_bias_op
 from .Broadcast import broadcastto_op
 from .BinaryCrossEntropy import binarycrossentropy_op
-from .BinaryCrossEntropyWithLogits import binarycrossentropywithlogits_op
+from .BinaryCrossEntropyWithLogits import binarycrossentropywithlogits_op, binarycrossentropywithlogits_gradient_op
 from .Concat import concat_op, concat_gradient_op
 from .Concatenate import concatenate_op, concatenate_gradient_op
 from .Conv2d import conv2d_op, conv2d_gradient_of_data_op, conv2d_gradient_of_filter_op
@@ -248,6 +248,7 @@ __all__ = [
     'datad2h_op',
     'binarycrossentropy_op',
     'binarycrossentropywithlogits_op',
+    'binarycrossentropywithlogits_gradient_op',
     'matrix_dot_op',
     'parameterServerSparsePull_op',
     'distgcn_15d_op',

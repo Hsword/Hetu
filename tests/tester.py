@@ -64,6 +64,12 @@ class HetuTester(object):
                 input_shapes[0]), self.random_int(input_shapes[1], 0, 2)]
             self.cpu_inputs[1].dtype = np.int32
             self.gpu_inputs[1].dtype = np.int32
+        elif self.cpu_op.op_type == 'BinaryCrossEntropyWithLogitsOp':
+            input_vals = [self.random_float(
+                input_shapes[0], 0, 1), self.random_int(input_shapes[1], 0, 2).astype(np.float32)]
+        elif self.cpu_op.op_type == 'BinaryCrossEntropyWithLogitsGradientOp':
+            input_vals = [self.random_float(
+                input_shapes[0], 0, 1), self.random_int(input_shapes[1], 0, 2).astype(np.float32), self.random_float(input_shapes[2], -10, 10)]
         else:
             for dt, shape in zip(self.in_dtype, input_shapes):
                 if dt == 'f':

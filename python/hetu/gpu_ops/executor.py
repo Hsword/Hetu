@@ -565,7 +565,11 @@ class Executor(object):
         if self.comm_mode in (None, 'AllReduce'):
             # when using allreduce, users need to specify the worker whose rank equals 0 to save
             for node, value in self.config.placeholder_to_arr_map.items():
-                state_dic[node.name] = value.asnumpy()
+                if value is not None:
+                    state_dic[node.name] = value.asnumpy()
+                else:
+                    # feed node
+                    assert node.shape is None
         else:
             self.ps_comm.BarrierWorker()
             if self.config.rank == 0:

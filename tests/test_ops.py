@@ -473,6 +473,18 @@ def test_binary_step():
     tester.test([(2, 2, 2, 2)], rtol=1e-6)
 
 
+def test_bce_with_logits():
+    tester = HetuTester(ht.binarycrossentropywithlogits_op, 2)
+    tester.test([(7, 9), (7, 9)], rtol=1e-6)
+    tester.test([(256,), (256,)], rtol=1e-6)
+
+
+def test_bce_with_logits_gradient():
+    tester = HetuTester(ht.binarycrossentropywithlogits_gradient_op, 3)
+    tester.test([(7, 9), (7, 9), (7, 9)], rtol=1e-6)
+    tester.test([(256,), (256,), (256,)], rtol=1e-6)
+
+
 def test_optimizers():
     test_shapes = [
         (1000, 8),
@@ -569,4 +581,6 @@ test_reduce_norm1()
 test_reduce_sum()
 test_reduce_norm2()
 test_binary_step()
+test_bce_with_logits()
+test_bce_with_logits_gradient()
 test_optimizers()

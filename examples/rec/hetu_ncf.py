@@ -1,47 +1,56 @@
 import hetu as ht
-from hetu import init
-
-import numpy as np
+import hetu.layers as htl
 
 
-def neural_mf(user_input, item_input, y_, num_users, num_items):
-    embed_dim = 8
-    layers = [64, 32, 16, 8]
-    learning_rate = 0.01
+class NCF(object):
+    def __init__(self, user_num, item_num, factor_num, num_layers, dropout, model):
+        self.model = model
+        self.dropout = dropout
+        emb_init = ht.init.GenNormal(stddev=0.01)
+        self.embed_user_GMF = htl.Embedding(
+            user_num, factor_num, initializer=emb_init, name='user_gmf')
+        self.embed_item_GMF = htl.Embedding(
+            item_num, factor_num, initializer=emb_init, name='item_gmf')
+        self.embed_user_MLP = htl.Embedding(
+            user_num, factor_num * (2 ** (num_layers - 1)), initializer=emb_init, name='user_mlp')
+        self.embed_item_MLP = htl.Embedding(
+            item_num, factor_num * (2 ** (num_layers - 1)), initializer=emb_init, name='item_mlp')
 
-    User_Embedding = init.random_normal(
-        (num_users, embed_dim + layers[0] // 2), stddev=0.01, name="user_embed", ctx=ht.cpu(0))
-    Item_Embedding = init.random_normal(
-        (num_items, embed_dim + layers[0] // 2), stddev=0.01, name="item_embed", ctx=ht.cpu(0))
+        linear_init = ht.init.GenXavierUniform()
+        MLP_modules = []
+        for i in range(num_layers):
+            input_size = factor_num * (2 ** (num_layers - i))
+            MLP_modules.append(htl.DropOut(p=self.dropout))
+            MLP_modules.append(htl.Linear(input_size, input_size//2,
+                               activation=ht.relu_op, initializer=linear_init, name=f'dnn_{i}'))
+        self.MLP_layers = htl.Sequence(*MLP_modules)
 
-    user_latent = ht.embedding_lookup_op(
-        User_Embedding, user_input, ctx=ht.cpu(0))
-    item_latent = ht.embedding_lookup_op(
-        Item_Embedding, item_input, ctx=ht.cpu(0))
+        if self.model in ['MLP', 'GMF']:
+            predict_size = factor_num
+        else:
+            predict_size = factor_num * 2
+        pred_init = ht.init.GenGeneralXavierUniform(1, 'fan_in')
+        self.predict_layer = htl.Linear(
+            predict_size, 1, initializer=pred_init, name='pred')
 
-    mf_user_latent = ht.slice_op(user_latent, (0, 0), (-1, embed_dim))
-    mlp_user_latent = ht.slice_op(user_latent, (0, embed_dim), (-1, -1))
-    mf_item_latent = ht.slice_op(item_latent, (0, 0), (-1, embed_dim))
-    mlp_item_latent = ht.slice_op(item_latent, (0, embed_dim), (-1, -1))
+    def __call__(self, user, item):
+        if not self.model == 'MLP':
+            embed_user_GMF = self.embed_user_GMF(user)
+            embed_item_GMF = self.embed_item_GMF(item)
+            output_GMF = ht.mul_op(embed_user_GMF, embed_item_GMF)
+        if not self.model == 'GMF':
+            embed_user_MLP = self.embed_user_MLP(user)
+            embed_item_MLP = self.embed_item_MLP(item)
+            interaction = ht.concatenate_op(
+                (embed_user_MLP, embed_item_MLP), -1)
+            output_MLP = self.MLP_layers(interaction)
 
-    W1 = init.random_normal((layers[0], layers[1]), stddev=0.1, name='W1')
-    W2 = init.random_normal((layers[1], layers[2]), stddev=0.1, name='W2')
-    W3 = init.random_normal((layers[2], layers[3]), stddev=0.1, name='W3')
-    W4 = init.random_normal((embed_dim + layers[3], 1), stddev=0.1, name='W4')
+        if self.model == 'GMF':
+            concat = output_GMF
+        elif self.model == 'MLP':
+            concat = output_MLP
+        else:
+            concat = ht.concatenate_op((output_GMF, output_MLP), -1)
 
-    mf_vector = ht.mul_op(mf_user_latent, mf_item_latent)
-    mlp_vector = ht.concat_op(mlp_user_latent, mlp_item_latent, axis=1)
-    fc1 = ht.matmul_op(mlp_vector, W1)
-    relu1 = ht.relu_op(fc1)
-    fc2 = ht.matmul_op(relu1, W2)
-    relu2 = ht.relu_op(fc2)
-    fc3 = ht.matmul_op(relu2, W3)
-    relu3 = ht.relu_op(fc3)
-    concat_vector = ht.concat_op(mf_vector, relu3, axis=1)
-    y = ht.matmul_op(concat_vector, W4)
-    y = ht.sigmoid_op(y)
-    loss = ht.binarycrossentropy_op(y, y_)
-    loss = ht.reduce_mean_op(loss, [0])
-    opt = ht.optim.SGDOptimizer(learning_rate=learning_rate)
-    train_op = opt.minimize(loss)
-    return loss, y, train_op
+        prediction = self.predict_layer(concat)
+        return ht.array_reshape_op(prediction, (-1,))
