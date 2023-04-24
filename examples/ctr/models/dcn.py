@@ -43,7 +43,10 @@ class DCN_Head(CTRModel_Head):
         # here the sparse_input is the output of embedding layer
         sparse_input = ht.array_reshape_op(
             sparse_input, (-1, self.sparse_slot*self.embed_dim))
-        x = ht.concat_op(sparse_input, dense_input, axis=1)
+        if dense_input is None:
+            x = sparse_input
+        else:
+            x = ht.concat_op(sparse_input, dense_input, axis=1)
         cross_output = self.build_cross_layers(x)
         dnn_output = self.dnn_layers(x)
         x = ht.concat_op(cross_output, dnn_output, axis=1)

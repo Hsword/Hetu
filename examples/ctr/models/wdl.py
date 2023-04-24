@@ -20,7 +20,10 @@ class WDL_Head(CTRModel_Head):
 
     def __call__(self, sparse_input, dense_input, label):
         sparse_input = self.reshape(sparse_input)
-        all_input = ht.concat_op(sparse_input, dense_input, axis=1)
+        if dense_input is None:
+            all_input = sparse_input
+        else:
+            all_input = ht.concat_op(sparse_input, dense_input, axis=1)
         deep_logit = self.deep_fc(all_input)
         wide_logit = self.wide_fc(all_input)
         logit = ht.add_op(deep_logit, wide_logit)

@@ -5,6 +5,7 @@ from .base import CTRModel_Head
 
 class DeepFM_Head(CTRModel_Head):
     # DeepFM model without embedding layer
+    # TODO: implement the 1st order embedding in the model, rather than in the embedding
     def __init__(
         self,
         embed_dim=16,
@@ -26,7 +27,10 @@ class DeepFM_Head(CTRModel_Head):
         # 1st order output
         sparse_1dim_input = ht.slice_op(sparse_input, [0, 0, 0], [-1, -1, 1])
         fm_sparse_part = ht.reduce_sum_op(sparse_1dim_input, axes=1)
-        fm_dense_part = self.fm_weight(dense_input)
+        if dense_input is not None:
+            fm_dense_part = self.fm_weight(dense_input)
+        else:
+            fm_dense_part = None
 
         # 2nd order output
         sparse_2dim_input = ht.slice_op(sparse_input, [0, 0, 1], [-1, -1, -1])
@@ -45,7 +49,10 @@ class DeepFM_Head(CTRModel_Head):
             sparse_2dim_input, (-1, self.sparse_slot*(self.embed_dim-1)))
         dnn_output = self.dnn_layers(flatten)
 
-        y = ht.sum_op([fm_dense_part, fm_sparse_part,
-                      sparse_2dim_part, dnn_output])
+        if fm_dense_part is not None:
+            y = ht.sum_op([fm_dense_part, fm_sparse_part,
+                           sparse_2dim_part, dnn_output])
+        else:
+            y = ht.sum_op([fm_sparse_part, sparse_2dim_part, dnn_output])
 
         return self.output(y, label)
