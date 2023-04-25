@@ -119,6 +119,7 @@ def worker(args):
         embedding_args = {
             'digit': 16,
             'init_scale': 0.01,
+            'scale_lr': 2e-5,
         }
     else:
         raise NotImplementedError

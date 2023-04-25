@@ -1,6 +1,7 @@
 from .base import EmbeddingTrainer
 from ..layers import ALPTEmbedding
 from ..gpu_links import reorder_into_lookup, assign_alpt_embedding
+from ..optimizer import AdamOptimizer
 import math
 
 
@@ -68,8 +69,13 @@ class ALPTEmbTrainer(EmbeddingTrainer):
                       (2 ** (self.embed_layer.digit-1) - 1))
         scale_dedupgrad = mul_byconst_op(
             scale_dedupgrad, scale_factor, ctx=self.ctx)
-        scale_update = self.opt.sparse_opt_op_type(
-            self.opt, scale, scale_unique, scale_deduplookup, scale_dedupgrad)
+        scale_opt = type(self.opt)(
+            learning_rate=self.embedding_args['scale_lr'])
+        if hasattr(self.opt, 'betatss'):
+            scale_opt.betatss = self.opt.betatss
+            scale_opt.betats_update_ops = self.opt.betats_update_ops
+        scale_update = scale_opt.sparse_opt_op_type(
+            scale_opt, scale, scale_unique, scale_deduplookup, scale_dedupgrad)
         scale_assign = assign_with_indexedslices_op(
             scale, scale_unique, scale_update)
         eval_nodes = {
