@@ -1,7 +1,7 @@
 name: hetu
 channels:
-  - anaconda
   - conda-forge
+  - anaconda
   - defaults
 dependencies:
   - _libgcc_mutex=0.1=main
@@ -12,12 +12,13 @@ dependencies:
   - botocore=1.29.99=pyhd8ed1ab_0
   - brotlipy=0.7.0=py37h5e8e339_1001
   - bzip2=1.0.8=h7b6447c_0
-  - ca-certificates=2023.01.10=h06a4308_0
-  - certifi=2022.12.7=py37h06a4308_0
+  - ca-certificates=2022.12.7=ha878542_0
+  - certifi=2022.12.7=pyhd8ed1ab_0
   - cffi=1.14.6=py37hc58025e_0
   - charset-normalizer=2.0.4=pyhd3eb1b0_0
   - cmake=3.18.2=ha30ef3c_0
   - cryptography=3.4.7=py37h5d9358c_0
+  - cub=1.16.0=ha770c72_0
   - cudatoolkit=10.1.243=h6bb024c_0
   - expat=2.4.1=h2531618_2
   - idna=3.4=pyhd8ed1ab_0
@@ -53,7 +54,7 @@ dependencies:
   - onnx=1.9.0=py37h284874a_0
   - onnxruntime=1.7.2=py37he8cb6d3_1
   - openmpi=4.0.3=hdf1f1ad_1
-  - openssl=1.1.1s=h7f8727e_0
+  - openssl=1.1.1t=h7f8727e_0
   - pandas=1.2.5=py37h295c915_0
   - paramiko=2.7.2=pyh9f0ad1d_0
   - pip=21.1.3=py37h06a4308_0
@@ -81,6 +82,7 @@ dependencies:
   - six=1.16.0=pyhd3eb1b0_0
   - sqlite=3.36.0=hc218d9a_0
   - threadpoolctl=2.2.0=pyhb85f177_0
+  - thrust=1.16.0=ha770c72_0
   - tk=8.6.10=hbc83047_0
   - tqdm=4.61.2=pyhd3eb1b0_1
   - typing-extensions=3.10.0.0=hd8ed1ab_0
@@ -93,5 +95,5 @@ dependencies:
   - zlib=1.2.11=h7b6447c_3
   - zstd=1.4.9=haebb681_0
   - pip:
-    - cloudpickle==1.6.0
-    - wget==3.2
+      - cloudpickle==1.6.0
+      - wget==3.2
