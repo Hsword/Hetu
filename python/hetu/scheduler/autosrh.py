@@ -92,6 +92,8 @@ class AutoSrhTrainer(SwitchInferenceTrainer):
                 self.embed_layer.embedding_table = warmed_up_embeddings
             eval_nodes = self.get_eval_nodes()
             self.init_executor(eval_nodes)
+            self.executor.subexecutor['alpha'].inference = False
+            self.executor.subexecutor['embed'].inference = False
 
             if meta is None or meta['args']['stage'] == 2:
                 self.load_into_executor(meta)
