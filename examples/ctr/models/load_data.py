@@ -22,7 +22,7 @@ def get_dataset(dataset):
 class CTRDataset(object):
     def __init__(self, path):
         self.path = path
-        self.raw_path = osp.join(path, 'train.csv')
+        self.raw_path = self.join('train.csv')
         self.phases = ['train', 'val', 'test']
         self.keys = ['dense', 'sparse', 'label']
         self.dtypes = [np.float32, np.int32, np.int32]
@@ -44,6 +44,12 @@ class CTRDataset(object):
     def num_embed_separate(self):
         raise NotImplementedError
 
+    def all_exists(self, paths):
+        return all([osp.exists(pa) for pa in paths])
+
+    def join(self, fpath):
+        return osp.join(self.path, fpath)
+
     def download(self, path):
         raise NotImplementedError
 
@@ -51,9 +57,9 @@ class CTRDataset(object):
         raise NotImplementedError
 
     def read_csv(self, nrows=-1):
-        path = osp.join(self.path, 'train.csv')
+        path = self.raw_path
         if not osp.exists(path):
-            self.download(self.path)
+            self.download(path)
         if nrows > 0:
             df = pd.read_csv(path, nrows=nrows)
         else:
@@ -163,7 +169,7 @@ class CTRDataset(object):
     def get_whole_frequency_split(self, train_data, top_percent):
         # now the filename is not correlated to top percent;
         # if modify top percent, MUST modify the fpath!
-        freq_path = osp.join(self.path, 'freq_split.bin')
+        freq_path = self.join('freq_split.bin')
         result = self.get_single_frequency_split(
             train_data, self.num_embed, top_percent, freq_path)
         return result
@@ -171,7 +177,7 @@ class CTRDataset(object):
     def get_separate_frequency_split(self, train_data, top_percent):
         # now the filename is not correlated to top percent;
         # if modify top percent, MUST modify the fpath!
-        separate_dir = osp.join(self.path, 'freq_split_separate')
+        separate_dir = self.join('freq_split_separate')
         os.makedirs(separate_dir, exist_ok=True)
         freq_paths = [
             osp.join(separate_dir, f'fields{i}.bin') for i in range(self.num_sparse)]
@@ -195,7 +201,7 @@ class CTRDataset(object):
     def get_whole_remap(self, train_data, top_percent):
         # now the filename is not correlated to top percent;
         # if modify top percent, MUST modify the fpath!
-        remap_path = osp.join(self.path, f'freq_remap{top_percent}.bin')
+        remap_path = self.join(f'freq_remap{top_percent}.bin')
         if osp.exists(remap_path):
             remap_indices = np.fromfile(remap_path, dtype=np.int32)
         else:
@@ -207,11 +213,11 @@ class CTRDataset(object):
     def get_separate_remap(self, train_data, top_percent):
         # now the filename is not correlated to top percent;
         # if modify top percent, MUST modify the fpath!
-        separate_dir = osp.join(self.path, 'freq_split_separate')
+        separate_dir = self.join('freq_split_separate')
         os.makedirs(separate_dir, exist_ok=True)
         remap_path = [
             osp.join(separate_dir, f'remap_fields{i}_{top_percent}.bin') for i in range(self.num_sparse)]
-        if all([osp.exists(rp) for rp in remap_path]):
+        if self.all_exists(remap_path):
             remap_indices = [np.fromfile(rp, dtype=np.int32)
                              for rp in remap_path]
         else:
@@ -224,11 +230,11 @@ class CTRDataset(object):
         return remap_indices
 
     def get_whole_frequency_grouping(self, train_data, nsplit):
-        cache_path = osp.join(self.path, 'freq_grouping.bin')
+        cache_path = self.join('freq_grouping.bin')
         if osp.exists(cache_path):
             grouping = np.fromfile(cache_path, dtype=np.int32)
         else:
-            counter_path = osp.join(self.path, 'counter_freq_split.bin')
+            counter_path = self.join('counter_freq_split.bin')
             counter = self.get_frequency_counter(
                 train_data, self.num_embed, counter_path)
             indices = np.argsort(counter)
@@ -270,20 +276,18 @@ class CTRDataset(object):
         return grouping
 
     def process_all_data_by_day(self, separate_fields=False):
-        path = self.path
         all_data_path = [
-            [osp.join(path, f'kaggle_processed_{ph}_{k}.bin') for k in self.keys] for ph in self.phases]
+            [self.join(f'kaggle_processed_{ph}_{k}.bin') for k in self.keys] for ph in self.phases]
 
-        data_ready = all([osp.exists(p)
-                         for value in all_data_path for p in value])
+        data_ready = self.all_exists(sum(all_data_path, []))
 
         if not data_ready:
             ckeys = self.keys + ['count']
             cdtypes = self.dtypes + [np.int32]
             cshapes = self.shapes + [(-1,)]
             pro_paths = [
-                osp.join(path, f'kaggle_processed_{k}.bin') for k in ckeys]
-            pro_data_ready = all([osp.exists(path) for path in pro_paths])
+                self.join(f'kaggle_processed_{k}.bin') for k in ckeys]
+            pro_data_ready = self.all_exists(pro_paths)
 
             if not pro_data_ready:
                 print("Reading raw data={}".format(self.raw_path))
@@ -306,7 +310,7 @@ class CTRDataset(object):
                     d.tofile(p)
         else:
             count = np.fromfile(
-                osp.join(path, f'kaggle_processed_count.bin'), dtype=np.int32)
+                self.join(f'kaggle_processed_count.bin'), dtype=np.int32)
             counts = self.accum_to_count(count)
         assert counts == self.num_embed_separate
 
@@ -317,7 +321,7 @@ class CTRDataset(object):
                 shape) for p, dtype, shape in zip(all_data_path[index], self.dtypes, self.shapes)]
             if separate_fields:
                 memmap_data[sparse_index] = self.get_separate_fields(
-                    osp.join(path, f'kaggle_processed_{phase}_sparse_sep.bin'), memmap_data[sparse_index], counts)
+                    self.join(f'kaggle_processed_{phase}_sparse_sep.bin'), memmap_data[sparse_index], counts)
             return memmap_data
 
         training_data = get_data('train')
