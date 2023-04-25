@@ -1,7 +1,7 @@
 from .switchinference import SwitchInferenceTrainer
-from ..layers import AutoSrhEmbedding
+from ..layers import AutoSrhEmbedding, AutoSrhRetrainEmbedding
 from ..ndarray import empty
-from ..gpu_links import num_less_than_grouping_threshold, set_less_than_grouping_threshold
+from ..gpu_links import multiply_grouping_alpha, num_less_than, set_mask_less_than
 from ..optimizer import SGDOptimizer
 import numpy as np
 
@@ -41,6 +41,17 @@ class AutoSrhTrainer(SwitchInferenceTrainer):
             self.grouping_indices,
             self.form,
             initializer=self.initializer,
+            name=self.sparse_name,
+            ctx=self.ectx,
+        )
+
+    def get_embed_layer_retrain(self, embedding_table, mask):
+        return AutoSrhRetrainEmbedding(
+            self.num_embed,
+            self.embedding_dim,
+            embedding_table,
+            mask,
+            self.form,
             name=self.sparse_name,
             ctx=self.ectx,
         )
@@ -87,56 +98,58 @@ class AutoSrhTrainer(SwitchInferenceTrainer):
             self.prepare_path_for_retrain('main')
             self.init_ckpts()
             self.run_once()
+            # prune and test
+            stream = self.executor.config.comp_stream
+            stream.sync()
             self.load_best_ckpt()
+            self.executor.return_tensor_values()
+            workspace = empty((self.num_embed, self.embedding_dim),
+                              ctx=self.ectx, dtype=np.int32)
+            prune_rate = empty((1,), ctx=self.ectx)
+            embed_arr = self.embed_layer.embedding_table.tensor_value
+            grouping_arr = self.embed_layer.group_indices.tensor_value
+            alpha_arr = self.embed_layer.alpha.tensor_value
+            multiply_grouping_alpha(embed_arr, grouping_arr, alpha_arr, stream)
+            l, r = 0., 100.
+            cnt = 0
+            while l < r:
+                cnt += 1
+                mid = (l + r) / 2
+                num_less_than(
+                    embed_arr, workspace, prune_rate, mid, None, stream)
+                stream.sync()
+                sparse_items = prune_rate.asnumpy()[0]
+                sparse_rate = sparse_items / self.num_embed / self.embedding_dim
+                if abs(sparse_rate - self.prune_rate) < 1e-3 * self.compress_rate:
+                    break
+                elif sparse_rate > self.prune_rate:
+                    r = mid
+                else:
+                    l = mid
+                if cnt > 100:
+                    break
+            self.log_func(
+                f'Final prune rate: {sparse_rate} (target {self.prune_rate}); final threshold: {mid}')
+            set_mask_less_than(embed_arr, workspace, mid, stream)
         else:
-            self.embed_layer = self.get_embed_layer()
-            eval_nodes = self.get_eval_nodes()
-            self.init_executor(eval_nodes)
-            self.load_into_executor(meta)
+            embed_arr = meta['state_dict'][self.sparse_name]
+            workspace = meta['state_dict'][f'{self.sparse_name}_mask']
 
         # re-train
         self.args['stage'] = 3
         self.log_func('Start retraining...')
         self.prepare_path_for_retrain('retrain')
+        self.embed_layer = self.get_embed_layer_retrain(embed_arr, workspace)
+        eval_nodes = super().get_eval_nodes()
+        self.init_executor(eval_nodes)
         self.init_ckpts()
         self.train_step = super().train_step
         self.run_once()
-
-        # prune and test
         stream = self.executor.config.comp_stream
         stream.sync()
         self.load_best_ckpt()
         self.executor.return_tensor_values()
-        workspace = empty((self.num_embed, self.embedding_dim),
-                          ctx=self.ectx, dtype=np.int32)
-        prune_rate = empty((1,), ctx=self.ectx)
-        embed_arr = self.embed_layer.embedding_table.tensor_value
-        grouping_arr = self.embed_layer.group_indices.tensor_value
-        alpha_arr = self.embed_layer.alpha.tensor_value
-        l, r = 0., 1.
-        cnt = 0
-        while l < r:
-            cnt += 1
-            mid = (l + r) / 2
-            num_less_than_grouping_threshold(
-                workspace, prune_rate, grouping_arr, alpha_arr, mid, stream)
-            stream.sync()
-            sparse_items = prune_rate.asnumpy()[0]
-            sparse_rate = sparse_items / self.num_embed / self.embedding_dim
-            if abs(sparse_rate - self.prune_rate) < 0.0001:
-                break
-            elif sparse_rate > self.prune_rate:
-                r = mid
-            else:
-                l = mid
-            if cnt > 100:
-                break
-        self.log_func(
-            f'Final prune rate: {sparse_rate} (target {self.prune_rate}); final threshold of alpha: {mid}')
-        del workspace
-        del prune_rate
-        set_less_than_grouping_threshold(
-            embed_arr, grouping_arr, alpha_arr, mid, stream)
+
         self.check_inference()
 
     def get_eval_nodes(self):

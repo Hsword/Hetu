@@ -784,6 +784,25 @@ class AutoSrhEmbedding(SparseEmbedding):
             return ht.mul_op(embeddings, ht.reshape_to_op(alphas, embeddings))
 
 
+class AutoSrhRetrainEmbedding(SparseEmbedding):
+    def __init__(self, num_embeddings, embedding_dim, embedding_table, mask, form, name='embedding', ctx=None):
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.name = name
+        self.ctx = ctx
+        self.embedding_table = ht.placeholder_op(
+            value=embedding_table, name=self.name, ctx=ctx)
+        self.mask = ht.placeholder_op(
+            f'{name}_mask', value=mask, trainable=False, dtype=np.int32, ctx=self.ctx)
+        self.form = form
+
+    def __call__(self, x):
+        with ht.context(self.ctx):
+            lookups = ht.embedding_lookup_op(self.embedding_table, x)
+            lookup_masks = ht.embedding_lookup_op(self.mask, x)
+            return ht.mask_op(lookups, lookup_masks)
+
+
 class QuantizedEmbedding(Embedding):
     def __init__(self, num_embeddings, embedding_dim, digit, scale=0.01, middle=0, use_qparam=False, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         assert digit in (8, 16)

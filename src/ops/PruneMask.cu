@@ -53,6 +53,37 @@ int DLGpuSetLessThan(const DLArrayHandle arr, float threshold,
     return 0;
 }
 
+__global__ void set_mask_less_const_kernel(float *arr, int *mask,
+                                           float threshold, size_t size) {
+    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
+    if (ind >= size)
+        return;
+    if (abs(arr[ind]) < threshold) {
+        arr[ind] = 0.;
+        mask[ind] = 0;
+    } else {
+        mask[ind] = 1;
+    }
+}
+
+int DLGpuSetMaskLessThan(DLArrayHandle arr, DLArrayHandle mask, float threshold,
+                         DLStreamHandle stream_handle = NULL) {
+    size_t size = ArrSize(arr);
+    float *arr_data = (float *)arr->data;
+    int *mask_data = (int *)mask->data;
+    dim3 blocks;
+    dim3 threads;
+    ThreadBlock1D(threads, blocks, size);
+    if (stream_handle)
+        set_mask_less_const_kernel<<<blocks, threads, 0,
+                                     *(cudaStream_t *)stream_handle->handle>>>(
+            arr_data, mask_data, threshold, size);
+    else
+        set_mask_less_const_kernel<<<blocks, threads>>>(arr_data, mask_data,
+                                                        threshold, size);
+    return 0;
+}
+
 __global__ void get_larger_than_kernel_feature_dimension(const float *arr,
                                                          const float *threshold,
                                                          int *mask,
@@ -201,56 +232,20 @@ int DLGpuNumLessThanTensorThreshold(const DLArrayHandle input,
     return DLGpuReduceSum(middle, output, axes, num_ax, stream_handle);
 }
 
-__global__ void less_grouping_kernel(float *output, const int *grouping,
-                                     const float *alpha, float threshold,
-                                     size_t size, size_t dim) {
+__global__ void multiple_grouping_alpha_kernel(float *arr, const int *grouping,
+                                               const float *alpha, size_t size,
+                                               size_t dim) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (ind >= size)
         return;
     int group_ind = grouping[ind / dim];
     float cur_alpha = alpha[group_ind * dim + ind % dim];
-    output[ind] = (cur_alpha < threshold);
+    arr[ind] *= cur_alpha;
 }
 
-int DLGpuNumLessThanGroupingThreshold(DLArrayHandle middle,
-                                      DLArrayHandle output,
-                                      const DLArrayHandle grouping,
-                                      const DLArrayHandle alpha,
-                                      float threshold, int *axes, int num_ax,
-                                      DLStreamHandle stream_handle = NULL) {
-    assert(middle->ndim == 2);
-    size_t size = ArrSize(middle);
-    size_t dim = middle->shape[1];
-    float *middle_data = (float *)middle->data;
-    const int *grouping_data = (const int *)grouping->data;
-    const float *alpha_data = (const float *)alpha->data;
-    dim3 blocks;
-    dim3 threads;
-    ThreadBlock1D(threads, blocks, size);
-    assert(stream_handle != NULL);
-    cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
-    less_grouping_kernel<<<blocks, threads, 0, stream>>>(
-        middle_data, grouping_data, alpha_data, threshold, size, dim);
-    return DLGpuReduceSum(middle, output, axes, num_ax, stream_handle);
-}
-
-__global__ void set_less_grouping_kernel(float *arr, const int *grouping,
-                                         const float *alpha, float threshold,
-                                         size_t size, size_t dim) {
-    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= size)
-        return;
-    int group_ind = grouping[ind / dim];
-    float cur_alpha = alpha[group_ind * dim + ind % dim];
-    if (cur_alpha < threshold)
-        arr[ind] = 0.;
-}
-
-int DLGpuNumSetLessThanGroupingThreshold(DLArrayHandle arr,
-                                         const DLArrayHandle grouping,
-                                         const DLArrayHandle alpha,
-                                         float threshold,
-                                         DLStreamHandle stream_handle = NULL) {
+int DLGpuMultiplyGroupingAlpha(DLArrayHandle arr, const DLArrayHandle grouping,
+                               const DLArrayHandle alpha,
+                               DLStreamHandle stream_handle = NULL) {
     assert(arr->ndim == 2);
     size_t size = ArrSize(arr);
     size_t dim = arr->shape[1];
@@ -262,7 +257,7 @@ int DLGpuNumSetLessThanGroupingThreshold(DLArrayHandle arr,
     ThreadBlock1D(threads, blocks, size);
     assert(stream_handle != NULL);
     cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
-    set_less_grouping_kernel<<<blocks, threads, 0, stream>>>(
-        arr_data, grouping_data, alpha_data, threshold, size, dim);
+    multiple_grouping_alpha_kernel<<<blocks, threads, 0, stream>>>(
+        arr_data, grouping_data, alpha_data, size, dim);
     return 0;
 }

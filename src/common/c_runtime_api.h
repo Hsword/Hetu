@@ -1260,6 +1260,8 @@ HETUSYS_EXTERN_C {
                          int num_ax, DLStreamHandle stream_handle);
     int DLGpuSetLessThan(const DLArrayHandle arr, float threshold,
                          DLStreamHandle stream_handle);
+    int DLGpuSetMaskLessThan(DLArrayHandle arr, DLArrayHandle mask,
+                             float threshold, DLStreamHandle stream_handle);
     int DLGpuGetLargerThan(const DLArrayHandle input,
                            const DLArrayHandle threshold, DLArrayHandle mask,
                            DLStreamHandle stream_handle);
@@ -1267,14 +1269,9 @@ HETUSYS_EXTERN_C {
         const DLArrayHandle input, DLArrayHandle middle, DLArrayHandle output,
         const DLArrayHandle threshold, int *axes, int num_ax,
         DLStreamHandle stream_handle);
-    int DLGpuNumLessThanGroupingThreshold(
-        DLArrayHandle middle, DLArrayHandle output,
-        const DLArrayHandle grouping, const DLArrayHandle alpha,
-        float threshold, int *axes, int num_ax, DLStreamHandle stream_handle);
-    int DLGpuNumSetLessThanGroupingThreshold(
+    int DLGpuMultiplyGroupingAlpha(
         DLArrayHandle arr, const DLArrayHandle grouping,
-        const DLArrayHandle alpha, float threshold,
-        DLStreamHandle stream_handle);
+        const DLArrayHandle alpha, DLStreamHandle stream_handle);
 
     int DLGpuDequantize(const DLArrayHandle input, DLArrayHandle output,
                         int digit, float scale, float minele,
