@@ -41,6 +41,8 @@ class BroadcastToOp(Op):
         keepdims = [False] * diff
         input_shape = [1] * diff + input_shape
         for i in range(output_ndim):
+            if isinstance(output_shape[i], (np.int32, np.int64)):
+                output_shape[i] = output_shape[i].item()
             assert output_shape[i] > 0 and isinstance(output_shape[i], int)
             assert input_shape[i] == 1 or input_shape[i] == output_shape[i]
             if i >= diff and input_shape[i] == 1 and output_shape[i] > 1:
