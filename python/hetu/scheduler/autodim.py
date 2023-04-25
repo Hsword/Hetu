@@ -40,17 +40,24 @@ class AutoDimTrainer(EmbeddingTrainer):
             self.embed_layer = self.get_embed_layer()
             self.alpha = self.embed_layer.alpha
             self.log_func(f'Embedding layer: {self.embed_layer}')
-            eval_nodes = self.get_eval_nodes()
+            if self.embedding_args['ignore_second']:
+                eval_nodes = self.get_eval_nodes_without_second_order()
+            else:
+                eval_nodes = self.get_eval_nodes()
             self.lookups = self.embed_layer.lookups
             self.init_executor(eval_nodes)
             self.load_into_executor(meta)
 
-            self.executor.subexecutor['alpha'].inference = False
-            self.executor.subexecutor['lookups'].inference = False
-            self.executor.subexecutor['allgrads'].inference = False
-            self.get_arch_params(self.executor.config.placeholder_to_arr_map)
-
-            self.train_step = self.first_stage_train_step
+            if self.embedding_args['ignore_second']:
+                self.executor.subexecutor['alpha'].inference = True
+                self.train_step = self.first_stage_train_step_without_second_order
+            else:
+                self.executor.subexecutor['alpha'].inference = False
+                self.executor.subexecutor['lookups'].inference = False
+                self.executor.subexecutor['allgrads'].inference = False
+                self.get_arch_params(
+                    self.executor.config.placeholder_to_arr_map)
+                self.train_step = self.first_stage_train_step
 
             self.run_once()
 
@@ -61,21 +68,38 @@ class AutoDimTrainer(EmbeddingTrainer):
             dim_choices = self.make_retrain(self.executor.config.comp_stream)
             self.args['dim_choices'] = dim_choices
 
-            self.reset_for_retrain()
-
+            if self.embedding_args['reset_retrain']:
+                self.reset_for_retrain()
+                init_embed = None
+            else:
+                stream = self.stream
+                ori_embed_tables = {k: v.tensor_value for k,
+                                    v in self.embed_layer.embedding_tables.items()}
+                init_embed = []
+                feature_offset = 0
+                for nemb, ndim in zip(self.num_embed_separate, dim_choices):
+                    cur_init_embed = empty((nemb, ndim), ctx=self.ectx)
+                    cur_init_embed._async_copyfrom_offset(
+                        ori_embed_tables[ndim], stream, feature_offset * ndim, 0, nemb * ndim)
+                    init_embed.append(cur_init_embed)
+                    feature_offset += nemb
+                stream.sync()
+                del self.executor
+                del self.embed_layer
         else:
             dim_choices = meta['args']['dim_choices']
+            init_embed = None
 
         self.set_use_multi(1)
         self.retraining = True
         self.args['stage'] = 2
         self.log_func('Switch to re-training stage!!!')
-        # TODO: test re-train from first stage, if current not good enough
         # re-init save topk
         self.prepare_path_for_retrain()
         self.init_ckpts()
         self.data_ops = self.get_data()
-        self.embed_layer = self.get_embed_layer_retrain(dim_choices)
+        self.embed_layer = self.get_embed_layer_retrain(
+            dim_choices, init_embed)
         self.log_func(f'New embedding layer: {self.embed_layer}')
         eval_nodes = super().get_eval_nodes()
 
@@ -91,11 +115,17 @@ class AutoDimTrainer(EmbeddingTrainer):
 
     @property
     def all_train_names(self):
-        return (self.train_name, 'alpha', 'lookups')
+        if self.embedding_args['ignore_second']:
+            return (self.train_name,)
+        else:
+            return (self.train_name, 'alpha', 'lookups')
 
     @property
     def all_validate_names(self):
-        return (self.validate_name, 'allgrads')
+        if self.embedding_args['ignore_second']:
+            return (self.validate_name, 'alpha')
+        else:
+            return (self.validate_name, 'allgrads')
 
     def get_arch_params(self, var2arr):
         copy_params = {}
@@ -204,6 +234,12 @@ class AutoDimTrainer(EmbeddingTrainer):
             self.train_name, convert_to_numpy_ret_vals=True, inference=True)  # train data
         return results[:3]
 
+    def first_stage_train_step_without_second_order(self):
+        results = self.executor.run(
+            self.train_name, convert_to_numpy_ret_vals=True)
+        self.executor.run('alpha')
+        return results[:3]
+
     def test(self):
         assert self.phase == 'test' and self.load_ckpt is not None, 'Checkpoint should be given in testing.'
         meta = self.try_load_ckpt()
@@ -251,13 +287,14 @@ class AutoDimTrainer(EmbeddingTrainer):
             ctx=self.ectx,
         )
 
-    def get_embed_layer_retrain(self, dim_choices):
+    def get_embed_layer_retrain(self, dim_choices, init_embed=None):
         emb = []
         for i, (nemb, cdim) in enumerate(zip(self.num_embed_separate, dim_choices)):
             emb.append(AutoDimRetrainEmbedding(
                 nemb,
                 cdim,
                 self.embedding_dim,
+                embedding_table=init_embed[i] if init_embed is not None else None,
                 initializer=self.initializer,
                 name=f'AutoDimNew_{i}',
                 ctx=self.ectx,
@@ -311,6 +348,29 @@ class AutoDimTrainer(EmbeddingTrainer):
             self.test_name: [loss, prediction, y_],
             'allgrads': [dalpha_op] + dup_dembed_ops + dembed_ops + dparam_ops,
             'alpha': [alpha_grad],
+        }
+
+        return eval_nodes
+
+    def get_eval_nodes_without_second_order(self):
+        embed_input, dense_input, y_ = self.data_ops
+        loss, prediction = self.model(
+            self.embed_layer(embed_input), dense_input, y_)
+        train_op = self.opt.minimize(loss)
+        param_opts = []
+        alpha_opt = None
+        for op in train_op:
+            if op.inputs[0] is self.alpha:
+                alpha_opt = op
+            else:
+                param_opts.append(op)
+        assert alpha_opt is not None
+
+        eval_nodes = {
+            self.train_name: [loss, prediction, y_, param_opts],
+            self.validate_name: [loss, prediction, y_],
+            self.test_name: [loss, prediction, y_],
+            'alpha': [alpha_opt],
         }
 
         return eval_nodes

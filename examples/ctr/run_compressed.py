@@ -74,6 +74,8 @@ def worker(args):
         embedding_args = {
             'alpha_lr': 0.001,
             'r': 1e-2,
+            'reset_retrain': 1,  # 0 or 1
+            'ignore_second': 0,  # 0 or 1
         }
     elif args.method == 'optembed':
         embed_layer_type = htl.OptEmbedding
