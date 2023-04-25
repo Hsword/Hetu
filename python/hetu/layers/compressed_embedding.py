@@ -410,7 +410,8 @@ class AdaptiveEmbedding(Embedding):
             low_freq_inds = ht.mod_hash_positive_op(
                 low_freq_inds, self.num_rare_emb)
             low_freq = ht.embedding_lookup_op(self.rare_emb, low_freq_inds)
-            return ht.add_op(high_freq, low_freq)
+            result = ht.add_op(high_freq, low_freq)
+            return ht.array_reshape_op(result, (-1, self.embedding_dim))
 
     def __repr__(self):
         return f'{self.name}({self.num_freq_emb},{self.num_rare_emb},{self.embedding_dim})'
