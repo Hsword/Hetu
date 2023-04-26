@@ -1,11 +1,34 @@
 from __future__ import absolute_import
-import os
 import numpy as np
-import multiprocessing as mp
 from collections import Iterable
 
 from . import ndarray
+from .random import get_np_rand
 from .gpu_ops.Node import Op
+
+
+class BatchIndices(object):
+    def __init__(self, batch_num, need_shuffle=False):
+        self.batch_num = batch_num
+        self.all_batch_indices = np.arange(self.batch_num)
+        self.last_key = len(self.all_batch_indices) - 1
+        self.need_shuffle = need_shuffle
+
+    def shuffle(self):
+        nprs = get_np_rand(1)
+        nprs.shuffle(self.all_batch_indices)
+
+    def assert_attr(self, dataloader):
+        assert self.batch_num == dataloader.batch_num
+        assert self.need_shuffle == dataloader.shuffle
+
+    def __getitem__(self, key):
+        if key == 0 and self.last_key != key:
+            assert self.last_key == len(self.all_batch_indices) - 1
+            if self.need_shuffle:
+                self.shuffle()
+        self.last_key = key
+        return self.all_batch_indices[key]
 
 
 class RawData(object):
@@ -87,7 +110,7 @@ class RawData(object):
 
 # Multi-Process not useful now, since we don't have memory to CPU bottleneck
 class Dataloader(object):
-    def __init__(self, raw_data, batch_size, name='default', func=None, batch_func=None, drop_last=False, offset=0, dtype=np.float32):
+    def __init__(self, raw_data, batch_size, name='default', func=None, batch_func=None, shuffle=False, drop_last=True, offset=0, dtype=np.float32):
         self.func = func if func else lambda x: x
         self.dtype = dtype
         self.raw_data = RawData(raw_data, self.dtype, self.func)
@@ -96,6 +119,7 @@ class Dataloader(object):
         if batch_func is None:
             def batch_func(x): return x
         self.batch_func = batch_func
+        self.shuffle = shuffle
         if isinstance(name, str):
             self.name = name
         else:
@@ -140,6 +164,7 @@ class Dataloader(object):
         self.set_slices()
 
     def _get_arr(self, batchind):
+        batchind = self.all_batch_indices[batchind]
         index = batchind * self.batch_size
         res = self.raw_data[index:index+self.batch_size]
         if res.shape[0] != self.batch_size:
@@ -303,11 +328,19 @@ class DataloaderOp(Op):
             min_dp_nrank = config.min_dp_nrank
         else:
             min_dp_nrank = None
+        if not hasattr(config, 'dataloader_states'):
+            config.dataloader_states = {}
         for d in self.dataloaders.values():
             if min_dp_nrank is not None:
                 # now we enforce stages with dataloaders to have the minimum data parallel degree
                 assert d.dp_nrank == min_dp_nrank
             d.init_states()
+            if d.name not in config.dataloader_states:
+                config.dataloader_states[d.name] = BatchIndices(
+                    d.batch_num, need_shuffle=d.shuffle)
+            else:
+                config.dataloader_states[d.name].assert_attr(d)
+            d.all_batch_indices = config.dataloader_states[d.name]
 
 
 def dataloader_op(dataloaders, dtype=np.float32):

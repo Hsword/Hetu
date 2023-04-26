@@ -140,6 +140,8 @@ class EmbeddingTrainer(object):
         return self.validate_name
 
     def make_dataloader_op(self, tr_data, va_data, te_data, dtype=np.float32):
+        # train_dataloader = Dataloader(
+        #     tr_data, self.batch_size, self.all_train_names, dtype=dtype, shuffle=True)
         train_dataloader = Dataloader(
             tr_data, self.batch_size, self.all_train_names, dtype=dtype)
         valid_dataloader = Dataloader(

@@ -161,6 +161,7 @@ class HetuConfig(object):
         'ps_map',
         'infer_ps_map',
         'dataloader_ops',
+        'dataloader_states',
         'use_sparse_pull',
         'cstable_policy',
         'inference',
