@@ -3,6 +3,7 @@ import os.path as osp
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+import pickle
 
 default_data_path = osp.join(
     osp.split(osp.abspath(__file__))[0], '../datasets')
@@ -454,6 +455,102 @@ class AvazuDataset(CTRDataset):
         print("Randomized indices across days ...")
         indices = [train_indices, val_indices, test_indices]
         return indices
+
+
+class CriteoTBDataset(CriteoDataset):
+    def __init__(self, path):
+        # the path should be given
+        self.path = path
+        self.days = 24
+        self.phases = ['train', 'val', 'test']
+        self.keys = ['dense', 'sparse', 'label']
+        self.dtypes = [np.float32, np.int32, np.int32]
+        self.shapes = [(-1, self.num_dense), (-1, self.num_sparse), (-1,)]
+
+    @property
+    def num_embed(self):
+        # TODO: fill this
+        ...
+
+    @property
+    def num_embed_separate(self):
+        # TODO: fill this
+        ...
+
+    def read_from_raw(self):
+        for i in range(self.days):
+            sparse = pd.read_csv(self.join(f'day_{i}'), header=None, sep='\t')
+            labels = np.array(sparse[0], dtype=np.int32)
+            labels.tofile(self.join(f'label_{i}.bin'))
+            del labels
+            dense = sparse[range(1, 14)]
+            dense.fillna(0.)
+            dense = np.array(dense, dtype=np.float32)
+            dense[dense < 0] = 0
+            dense = np.log(dense + 1)
+            dense.tofile(self.join(f'dense_{i}.bin'))
+            del dense
+            sparse = sparse[range(14, 40)]
+            sparse.fillna('0')
+            uniques = []
+            for f in sparse:
+                cur_set = set(sparse[f])
+                uniques.append(list(cur_set))
+            with open(self.join(f'uniques_{i}.pkl'), 'wb') as fw:
+                pickle.dump(uniques, fw)
+            del uniques
+            del sparse
+        uniques = [[] for _ in range(self.num_sparse)]
+        for i in range(self.days):
+            with open(self.join(f'uniques_{i}.pkl'), 'rb') as fr:
+                cur_uniques = pickle.load(fr)
+            for j, uni in enumerate(cur_uniques):
+                uniques[j] += uni
+        for i in range(self.num_sparse):
+            cur_set = set(uniques[i])
+            cur_set.remove('0')
+            cur_list = ['0'] + list(cur_set)
+            reverse_dict = {v: k for k, v in enumerate(cur_list)}
+            uniques[i] = reverse_dict
+        counts = [len(uni) for uni in uniques]
+        npcounts = np.array(counts, dtype=np.int32)
+        npcounts.tofile(self.join('processed_count.bin'))
+        offsets = self.count_to_accum(counts)
+        for i in range(self.days):
+            sparse = pd.read_csv(self.join(f'day_{i}'), header=None, sep='\t')[
+                range(14, 40)]
+            for j, f in enumerate(range(14, 40)):
+                sparse[f] = sparse[f].apply(lambda x: uniques[j][x])
+            sparse = np.array(sparse, dtype=np.int32)
+            sparse.tofile(f'sparse_{i}_sep.bin')
+            for j in range(self.num_sparse):
+                sparse[:, j] += offsets[j]
+            sparse.tofile(f'sparse_{i}.bin')
+
+    def process_all_data_by_day(self, separate_fields=False):
+        all_data_path = [[self.join(f'{k}_{i}.bin')
+                          for i in range(self.days)] for k in self.keys]
+        if separate_fields:
+            all_data_path[1] = [
+                self.join(f'sparse_{i}_sep.bin') for i in range(self.days)]
+
+        data_ready = self.all_exists(sum(all_data_path, []))
+
+        if not data_ready:
+            self.read_from_raw()
+        count = np.fromfile(
+            self.join(f'processed_count.bin'), dtype=np.int32)
+        counts = self.accum_to_count(count)
+        assert counts == self.num_embed_separate
+
+        all_data = [[np.memmap(p, mode='r', dtype=dtype) for p in data_path]
+                    for dtype, data_path in zip(self.dtypes, all_data_path)]
+        nlast = all_data[-1][-1].shape[0]
+        ntest = int(np.ceil(nlast / 2))
+        return_data = []
+        for data in all_data:
+            return_data.append((data[:-1], data[-1][ntest:], data[-1][:ntest]))
+        return return_data
 
 
 if __name__ == '__main__':

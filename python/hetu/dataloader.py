@@ -8,12 +8,86 @@ from . import ndarray
 from .gpu_ops.Node import Op
 
 
+class RawData(object):
+    def __init__(self, raw_data, dtype, func=None) -> None:
+        self.dtype = dtype
+        self.func = func if func else lambda x: x
+        if isinstance(raw_data, Iterable):
+            raw_data = [self._init_array(data) for data in raw_data]
+        else:
+            raw_data = [self._init_array(raw_data)]
+        self.raw_data = raw_data
+        self._shape = list(raw_data[0].shape)
+        self._offsets = [0, self._shape[0]]
+        for d in raw_data[1:]:
+            assert list(d.shape[1:]) == self._shape[1:]
+            self._shape[0] += d.shape[0]
+            self._offsets.append(self._shape[0])
+
+    def _init_array(self, raw_data):
+        raw_data = self.func(raw_data)
+        if not isinstance(raw_data, (np.memmap, np.ndarray)):
+            raw_data = np.array(raw_data, dtype=self.dtype)
+        elif raw_data.dtype != self.dtype:
+            raw_data = raw_data.astype(self.dtype)
+        return raw_data
+
+    def __len__(self):
+        return self._shape[0]
+
+    @property
+    def shape(self):
+        return self._shape
+
+    def _get_arr_index(self, index):
+        # binary search
+        if index < 0 or index >= len(self):
+            return -1
+        l, r = 0, len(self.raw_data)
+        while l + 1 < r:
+            mid = (l + r) // 2
+            if self._offsets[mid] == index:
+                r = mid
+                break
+            elif self._offsets[mid] < index:
+                l = mid
+            else:
+                r = mid
+        arr_ind = r
+        arr_offset = index - self._offsets[arr_ind]
+        return arr_ind, arr_offset
+
+    def __getitem__(self, key):
+        # directly return array; not good for dp split, need further support
+        if isinstance(key, int):
+            arr_ind, arr_offset = self._get_arr_index(key)
+            return self.raw_data[arr_ind][arr_offset]
+        else:
+            assert isinstance(key, slice) and key.step is None
+            start, stop = key.start, key.stop
+            if start is None:
+                start = 0
+            if stop is None:
+                stop = len(self)
+            start_arr_ind, start_arr_offset = self._get_arr_index(start)
+            stop_arr_ind, stop_arr_offset = self._get_arr_index(stop)
+            if start_arr_ind == stop_arr_ind:
+                return np.array(self.raw_data[start_arr_ind][start_arr_offset:stop_arr_offset], dtype=self.dtype)
+            else:
+                cands = [self.raw_data[start_arr_ind][start_arr_offset:]]
+                for i in range(start_arr_ind+1, stop_arr_ind):
+                    cands.append(self.raw_data[i])
+                cands.append(self.raw_data[stop_arr_ind][:stop_arr_offset])
+                result = np.concatenate(cands)
+                return result
+
+
 # Multi-Process not useful now, since we don't have memory to CPU bottleneck
 class Dataloader(object):
     def __init__(self, raw_data, batch_size, name='default', func=None, batch_func=None, drop_last=True, offset=0, dtype=np.float32):
         self.func = func if func else lambda x: x
         self.dtype = dtype
-        self.raw_data = np.array(self.func(raw_data), dtype=self.dtype)
+        self.raw_data = RawData(raw_data, self.dtype, self.func)
         self.batch_size = batch_size
         self.drop_last = drop_last
         if batch_func is None:
