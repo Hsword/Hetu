@@ -12,7 +12,7 @@ class RawData(object):
     def __init__(self, raw_data, dtype, func=None) -> None:
         self.dtype = dtype
         self.func = func if func else lambda x: x
-        if isinstance(raw_data, Iterable):
+        if isinstance(raw_data, (list, tuple)):
             raw_data = [self._init_array(data) for data in raw_data]
         else:
             raw_data = [self._init_array(raw_data)]
@@ -42,18 +42,18 @@ class RawData(object):
     def _get_arr_index(self, index):
         # binary search
         if index < 0 or index >= len(self):
-            return -1
+            assert False, f'Invalid index {index} with data index range 0 to {len(self)}'
         l, r = 0, len(self.raw_data)
         while l + 1 < r:
             mid = (l + r) // 2
             if self._offsets[mid] == index:
-                r = mid
+                l = mid
                 break
             elif self._offsets[mid] < index:
                 l = mid
             else:
                 r = mid
-        arr_ind = r
+        arr_ind = l
         arr_offset = index - self._offsets[arr_ind]
         return arr_ind, arr_offset
 
