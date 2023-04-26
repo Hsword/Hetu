@@ -41,8 +41,10 @@ class RawData(object):
 
     def _get_arr_index(self, index):
         # binary search
-        if index < 0 or index >= len(self):
-            assert False, f'Invalid index {index} with data index range 0 to {len(self)}'
+        if index < 0:
+            index = index % len(self)
+        elif index >= len(self):
+            index = len(self) - 1
         l, r = 0, len(self.raw_data)
         while l + 1 < r:
             mid = (l + r) // 2
@@ -70,21 +72,22 @@ class RawData(object):
             if stop is None:
                 stop = len(self)
             start_arr_ind, start_arr_offset = self._get_arr_index(start)
-            stop_arr_ind, stop_arr_offset = self._get_arr_index(stop)
+            stop_arr_ind, stop_arr_offset = self._get_arr_index(stop - 1)
             if start_arr_ind == stop_arr_ind:
-                return np.array(self.raw_data[start_arr_ind][start_arr_offset:stop_arr_offset], dtype=self.dtype)
+                result = np.array(
+                    self.raw_data[start_arr_ind][start_arr_offset:stop_arr_offset + 1], dtype=self.dtype)
             else:
                 cands = [self.raw_data[start_arr_ind][start_arr_offset:]]
                 for i in range(start_arr_ind+1, stop_arr_ind):
                     cands.append(self.raw_data[i])
-                cands.append(self.raw_data[stop_arr_ind][:stop_arr_offset])
+                cands.append(self.raw_data[stop_arr_ind][:stop_arr_offset + 1])
                 result = np.concatenate(cands)
-                return result
+            return result
 
 
 # Multi-Process not useful now, since we don't have memory to CPU bottleneck
 class Dataloader(object):
-    def __init__(self, raw_data, batch_size, name='default', func=None, batch_func=None, drop_last=True, offset=0, dtype=np.float32):
+    def __init__(self, raw_data, batch_size, name='default', func=None, batch_func=None, drop_last=False, offset=0, dtype=np.float32):
         self.func = func if func else lambda x: x
         self.dtype = dtype
         self.raw_data = RawData(raw_data, self.dtype, self.func)
