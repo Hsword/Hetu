@@ -330,6 +330,107 @@ class CTRDataset(object):
         testing_data = get_data('test')
         return tuple(zip(training_data, validation_data, testing_data))
 
+    def check_skewness(self):
+        sorted_all_counter_path = self.join('counter_all_sorted.bin')
+        if not osp.exists(sorted_all_counter_path):
+            all_counter_path = self.join('counter_all.bin')
+            if not osp.exists(all_counter_path):
+                counter = self.get_frequency_counter(
+                    np.memmap(self.join(f'kaggle_processed_train_sparse.bin'), mode='r', dtype=np.int32), self.num_embed, self.join('counter_freq_split.bin'))
+                for ph in ('val', 'test'):
+                    cur_sparse = np.memmap(
+                        self.join(f'kaggle_processed_{ph}_sparse.bin'), mode='r', dtype=np.int32)
+                    for i in tqdm(cur_sparse.reshape(-1)):
+                        counter[i] += 1
+                counter.tofile(all_counter_path)
+            else:
+                counter = np.fromfile(all_counter_path)
+            counter = np.sort(counter)
+            counter.tofile(sorted_all_counter_path)
+
+    def pruning_to_different_skewness(self, reserve_rate, alpha):
+        assert 0 < reserve_rate < 1 and -1 <= alpha <= 1
+        sum_file = self.join('sumfreq.bin')
+        if not osp.exists(sum_file):
+            all_counter = np.fromfile(
+                self.join('counter_all.bin'), dtype=np.int32)
+            sparse = np.memmap(self.join('kaggle_processed_sparse.bin'),
+                               mode='r', dtype=np.int32).reshape(-1, self.num_sparse)
+            scores = np.zeros(sparse.shape[0], dtype=np.int32)
+            for i, sp in enumerate(tqdm(sparse)):
+                scores[i] = all_counter[sp].sum()
+            scores.tofile(sum_file)
+        else:
+            scores = np.fromfile(sum_file, dtype=np.int32)
+        average = scores.mean()
+        larger = scores.max() - average
+        smaller = average - scores.min()
+        if alpha > 0:
+            larger = (1 - reserve_rate) / larger
+            smaller = reserve_rate / smaller
+            scale = min(larger, smaller)
+        else:
+            larger = reserve_rate / larger
+            smaller = (1 - reserve_rate) / smaller
+            scale = min(larger, smaller)
+        rands = np.random.random_sample(size=scores.shape[0])
+        rands = rands - scale * alpha * (scores - average)
+        reserved = (rands < reserve_rate)
+        reserved.tofile(self.join(f'reserving_{reserve_rate}_{alpha}.bin'))
+        return reserved
+
+    def pruning_to_different_skewness_greedy(self, target_num, alpha):
+        assert 0 < target_num and alpha in (-1, 1)
+        sum_file = self.join('sumfreq.bin')
+        if not osp.exists(sum_file):
+            all_counter = np.fromfile(
+                self.join('counter_all.bin'), dtype=np.int32)
+            sparse = np.memmap(self.join('kaggle_processed_sparse.bin'),
+                               mode='r', dtype=np.int32).reshape(-1, self.num_sparse)
+            scores = np.zeros(sparse.shape[0], dtype=np.int32)
+            for i, sp in enumerate(tqdm(sparse)):
+                scores[i] = all_counter[sp].sum()
+            scores.tofile(sum_file)
+        else:
+            scores = np.fromfile(sum_file, dtype=np.int32)
+        if alpha == 1:
+            more_target = len(scores) - target_num
+        else:
+            more_target = target_num
+        l, r = scores.min(), scores.max()
+        while (r - l) > 0.5:
+            mid = (l + r) / 2
+            num_more = (scores > mid).sum()
+            if num_more == more_target:
+                break
+            elif num_more > more_target:
+                l = mid
+            else:
+                r = mid
+        mid = int(mid)
+        if alpha == 1:
+            if (scores > mid).sum() > more_target:
+                mid += 1
+            reserved = (scores <= mid)
+            reserved.tofile(self.join(f'reserving_{target_num}_{alpha}.bin'))
+        else:
+            if (scores > mid).sum() < more_target:
+                mid -= 1
+            reserved = (scores > mid)
+            reserved.tofile(self.join(f'reserving_{target_num}_{alpha}.bin'))
+        return reserved
+
+    def masked_counter(self, mask_file, target_file):
+        mask = np.fromfile(self.join(mask_file), dtype=np.bool_)
+        sparse = np.memmap(self.join('kaggle_processed_sparse.bin'),
+                           mode='r', dtype=np.int32).reshape(-1, self.num_sparse)
+        sparse = sparse[mask]
+        print('shape:', sparse.shape)
+        counter = np.zeros((self.num_embed,), dtype=np.int32)
+        for sp in tqdm(sparse):
+            counter[sp] += 1
+        counter.tofile(self.join(target_file))
+
 
 class CriteoDataset(CTRDataset):
     def __init__(self, path=default_criteo_path):
@@ -469,13 +570,12 @@ class CriteoTBDataset(CriteoDataset):
 
     @property
     def num_embed(self):
-        # TODO: fill this
-        ...
+        return 882774559
 
     @property
     def num_embed_separate(self):
-        # TODO: fill this
-        ...
+        return [227605432, 39060, 17295, 7424, 20265, 3, 7122, 1543, 63, 130229467, 3067956,
+                405282, 10, 2209, 11938, 155, 4, 976, 14, 292775614, 40790948, 187188510, 590152, 12973, 108, 36]
 
     def read_from_raw(self):
         for i in range(self.days):
@@ -508,8 +608,11 @@ class CriteoTBDataset(CriteoDataset):
                 uniques[j] += uni
         for i in range(self.num_sparse):
             cur_set = set(uniques[i])
-            cur_set.remove('0')
-            cur_list = ['0'] + list(cur_set)
+            if '0' in cur_set:
+                cur_set.remove('0')
+                cur_list = ['0'] + list(cur_set)
+            else:
+                cur_list = list(cur_set)
             reverse_dict = {v: k for k, v in enumerate(cur_list)}
             uniques[i] = reverse_dict
         counts = [len(uni) for uni in uniques]
@@ -519,6 +622,7 @@ class CriteoTBDataset(CriteoDataset):
         for i in range(self.days):
             sparse = pd.read_csv(self.join(f'day_{i}'), header=None, sep='\t')[
                 range(14, 40)]
+            sparse.fillna('0')
             for j, f in enumerate(range(14, 40)):
                 sparse[f] = sparse[f].apply(lambda x: uniques[j][x])
             sparse = np.array(sparse, dtype=np.int32)
