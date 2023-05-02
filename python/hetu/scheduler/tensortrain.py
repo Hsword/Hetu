@@ -57,7 +57,6 @@ class TTEmbTrainer(EmbeddingTrainer):
             decomp_nemb,
             decomp_ndim,
             rank,
-            ttcore_initializer=self.embedding_args['ttcore_initializer'],
             name=name,
             ctx=self.ectx
         )

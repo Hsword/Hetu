@@ -28,9 +28,7 @@ def worker(args):
         }
     elif args.method == 'tt':
         embed_layer_type = htl.TensorTrainEmbedding
-        embedding_args = {
-            'ttcore_initializer': ht.init.GenReversedTruncatedNormal(stddev=1 / ((np.sqrt(1 / 3 * max(dataset.num_embed_separate))) ** (1/3))),
-        }
+        embedding_args = {}
     elif args.method == 'dhe':
         embed_layer_type = htl.DeepHashEmbedding
         embedding_args = {

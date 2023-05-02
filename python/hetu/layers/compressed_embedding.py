@@ -47,7 +47,7 @@ class CompositionalEmbedding(Embedding):
 
 
 class TensorTrainEmbedding(Embedding):
-    def __init__(self, decomp_nemb, decomp_ndim, rank, ttcore_initializer, name='embedding', ctx=None):
+    def __init__(self, decomp_nemb, decomp_ndim, rank, name='embedding', ctx=None):
         self.num_tables = len(decomp_nemb)
         assert len(decomp_ndim) == self.num_tables
         self.decomp_nemb = decomp_nemb
@@ -63,6 +63,8 @@ class TensorTrainEmbedding(Embedding):
             postrank = self.ranks[i+1]
             ncol = prerank * ndim * postrank
             cur_shapes.append((nrow, ncol))
+        ttcore_initializer = ht.init.GenReversedTruncatedNormal(
+            stddev=1 / ((np.sqrt(1 / 3 * np.prod(decomp_nemb))) ** (1/3)))
         self.tt_cores = tuple(ttcore_initializer(
             shape=sh, name=f'{name}_{i}') for i, sh in enumerate(cur_shapes))
 
