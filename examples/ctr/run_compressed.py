@@ -11,7 +11,7 @@ def worker(args):
     num_dim = args.dim
     learning_rate = args.lr
     from models.load_data import get_dataset
-    dataset = get_dataset(args.dataset)()
+    dataset = get_dataset(args.dataset)(path=args.data_path)
     num_dense = dataset.num_dense
     num_sparse = dataset.num_sparse
 
@@ -174,7 +174,9 @@ if __name__ == '__main__':
     parser.add_argument("--lr", type=float, default=1e-3,
                         help="learning rate to be used")
     parser.add_argument("--dataset", type=str, default='criteo',
-                        help="dataset to be used", choices=['criteo', 'avazu'])
+                        help="dataset to be used", choices=['criteo', 'avazu', 'criteotb'])
+    parser.add_argument("--data_path", type=str, default=None,
+                        help="path to dataset")
     parser.add_argument("--nepoch", type=float, default=0.1,
                         help="num of epochs")
     parser.add_argument("--num_test_every_epoch", type=int, default=100,

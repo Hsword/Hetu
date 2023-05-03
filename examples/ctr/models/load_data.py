@@ -16,8 +16,8 @@ def get_dataset(dataset):
         return CriteoDataset
     elif dataset == 'avazu':
         return AvazuDataset
-    else:
-        raise NotImplementedError
+    elif dataset == 'criteotb':
+        return CriteoTBDataset
 
 
 class CTRDataset(object):
@@ -27,7 +27,7 @@ class CTRDataset(object):
         self.phases = ['train', 'val', 'test']
         self.keys = ['dense', 'sparse', 'label']
         self.dtypes = [np.float32, np.int32, np.int32]
-        self.shapes = [(-1, self.num_dense), (-1, self.num_sparse), (-1,)]
+        self.shapes = [(-1, self.num_dense), (-1, self.num_sparse), (-1, 1)]
 
     @property
     def num_dense(self):
@@ -433,7 +433,9 @@ class CTRDataset(object):
 
 
 class CriteoDataset(CTRDataset):
-    def __init__(self, path=default_criteo_path):
+    def __init__(self, path=None):
+        if path is None:
+            path = default_criteo_path
         super().__init__(path)
 
     @property
@@ -511,12 +513,14 @@ class CriteoDataset(CTRDataset):
 
 
 class AvazuDataset(CTRDataset):
-    def __init__(self, path=default_avazu_path):
+    def __init__(self, path=None):
+        if path is None:
+            path = default_avazu_path
         # please download manually from https://www.kaggle.com/c/avazu-ctr-prediction/data
         super().__init__(path)
         self.keys = ['sparse', 'label']
         self.dtypes = [np.int32, np.int32]
-        self.shapes = [(-1, self.num_sparse), (-1,)]
+        self.shapes = [(-1, self.num_sparse), (-1, 1)]
 
     @property
     def num_dense(self):
@@ -566,7 +570,7 @@ class CriteoTBDataset(CriteoDataset):
         self.phases = ['train', 'val', 'test']
         self.keys = ['dense', 'sparse', 'label']
         self.dtypes = [np.float32, np.int32, np.int32]
-        self.shapes = [(-1, self.num_dense), (-1, self.num_sparse), (-1,)]
+        self.shapes = [(-1, self.num_dense), (-1, self.num_sparse), (-1, 1)]
 
     @property
     def num_embed(self):
@@ -642,13 +646,12 @@ class CriteoTBDataset(CriteoDataset):
 
         if not data_ready:
             self.read_from_raw()
-        count = np.fromfile(
-            self.join(f'processed_count.bin'), dtype=np.int32)
-        counts = self.accum_to_count(count)
+        counts = np.fromfile(
+            self.join(f'processed_count.bin'), dtype=np.int32).tolist()
         assert counts == self.num_embed_separate
 
-        all_data = [[np.memmap(p, mode='r', dtype=dtype) for p in data_path]
-                    for dtype, data_path in zip(self.dtypes, all_data_path)]
+        all_data = [[np.memmap(p, mode='r', dtype=dtype).reshape(shape) for p in data_path]
+                    for dtype, data_path, shape in zip(self.dtypes, all_data_path, self.shapes)]
         nlast = all_data[-1][-1].shape[0]
         ntest = int(np.ceil(nlast / 2))
         return_data = []

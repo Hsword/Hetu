@@ -153,6 +153,13 @@ class EmbeddingTrainer(object):
         return data_op
 
     def get_data(self):
+
+        def get_separate_slice(data, index):
+            if isinstance(data, (tuple, list)):
+                return [d[:, index] for d in data]
+            else:
+                return data[:, index]
+
         self.assert_use_multi()
         all_data = self.dataset.process_all_data_by_day(
             separate_fields=self.separate_fields)
@@ -160,9 +167,6 @@ class EmbeddingTrainer(object):
         # define models for criteo
         tr_sparse, va_sparse, te_sparse = all_data[-2]
         tr_labels, va_labels, te_labels = all_data[-1]
-        tr_labels = tr_labels.reshape((-1, 1))
-        va_labels = va_labels.reshape((-1, 1))
-        te_labels = te_labels.reshape((-1, 1))
         if len(all_data) == 3:
             dense_input = self.make_dataloader_op(*all_data[0])
         else:
@@ -170,9 +174,13 @@ class EmbeddingTrainer(object):
         y_ = self.make_dataloader_op(tr_labels, va_labels, te_labels)
         if self.use_multi:
             new_sparse_ops = []
-            for i in range(tr_sparse.shape[1]):
+            for i in range(self.num_slot):
                 cur_data = self.make_dataloader_op(
-                    tr_sparse[:, i], va_sparse[:, i], te_sparse[:, i], dtype=np.int32)
+                    get_separate_slice(tr_sparse, i),
+                    get_separate_slice(va_sparse, i),
+                    get_separate_slice(te_sparse, i),
+                    dtype=np.int32,
+                )
                 new_sparse_ops.append(cur_data)
             embed_input = new_sparse_ops
         else:
