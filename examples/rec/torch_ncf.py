@@ -22,12 +22,12 @@ class NCF(nn.Module):
         self.GMF_model = GMF_model
         self.MLP_model = MLP_model
 
-        self.embed_user_GMF = nn.Embedding(user_num, factor_num)
-        self.embed_item_GMF = nn.Embedding(item_num, factor_num)
+        self.embed_user_GMF = nn.Embedding(user_num, factor_num, sparse=True)
+        self.embed_item_GMF = nn.Embedding(item_num, factor_num, sparse=True)
         self.embed_user_MLP = nn.Embedding(
-            user_num, factor_num * (2 ** (num_layers - 1)))
+            user_num, factor_num * (2 ** (num_layers - 1)), sparse=True)
         self.embed_item_MLP = nn.Embedding(
-            item_num, factor_num * (2 ** (num_layers - 1)))
+            item_num, factor_num * (2 ** (num_layers - 1)), sparse=True)
 
         MLP_modules = []
         for i in range(num_layers):

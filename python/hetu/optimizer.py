@@ -608,7 +608,7 @@ class AdamSparseUpdateOp(OptimizerSparseOp):
 
 
 class AdamOptimizer(Optimizer):
-    def __init__(self, learning_rate=0.01, beta1=0.9, beta2=0.999, epsilon=1e-7, l2reg=0, amsgrad=False):
+    def __init__(self, learning_rate=1e-3, beta1=0.9, beta2=0.999, epsilon=1e-8, l2reg=0, amsgrad=False):
         super(AdamOptimizer, self).__init__(learning_rate, l2reg)
         self.beta1 = beta1
         self.beta2 = beta2

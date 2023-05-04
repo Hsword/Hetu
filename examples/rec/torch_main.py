@@ -129,9 +129,16 @@ model.cuda()
 loss_function = nn.BCEWithLogitsLoss()
 
 if config.model == 'NeuMF-pre':
+    sp_opt = None
     optimizer = optim.SGD(model.parameters(), lr=args.lr)
 else:
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    # pytorch implementation https://github.dev/pytorch/pytorch/blob/main/torch/optim/sparse_adam.py
+    # in sparse adam, the order of bias correction and epsilon is not the same as dense
+    # so the result is somewhat different from hetu
+    sp_opt = optim.SparseAdam(
+        [p for n, p in model.named_parameters() if n.startswith('embed_')], lr=args.lr)
+    optimizer = optim.Adam([p for n, p in model.named_parameters(
+    ) if not n.startswith('embed_')], lr=args.lr)
 
 # writer = SummaryWriter() # for visualization
 
@@ -152,6 +159,8 @@ for epoch in range(args.epochs):
         loss = loss_function(prediction, label)
         loss.backward()
         optimizer.step()
+        if sp_opt is not None:
+            sp_opt.step()
         # writer.add_scalar('data/loss', loss.item(), count)
         count += 1
 
