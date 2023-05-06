@@ -54,6 +54,7 @@ class EmbeddingTrainer(object):
             self.batch_size = self.args['bs']
         self.use_multi = self.args.get('use_multi', 0)
         self.separate_fields = self.args.get('separate_fields', self.use_multi)
+        self.need_concatenate = self.args.get('need_concatenate', 1)
 
         self.nepoch = self.args.get('nepoch', 0.1)
         self.tqdm_enabled = self.args.get('tqdm_enabled', True)
@@ -161,7 +162,7 @@ class EmbeddingTrainer(object):
                 return data[:, index]
 
         self.assert_use_multi()
-        all_data = self.dataset.process_all_data_by_day(
+        all_data = self.dataset.process_all_data(
             separate_fields=self.separate_fields)
 
         # define models for criteo
@@ -231,9 +232,10 @@ class EmbeddingTrainer(object):
         train_time = self.temp_time[0]
         results = {
             'avg_train_loss': train_loss,
-            f'train_{self.monitor}': train_metric,
             'train_time': train_time,
         }
+        if self.monitor != 'loss':
+            results[f'train_{self.monitor}'] = train_metric
         early_stop = False
         if self.check_val:
             with self.timing():
@@ -242,9 +244,10 @@ class EmbeddingTrainer(object):
             val_time = self.temp_time[0]
             results.update({
                 'avg_val_loss': val_loss,
-                f'val_{self.monitor}': val_metric,
                 'val_time': val_time,
             })
+            if self.monitor != 'loss':
+                results[f'val_{self.monitor}'] = val_metric
         if self.check_test:
             test_epoch, test_part = epoch, part
             if self.check_val:
@@ -257,9 +260,10 @@ class EmbeddingTrainer(object):
             test_time = self.temp_time[0]
             results.update({
                 'avg_test_loss': test_loss,
-                f'test_{self.monitor}': test_metric,
                 'test_time': test_time,
             })
+            if self.monitor != 'loss':
+                results[f'test_{self.monitor}'] = test_metric
         printstr = ', '.join(
             [f'{key}: {value:.4f}' for key, value in results.items()])
         results.update({'epoch': epoch, 'part': part, })
@@ -298,6 +302,7 @@ class EmbeddingTrainer(object):
                 acc_val = self.get_acc(y_val, predict_y)
                 train_acc.append(acc_val)
         train_loss = np.mean(train_loss)
+        result = train_loss
         if self.check_auc:
             train_auc = self.get_auc(ground_truth_y, predicted_y)
             result = train_auc
@@ -320,12 +325,13 @@ class EmbeddingTrainer(object):
         for it in localiter:
             loss_value, test_y_predicted, y_test_value = self.executor.run(
                 name, convert_to_numpy_ret_vals=True)
-            correct_prediction = self.get_acc(y_test_value, test_y_predicted)
             test_loss.append(loss_value[0])
             if self.check_auc:
                 ground_truth_y.append(y_test_value)
                 predicted_y.append(test_y_predicted)
             elif self.check_acc:
+                correct_prediction = self.get_acc(
+                    y_test_value, test_y_predicted)
                 test_acc.append(correct_prediction)
         test_loss = np.mean(test_loss)
         new_result = test_loss
@@ -537,9 +543,10 @@ class EmbeddingTrainer(object):
 
     def get_embeddings(self, embed_input):
         if self.use_multi:
-            results = [emb_layer(x) for emb_layer, x in zip(
+            result = [emb_layer(x) for emb_layer, x in zip(
                 self.embed_layer, embed_input)]
-            result = concatenate_op(results, axis=-1)
+            if self.need_concatenate:
+                result = concatenate_op(result, axis=-1)
         else:
             result = self.embed_layer(embed_input)
         return result

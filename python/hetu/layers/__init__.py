@@ -30,4 +30,4 @@ from .KTop1Gate import KTop1Gate
 from .ktop1_layer import KTop1Layer
 from .sam_layer import SAMLayer
 from .SAMGate import SAMGate
-from .loss import BCEWithLogitsLoss, BCELoss, SoftmaxCrossEntropyLoss
+from .loss import MSELoss, BCEWithLogitsLoss, BCELoss, SoftmaxCrossEntropyLoss

@@ -58,7 +58,6 @@ class ReduceNorm2Op(Op):
             if self.axes[i] < 0:
                 self.axes[i] += len(input_shape)
             assert 0 <= self.axes[i] < len(input_shape)
-            input_shape[self.axes[i]] = 1 if self.keepdims[i] else 0
         if self.grad_node is not None:
             self.grad_node.target_shape = tuple(input_shapes[0])
             add_axes = []
@@ -66,6 +65,8 @@ class ReduceNorm2Op(Op):
                 if not self.keepdims[i]:
                     add_axes.append(self.axes[i])
             self.grad_node.add_axes = add_axes
+        for i in range(len(self.axes)):
+            input_shape[self.axes[i]] = 1 if self.keepdims[i] else 0
         input_shape = [x for x in input_shape if x > 0]
         if input_shape == []:
             result = (1,)

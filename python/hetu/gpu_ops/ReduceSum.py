@@ -52,6 +52,10 @@ class ReduceSumOp(Op):
         assert self.axes is not None and self.keepdims is not None
         assert len(input_shapes) == 1
         input_shape = list(input_shapes[0])
+        for i in range(len(self.axes)):
+            if self.axes[i] < 0:
+                self.axes[i] += len(input_shape)
+            assert 0 <= self.axes[i] < len(input_shape)
         if self.grad_node is not None:
             self.grad_node.target_shape = tuple(input_shape)
             add_axes = []
@@ -60,9 +64,6 @@ class ReduceSumOp(Op):
                     add_axes.append(self.axes[i])
             self.grad_node.add_axes = add_axes
         for i in range(len(self.axes)):
-            if self.axes[i] < 0:
-                self.axes[i] += len(input_shape)
-            assert 0 <= self.axes[i] < len(input_shape)
             input_shape[self.axes[i]] = 1 if self.keepdims[i] else 0
         input_shape = [x for x in input_shape if x > 0]
         if input_shape == []:

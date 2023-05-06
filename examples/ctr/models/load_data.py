@@ -276,6 +276,9 @@ class CTRDataset(object):
             grouping.tofile(cache_path)
         return grouping
 
+    def process_all_data(self, separate_fields=False):
+        return self.process_all_data_by_day(separate_fields)
+
     def process_all_data_by_day(self, separate_fields=False):
         all_data_path = [
             [self.join(f'kaggle_processed_{ph}_{k}.bin') for k in self.keys] for ph in self.phases]
