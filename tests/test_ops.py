@@ -485,6 +485,12 @@ def test_bce_with_logits_gradient():
     tester.test([(256,), (256,), (256,)], rtol=1e-6)
 
 
+def test_div_handle_zero():
+    tester = HetuTester(ht.div_handle_zero_op, 2)
+    tester.test([(2, 3, 4, 5), (2, 3, 4, 5)])
+    tester.test([(3, 4, 1), (3, 4, 1)])
+
+
 def test_optimizers():
     test_shapes = [
         (1000, 8),
@@ -583,4 +589,5 @@ test_reduce_norm2()
 test_binary_step()
 test_bce_with_logits()
 test_bce_with_logits_gradient()
+test_div_handle_zero()
 test_optimizers()

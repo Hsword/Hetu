@@ -107,6 +107,19 @@ class RawData(object):
                 result = np.concatenate(cands)
             return result
 
+    def __iter__(self):
+        for d in self.raw_data:
+            for dd in d:
+                yield dd
+
+    def reshape(self, *new_shape):
+        if len(new_shape) == 1 and isinstance(new_shape[0], (tuple, list)):
+            new_shape = tuple(new_shape[0])
+        else:
+            new_shape = tuple(new_shape)
+        assert new_shape[0] == -1
+        return RawData([d.reshape(new_shape) for d in self.raw_data], dtype=self.dtype, func=None)
+
 
 # Multi-Process not useful now, since we don't have memory to CPU bottleneck
 class Dataloader(object):

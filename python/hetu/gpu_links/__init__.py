@@ -156,6 +156,7 @@ __all__ = [
     'softmax',
     'matrix_elementwise_divide_const',
     'matrix_elementwise_divide',
+    'matrix_elementwise_divide_handle_zero',
     'matrix_opposite',
     'binary_step_forward',
     'binary_step_backward',

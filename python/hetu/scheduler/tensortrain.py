@@ -6,14 +6,25 @@ import math
 class TTEmbTrainer(EmbeddingTrainer):
     def _get_decomp_dim(self):
         embedding_dim = self.embedding_dim
-        assert embedding_dim >= 8 and embedding_dim & (embedding_dim - 1) == 0
-        decomp_ndim = [2, 2, 2]
-        idx = 2
-        embedding_dim = embedding_dim // 8
-        while embedding_dim != 1:
-            decomp_ndim[idx] *= 2
-            embedding_dim = embedding_dim // 2
-            idx = (idx - 1) % 3
+        if embedding_dim & (embedding_dim - 1) == 0:
+            assert embedding_dim >= 8
+            decomp_ndim = [2, 2, 2]
+            idx = 2
+            embedding_dim = embedding_dim // 8
+            while embedding_dim != 1:
+                decomp_ndim[idx] *= 2
+                embedding_dim = embedding_dim // 2
+                idx = (idx - 1) % 3
+        else:
+            n1 = math.ceil(embedding_dim ** (1/3))
+            while embedding_dim % n1 != 0:
+                n1 -= 1
+            rest = embedding_dim // n1
+            n2 = math.ceil(rest ** (1/2))
+            while rest % n2 != 0:
+                n2 -= 1
+            n3 = rest // n2
+            decomp_ndim = sorted([n1, n2, n3])
         return decomp_ndim
 
     def _get_decomp_emb(self, nemb):

@@ -28,7 +28,8 @@ class DHETrainer(EmbeddingTrainer):
             evaluate = multi_evaluate
         else:
             evaluate = single_evaluate
-        res = self.binary_search(1, math.sqrt(self.num_embed), evaluate)
+        res = self.binary_search(1, math.sqrt(
+            self.num_embed * self.embedding_dim), evaluate)
         res = math.floor(res[1])
         if evaluate(res) > 0:
             res -= 1

@@ -38,7 +38,7 @@ class MDETrainer(EmbeddingTrainer):
         def evaluate(x):
             cur_dims = self._md_solver(x, round_dim=round_dim)
             cur_memory = sum(
-                [nemb * ndim for nemb, ndim in zip(self.num_embed_separate, cur_dims)])
+                [nemb * ndim + ndim * self.embedding_dim * (ndim != self.embedding_dim) for nemb, ndim in zip(self.num_embed_separate, cur_dims)])
             return target_memory - cur_memory
         round_dim = self.embedding_args['round_dim']
         target_memory = self.num_embed * self.embedding_dim * self.compress_rate
@@ -70,7 +70,7 @@ class MDETrainer(EmbeddingTrainer):
 
     def get_embed_layer(self):
         dims = self.get_dims_from_compress_rate()
-        assert max(dims) == self.embedding_dim
+        # assert max(dims) == self.embedding_dim
         emb = []
         for i, (nemb, cdim) in enumerate(zip(self.num_embed_separate, dims)):
             emb.append(self.get_single_embed_layer(nemb, cdim, f'MDEmb_{i}'))

@@ -18,7 +18,7 @@ from .Conv2d import conv2d_op, conv2d_gradient_of_data_op, conv2d_gradient_of_fi
 from .Conv2dBroadcast import conv2d_broadcastto_op
 from .Conv2dReduceSum import conv2d_reducesum_op
 from .CuSparse import csrmv_op, csrmm_op
-from .Division import div_op, div_const_op
+from .Division import div_op, div_handle_zero_op, div_const_op
 from .Dropout import dropout_op, dropout_gradient_op
 from .Exp import exp_op
 from .MatrixMult import matmul_op
@@ -157,6 +157,7 @@ __all__ = [
     'csrmv_op',
     'csrmm_op',
     'div_op',
+    'div_handle_zero_op',
     'div_const_op',
     'dropout_op',
     'dropout_gradient_op',

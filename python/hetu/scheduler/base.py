@@ -54,7 +54,6 @@ class EmbeddingTrainer(object):
             self.batch_size = self.args['bs']
         self.use_multi = self.args.get('use_multi', 0)
         self.separate_fields = self.args.get('separate_fields', self.use_multi)
-        self.need_concatenate = self.args.get('need_concatenate', 1)
 
         self.nepoch = self.args.get('nepoch', 0.1)
         self.tqdm_enabled = self.args.get('tqdm_enabled', True)
@@ -545,8 +544,7 @@ class EmbeddingTrainer(object):
         if self.use_multi:
             result = [emb_layer(x) for emb_layer, x in zip(
                 self.embed_layer, embed_input)]
-            if self.need_concatenate:
-                result = concatenate_op(result, axis=-1)
+            result = concatenate_op(result, axis=-1)
         else:
             result = self.embed_layer(embed_input)
         return result

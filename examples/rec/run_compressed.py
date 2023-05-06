@@ -146,7 +146,7 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default='neumf',
-                        help="model to be tested", choices=['mf', 'neumf'])
+                        help="model to be tested", choices=['mf', 'neumf', 'gmf', 'mlp'])
     parser.add_argument("--method", type=str, default='full',
                         help="method to be used",
                         choices=['full', 'hash', 'compo', 'tt',
@@ -180,6 +180,10 @@ if __name__ == '__main__':
                         help="evaluate each 1/100 epoch in default")
     parser.add_argument("--seed", type=int, default=123,
                         help="random seed")
+    parser.add_argument("--separate_fields", type=int, default=None,
+                        help="whether seperate fields")
+    parser.add_argument("--use_multi", type=int, default=0,
+                        help="whether use multi embedding")
     parser.add_argument("--compress_rate", type=float, default=0.5,
                         help="compress rate")
     parser.add_argument("--logger", type=str, default="hetu",
@@ -197,14 +201,26 @@ if __name__ == '__main__':
     parser.add_argument("--early_stop_steps", type=int, default=10,
                         help="early stopping if no improvement over steps")
     args = parser.parse_args()
-    args.use_multi = 1
-    args.separate_fields = 1
-    args.need_concatenate = 0
     args.monitor = 'loss'
 
     args.opt = args.opt.lower()
     if args.ectx is None:
         args.ectx = args.ctx
+
+    if args.method in ('robe', 'deeplight', 'pep', 'autosrh', 'quantize', 'alpt', 'autodim', 'optembed'):
+        # autodim not use multi in the first stage, use multi in the second stage.
+        args.use_multi = 0
+    elif args.method in ('compo', 'md', 'tt', 'dhe', 'mgqe', 'adapt'):
+        # dhe, mgqe, adapt both is ok; use multi is better according to semantic meaning.
+        args.use_multi = 1
+    if args.method == 'autodim' and args.phase == 'test':
+        args.use_multi = 1
+    if args.method == 'robe':
+        # robe use multi, separate fields controls whether using slot coefficient
+        if args.separate_fields is None:
+            args.separate_fields = args.use_multi
+    else:
+        args.separate_fields = args.use_multi
 
     infos = [
         f'{args.model}',
@@ -215,6 +231,7 @@ if __name__ == '__main__':
         # f'bs{args.bs}',
         # f'lr{args.lr}',
         f'cr{args.compress_rate}',
+        f'multi{args.use_multi}',
     ]
     args.result_file = '_'.join(infos) + '.log'
     if args.phase == 'test':
@@ -241,6 +258,12 @@ if __name__ == '__main__':
     elif model_name == 'neumf':
         from models import NeuMF_Head
         model = NeuMF_Head
+    elif model_name == 'gmf':
+        from models import GMF_Head
+        model = GMF_Head
+    elif model_name == 'mlp':
+        from models import MLP_Head
+        model = MLP_Head
     else:
         raise NotImplementedError
     args.model = model

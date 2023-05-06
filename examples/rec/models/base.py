@@ -8,6 +8,8 @@ class RatingModel_Head(object):
     def __init__(
         self,
         embed_dim=160,
+        nsparse=2,
+        ndense=0,
     ):
         self.embed_dim = embed_dim
         self.loss_fn = htl.MSELoss()

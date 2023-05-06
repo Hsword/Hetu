@@ -163,6 +163,9 @@ HETUSYS_EXTERN_C {
     int DLGpuMatrixElementwiseDivide(
         const DLArrayHandle matA, const DLArrayHandle matB,
         DLArrayHandle output, DLStreamHandle stream_handle);
+    int DLGpuMatrixElementwiseDivideHandleZero(
+        const DLArrayHandle matA, const DLArrayHandle matB,
+        DLArrayHandle output, DLStreamHandle stream_handle);
 
     /*!
      * \brief Divide const by matrix and store to output.

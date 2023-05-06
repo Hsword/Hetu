@@ -42,12 +42,12 @@ class ReduceMulOp(Op):
     def gradient(self, output_grad):
         from .MultiplyElewise import mul_op
         from .BroadcastShape import broadcast_shape_op
-        from .Division import div_op
+        from .Division import div_handle_zero_op
         # Here we don't know how to calculate gradient since we don't have shape information
         # The const is determined in infer_shape phase.
         x1 = mul_op(output_grad, self, ctx=self.raw_ctx)
         x2 = broadcast_shape_op(x1, None, None, ctx=self.raw_ctx)
-        x3 = div_op(x2, self.inputs[0], ctx=self.raw_ctx)
+        x3 = div_handle_zero_op(x2, self.inputs[0], ctx=self.raw_ctx)
         self.grad_node = x2
         return [x3]
 
