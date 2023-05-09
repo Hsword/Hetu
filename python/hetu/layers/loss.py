@@ -21,6 +21,12 @@ class MSELoss(BaseLossLayer):
         return super().reduce(loss)
 
 
+class MAELoss(BaseLossLayer):
+    def __call__(self,inputs,targets):
+        loss = ht.abs_op(ht.minus_op(inputs, targets))
+        return super().reduce(loss)
+
+
 class BCEWithLogitsLoss(BaseLossLayer):
     def __call__(self, inputs, targets):
         loss = ht.binarycrossentropywithlogits_op(inputs, targets)

@@ -13,6 +13,7 @@ class RatingModel_Head(object):
     ):
         self.embed_dim = embed_dim
         self.loss_fn = htl.MSELoss()
+        self.loss_fn_mae = htl.MAELoss()
 
     def create_mlp(self, ln, sigmoid_layer=-1, name='mlp'):
         layers = []
@@ -36,4 +37,4 @@ class RatingModel_Head(object):
         raise NotImplementedError
 
     def output(self, y, label):
-        return self.loss_fn(y, label), y
+        return self.loss_fn(y, label), self.loss_fn_mae(y,label),y
