@@ -70,7 +70,7 @@ class MGQETrainer(SwitchInferenceTrainer):
     def get_eval_nodes(self):
         embed_input, dense_input, y_ = self.data_ops
         embeddings = self.get_embeddings(embed_input)
-        loss, prediction = self.model(
+        loss,loss2, prediction = self.model(
             embeddings, dense_input, y_)
         if self.use_multi:
             regs = [emblayer.reg for emblayer in self.embed_layer if isinstance(
@@ -79,8 +79,9 @@ class MGQETrainer(SwitchInferenceTrainer):
         else:
             reg = self.embed_layer.reg
         loss = add_op(loss, reg)
+        loss2 = add_op(loss2,reg)
         train_op = self.opt.minimize(loss)
-        train_nodes = [loss, prediction, y_, train_op]
+        train_nodes = [loss,loss2, prediction, y_, train_op]
         if self.use_multi:
             for emblayer in self.embed_layer:
                 if isinstance(emblayer, MGQEmbedding):
@@ -91,18 +92,18 @@ class MGQETrainer(SwitchInferenceTrainer):
             self.train_name: train_nodes,
         }
         test_embed_input = self._get_inference_embeddings(embed_input)
-        test_loss, test_prediction = self.model(
+        test_loss,test_loss2, test_prediction = self.model(
             test_embed_input, dense_input, y_)
-        eval_nodes[self.validate_name] = [test_loss, test_prediction, y_]
-        eval_nodes[self.test_name] = [test_loss, test_prediction, y_]
+        eval_nodes[self.validate_name] = [test_loss,test_loss2, test_prediction, y_]
+        eval_nodes[self.test_name] = [test_loss,test_loss2, test_prediction, y_]
         return eval_nodes
 
     def get_eval_nodes_inference(self):
         embed_input, dense_input, y_ = self.data_ops
         test_embed_input = self._get_inference_embeddings(embed_input)
-        test_loss, test_prediction = self.model(
+        test_loss,test_loss2, test_prediction = self.model(
             test_embed_input, dense_input, y_)
         eval_nodes = {
-            self.test_name: [test_loss, test_prediction, y_],
+            self.test_name: [test_loss,test_loss2, test_prediction, y_],
         }
         return eval_nodes

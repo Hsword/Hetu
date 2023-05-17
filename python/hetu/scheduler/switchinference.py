@@ -45,7 +45,7 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
         del self.executor
         self.executor = infer_executor
         with self.timing():
-            test_loss, test_metric, _ = self.test_once()
+            test_loss,test_loss2, test_metric, _ = self.test_once()
         test_time = self.temp_time[0]
         os.makedirs(self.save_dir, exist_ok=True)
         if self.save_topk > 0:
@@ -58,6 +58,7 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
             'epoch': ep, 'part': part, 'npart': self.num_test_every_epoch, 'args': self.get_args_for_saving()})
         results = {
             'avg_test_loss': test_loss,
+            'avg_test_loss_mae':test_loss2,
             f'test_{self.monitor}': test_metric,
             'test_time': test_time,
         }
@@ -83,9 +84,9 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
         # check inference; use sparse embedding
         embed_input, dense_input, y_ = self.data_ops
         test_embed_input = self.embed_layer.make_inference(embed_input)
-        test_loss, test_prediction = self.model(
+        test_loss,test_loss2, test_prediction = self.model(
             test_embed_input, dense_input, y_)
-        eval_nodes = {self.test_name: [test_loss, test_prediction, y_]}
+        eval_nodes = {self.test_name: [test_loss,test_loss2, test_prediction, y_]}
         return eval_nodes
 
     def get_embed_layer_inference(self):

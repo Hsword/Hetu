@@ -35,7 +35,7 @@ class ALPTEmbTrainer(EmbeddingTrainer):
         from ..initializers import GenEmpty
         embed_input, dense_input, y_ = self.data_ops
         embeddings = self.embed_layer(embed_input)
-        loss, prediction = self.model(
+        loss,loss2, prediction = self.model(
             embeddings, dense_input, y_)
         train_op = self.opt.minimize(loss)
         idoffsets_op = None
@@ -58,7 +58,7 @@ class ALPTEmbTrainer(EmbeddingTrainer):
         round_result = alpt_rounding_op(
             lookup, lookuped_scale, self.embed_layer.middle, self.embed_layer.digit, ctx=self.ctx)
 
-        new_loss, new_prediction = self.model(
+        new_loss, new_loss2,new_prediction = self.model(
             round_result, dense_input, y_)
         dscale = gradients(new_loss, [scale])
 
@@ -79,10 +79,10 @@ class ALPTEmbTrainer(EmbeddingTrainer):
         scale_assign = assign_with_indexedslices_op(
             scale, scale_unique, scale_update)
         eval_nodes = {
-            self.train_name: [loss, prediction, y_, updated_emb_op, idoffsets_op, dense_param_opt],
+            self.train_name: [loss,loss2, prediction, y_, updated_emb_op, idoffsets_op, dense_param_opt],
             'train_scale': [scale_unique, scale_update, scale_assign],
-            self.validate_name: [loss, prediction, y_],
-            self.test_name: [loss, prediction, y_],
+            self.validate_name: [loss,loss2, prediction, y_],
+            self.test_name: [loss,loss2, prediction, y_],
         }
         return eval_nodes
 
@@ -91,7 +91,7 @@ class ALPTEmbTrainer(EmbeddingTrainer):
         stream = self.stream
         first_stage_results = self.executor.run(
             self.train_name, dataloader_step=False)
-        loss_val, predict_y, y_val = first_stage_results[:3]
+        loss_val,loss2_val, predict_y, y_val = first_stage_results[:4]
         updated_emb = first_stage_results[3]
         idoffsets = first_stage_results[4]
         reorder_into_lookup(idoffsets, updated_emb,
@@ -100,7 +100,7 @@ class ALPTEmbTrainer(EmbeddingTrainer):
         unique_indices, updated_scale = second_stage_results[:2]
         assign_alpt_embedding(var2arr[self.embed_layer.embedding_table], unique_indices,
                               updated_emb, updated_scale, self.embed_layer.middle, self.embed_layer.digit, stream)
-        return loss_val.asnumpy(), predict_y.asnumpy(), y_val.asnumpy()
+        return loss_val.asnumpy(),loss2_val.asnumpy(), predict_y.asnumpy(), y_val.asnumpy()
 
     def init_executor(self, eval_nodes):
         super().init_executor(eval_nodes)
