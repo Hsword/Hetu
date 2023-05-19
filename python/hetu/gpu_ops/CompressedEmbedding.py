@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 from .Node import Op
 import numpy as np
-from ..gpu_links import robe_hash, robe_sign, mod_hash, mod_hash_positive, div_hash, compo_hash, learn_hash
+from ..gpu_links import robe_hash, robe_sign, mod_hash, mod_hash_negative, div_hash, compo_hash, learn_hash
 
 
 class RobeHashOp(Op):
@@ -111,9 +111,9 @@ class ModHashOp(Op):
         return input_shapes[0]
 
 
-class ModHashPositiveOp(Op):
+class ModHashNegativeOp(Op):
     def __init__(self, node, nembed, ctx=None):
-        super().__init__(ModHashPositiveOp, [node], ctx)
+        super().__init__(ModHashNegativeOp, [node], ctx)
         self.nembed = nembed
         assert node.dtype == np.int32
         self.dtype = np.int32
@@ -121,12 +121,14 @@ class ModHashPositiveOp(Op):
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
             values = input_vals[0].asnumpy()
+            values = -(values + 1)
             assert values.dtype == np.int32
-            positive_parts = values[values >= 0] % self.nembed
-            values[values >= 0] = positive_parts
+            is_positive = (values >= 0)
+            positive_parts = values[is_positive] % self.nembed
+            values[is_positive] = positive_parts
             output_val[:] = values
         else:
-            mod_hash_positive(
+            mod_hash_negative(
                 input_vals[0], output_val, self.nembed, stream_handle)
 
     def gradient(self, output_grad):
@@ -247,8 +249,8 @@ def mod_hash_op(node, nembed, ctx=None):
     return ModHashOp(node, nembed, ctx=ctx)
 
 
-def mod_hash_positive_op(node, nembed, ctx=None):
-    return ModHashPositiveOp(node, nembed, ctx=ctx)
+def mod_hash_negative_op(node, nembed, ctx=None):
+    return ModHashNegativeOp(node, nembed, ctx=ctx)
 
 
 def div_hash_op(node, nembed, ctx=None):

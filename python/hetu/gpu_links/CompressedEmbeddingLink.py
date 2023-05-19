@@ -28,10 +28,10 @@ def mod_hash(in_arr, out_arr, nembed, stream=None):
         nembed), stream.handle if stream else None)
 
 
-def mod_hash_positive(in_arr, out_arr, nembed, stream=None):
+def mod_hash_negative(in_arr, out_arr, nembed, stream=None):
     assert isinstance(in_arr, _nd.NDArray)
     assert isinstance(out_arr, _nd.NDArray)
-    _LIB.DLGpuModHashPositive(in_arr.handle, out_arr.handle, ctypes.c_int(
+    _LIB.DLGpuModHashNegative(in_arr.handle, out_arr.handle, ctypes.c_int(
         nembed), stream.handle if stream else None)
 
 

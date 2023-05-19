@@ -1244,7 +1244,7 @@ HETUSYS_EXTERN_C {
     int DLGpuModHash(const DLArrayHandle input, DLArrayHandle output,
                      int nembed, DLStreamHandle stream_handle);
 
-    int DLGpuModHashPositive(const DLArrayHandle input, DLArrayHandle output,
+    int DLGpuModHashNegative(const DLArrayHandle input, DLArrayHandle output,
                              int nembed, DLStreamHandle stream_handle);
 
     int DLGpuDivHash(const DLArrayHandle input, DLArrayHandle output,
