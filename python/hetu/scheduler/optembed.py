@@ -33,21 +33,21 @@ class OptEmbedTrainer(EmbeddingTrainer):
         from ..gpu_ops import mul_byconst_op, reduce_sum_op, exp_op, opposite_op, add_op
         embed_input, dense_input, y_ = self.data_ops
         embeddings = self.embed_layer(embed_input)
-        loss,loss2, prediction = self.model(
+        loss, prediction = self.model(
             embeddings, dense_input, y_)
         regloss = mul_byconst_op(reduce_sum_op(exp_op(opposite_op(
             self.embed_layer.threshold)), axes=0, keepdims=False,), self.embedding_args['alpha'])
         loss = add_op(loss, regloss)
-        loss2 =add_op(loss2,regloss)
+        #loss2 =add_op(loss2,regloss)
         train_op = self.opt.minimize(loss)
         eval_nodes = {
-            self.train_name: [loss,loss2, prediction, y_, train_op],
+            self.train_name: [loss, prediction, y_, train_op],
         }
         val_embeddings = self.embed_layer.make_inference(embed_input)
-        val_loss,val_loss2, val_pred = self.model(
+        val_loss, val_pred = self.model(
             val_embeddings, dense_input, y_)
-        eval_nodes[self.validate_name] = [val_loss,val_loss2, val_pred, y_],
-        eval_nodes[self.test_name] = [val_loss,val_loss2, val_pred, y_],
+        eval_nodes[self.validate_name] = [val_loss, val_pred, y_],
+        eval_nodes[self.test_name] = [val_loss, val_pred, y_],
         return eval_nodes
 
     def calc_row_sparsity(self, embedding_table, threshold, stream):
@@ -199,17 +199,17 @@ class OptEmbedTrainer(EmbeddingTrainer):
 
     def eval_one_candidate(self, cand):
         self.set_candidate(cand)
-        loss,loss2, auc, _ = self.validate_once()
-        return auc, loss,loss2
+        loss, auc, _ = self.validate_once()
+        return auc, loss
 
     def eval_all_candidates(self):
         aucs, losses,loss2es = [], [],[]
         for cand in self.cands:
-            auc, loss,loss2 = self.eval_one_candidate(cand)
+            auc, loss = self.eval_one_candidate(cand)
             aucs.append(auc)
             losses.append(loss)
-            loss2es.append(loss2)
-        return aucs, losses,loss2es
+            #loss2es.append(loss2)
+        return aucs, losses
 
     def init_random_candidates(self, nprs):
         self.log_func("Generating random embedding masks ...")
@@ -267,7 +267,7 @@ class OptEmbedTrainer(EmbeddingTrainer):
         acc_cand = None
 
         for epoch_idx in range(int(max_epoch)):
-            aucs, losses,loss2es = self.eval_all_candidates()
+            aucs, losses = self.eval_all_candidates()
             self.log_func(
                 f'Epoch {epoch_idx}: best AUC {max(aucs)}; worst AUC {min(aucs)}')
             self.sort_cands(aucs)
@@ -281,11 +281,11 @@ class OptEmbedTrainer(EmbeddingTrainer):
             crossover = self.get_crossover(nprs)
             self.cands = self.cands[:self.keep_num] + mutation + crossover
 
-        acc_auc, acc_loss,acc_loss2 = self.eval_one_candidate(cand=acc_cand)
+        acc_auc, acc_loss = self.eval_one_candidate(cand=acc_cand)
         acc_cr, _ = self.calc_col_sparsity(acc_cand)
         self.log_func(
             f'Best candidate: {acc_cand}')
-        self.log_func(f'with AUC {acc_auc}; Loss {acc_loss};Loss2 {acc_loss2}; CR {acc_cr}')
+        self.log_func(f'with AUC {acc_auc}; Loss {acc_loss}; CR {acc_cr}')
         self.set_candidate(acc_cand)
 
     def test(self):
@@ -309,11 +309,11 @@ class OptEmbedTrainer(EmbeddingTrainer):
         log_file = open(self.result_file,
                         'w') if self.result_file is not None else None
         with self.timing():
-            test_loss,test_loss2, test_metric, _ = self.test_once()
+            test_loss, test_metric, _ = self.test_once()
         test_time = self.temp_time[0]
         results = {
             'avg_test_loss': test_loss,
-            'avg_test_loss2':test_loss2,
+            
             f'test_{self.monitor}': test_metric,
             'test_time': test_time,
         }

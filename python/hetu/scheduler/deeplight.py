@@ -24,12 +24,12 @@ class DeepLightTrainer(SwitchInferenceTrainer):
 
     def get_eval_nodes(self):
         embed_input, dense_input, y_ = self.data_ops
-        loss,loss2, prediction = self.model(
+        loss, prediction = self.model(
             self.embed_layer(embed_input), dense_input, y_)
         train_op = self.opt.minimize(loss)
         eval_nodes = {
-            self.train_name: [loss, loss2,prediction, y_, train_op, self.embed_layer.make_prune_op(y_)],
-            self.validate_name: [loss, loss2,prediction, y_],
-            self.test_name: [loss,loss2, prediction, y_],
+            self.train_name: [loss, prediction, y_, train_op, self.embed_layer.make_prune_op(y_)],
+            self.validate_name: [loss, prediction, y_],
+            self.test_name: [loss, prediction, y_],
         }
         return eval_nodes

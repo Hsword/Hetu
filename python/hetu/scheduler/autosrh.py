@@ -159,13 +159,13 @@ class AutoSrhTrainer(SwitchInferenceTrainer):
         from ..gpu_ops import div_op, broadcastto_op, reduce_mean_op, addbyconst_op
         embed_input, dense_input, y_ = self.data_ops
         embeddings = self.embed_layer(embed_input)
-        loss,loss2, prediction = self.model(
+        loss, prediction = self.model(
             embeddings, dense_input, y_)
         # add l1 loss for alpha
         loss = add_op(loss, mul_byconst_op(reduce_sum_op(
             abs_op(self.embed_layer.alpha), axes=[0, 1]), self.embedding_args['alpha_l1']))
-        loss2 = add_op(loss2, mul_byconst_op(reduce_sum_op(
-            abs_op(self.embed_layer.alpha), axes=[0, 1]), self.embedding_args['alpha_l1']))
+        #loss2 = add_op(loss2, mul_byconst_op(reduce_sum_op(
+           # abs_op(self.embed_layer.alpha), axes=[0, 1]), self.embedding_args['alpha_l1']))
         train_op = self.opt.minimize(loss)
         alpha_update = None
         embed_update = None
@@ -189,16 +189,16 @@ class AutoSrhTrainer(SwitchInferenceTrainer):
             self.embed_layer.alpha, alpha_update, 0., 1., self.ctx)
         # train here is for warm-up and re-train
         eval_nodes = {
-            self.train_name: [loss,loss2, prediction, y_, embed_update, *dense_param_updates],
+            self.train_name: [loss, prediction, y_, embed_update, *dense_param_updates],
             'alpha': [alpha_clip_op],
-            'embed': [loss,loss2, prediction, y_, embed_update],
-            self.validate_name: [loss,loss2, prediction, y_],
-            self.test_name: [loss,loss2, prediction, y_],
+            'embed': [loss, prediction, y_, embed_update],
+            self.validate_name: [loss, prediction, y_],
+            self.test_name: [loss, prediction, y_],
         }
         return eval_nodes
 
     def first_stage_train_step(self):
-        loss_val,loss2_val, predict_y, y_val = self.executor.run(
-            'embed', convert_to_numpy_ret_vals=True)[:4]
+        loss_val, predict_y, y_val = self.executor.run(
+            'embed', convert_to_numpy_ret_vals=True)[:3]
         self.executor.run('alpha')
-        return loss_val,loss2_val, predict_y, y_val
+        return loss_val, predict_y, y_val

@@ -257,11 +257,11 @@ class AutoDimTrainer(EmbeddingTrainer):
         log_file = open(self.result_file,
                         'w') if self.result_file is not None else None
         with self.timing():
-            test_loss,test_loss2, test_metric, _ = self.test_once()
+            test_loss, test_metric, _ = self.test_once()
         test_time = self.temp_time[0]
         results = {
             'avg_test_loss': test_loss,
-            'avg_test_loss2':test_loss2,
+            
             f'test_{self.monitor}': test_metric,
             'test_time': test_time,
         }
@@ -307,7 +307,7 @@ class AutoDimTrainer(EmbeddingTrainer):
         from ..gpu_ops import gradients
         from ..initializers import GenEmpty
         embed_input, dense_input, y_ = self.data_ops
-        loss,loss2, prediction = self.model(
+        loss, prediction = self.model(
             self.embed_layer(embed_input), dense_input, y_)
         train_op = self.opt.minimize(loss)
         lookups = []
@@ -338,15 +338,15 @@ class AutoDimTrainer(EmbeddingTrainer):
 
         self.var_lookups = {dim: GenEmpty()(
             (self.batch_size, self.num_slot, dim), f'lookups{dim}', False, self.ctx) for dim in self.dim_candidates}
-        new_loss,new_loss2, new_pred = self.model(self.embed_layer.make_embed(
+        new_loss, new_pred = self.model(self.embed_layer.make_embed(
             self.var_lookups), dense_input, y_)
         alpha_grad = gradients(new_loss, [self.alpha])
 
         eval_nodes = {
-            self.train_name: [loss,loss2, prediction, y_, param_opts],
+            self.train_name: [loss, prediction, y_, param_opts],
             'lookups': lookups + dedup_lookups + unique_indices + param_opts,
-            self.validate_name: [loss,loss2, prediction, y_],
-            self.test_name: [loss,loss2, prediction, y_],
+            self.validate_name: [loss, prediction, y_],
+            self.test_name: [loss, prediction, y_],
             'allgrads': [dalpha_op] + dup_dembed_ops + dembed_ops + dparam_ops,
             'alpha': [alpha_grad],
         }
@@ -355,7 +355,7 @@ class AutoDimTrainer(EmbeddingTrainer):
 
     def get_eval_nodes_without_second_order(self):
         embed_input, dense_input, y_ = self.data_ops
-        loss,loss2, prediction = self.model(
+        loss,prediction = self.model(
             self.embed_layer(embed_input), dense_input, y_)
         train_op = self.opt.minimize(loss)
         param_opts = []
@@ -368,9 +368,9 @@ class AutoDimTrainer(EmbeddingTrainer):
         assert alpha_opt is not None
 
         eval_nodes = {
-            self.train_name: [loss,loss2, prediction, y_, param_opts],
-            self.validate_name: [loss,loss2, prediction, y_],
-            self.test_name: [loss,loss2, prediction, y_],
+            self.train_name: [loss, prediction, y_, param_opts],
+            self.validate_name: [loss, prediction, y_],
+            self.test_name: [loss, prediction, y_],
             'alpha': [alpha_opt],
         }
 

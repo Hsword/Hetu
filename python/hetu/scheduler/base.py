@@ -226,12 +226,12 @@ class EmbeddingTrainer(object):
 
     def run_epoch(self, train_batch_num, epoch, part, log_file=None):
         with self.timing():
-            train_loss,train_loss_mae, train_metric = self.train_once(
+            train_loss, train_metric = self.train_once(
                 train_batch_num, epoch, part)
         train_time = self.temp_time[0]
         results = {
             'avg_train_loss': train_loss,
-            'avg_train_loss_ame':train_loss_mae,
+            
             'train_time': train_time,
         }
         if self.monitor != 'loss':
@@ -239,12 +239,12 @@ class EmbeddingTrainer(object):
         early_stop = False
         if self.check_val:
             with self.timing():
-                val_loss,val_loss_mae, val_metric, early_stop = self.validate_once(
+                val_loss, val_metric, early_stop = self.validate_once(
                     epoch, part)
             val_time = self.temp_time[0]
             results.update({
                 'avg_val_loss': val_loss,
-                'avg_val_loss_mae':val_loss_mae,
+                
                 'val_time': val_time,
             })
             if self.monitor != 'loss':
@@ -254,14 +254,14 @@ class EmbeddingTrainer(object):
             if self.check_val:
                 test_epoch, test_part = None, None
             with self.timing():
-                test_loss, test_loss_mae,test_metric, test_early_stop = self.test_once(
+                test_loss, test_metric, test_early_stop = self.test_once(
                     test_epoch, test_part)
             if not self.check_val:
                 early_stop = test_early_stop
             test_time = self.temp_time[0]
             results.update({
                 'avg_test_loss': test_loss,
-                'avg_test_loss_mae':test_loss_mae,
+                
                 'test_time': test_time,
             })
             if self.monitor != 'loss':
@@ -277,9 +277,9 @@ class EmbeddingTrainer(object):
         return results, early_stop
 
     def train_step(self):
-        loss_val, loss_val_mae,predict_y, y_val = self.executor.run(
-            self.train_name, convert_to_numpy_ret_vals=True)[:4]
-        return loss_val,loss_val_mae, predict_y, y_val
+        loss_val, predict_y, y_val = self.executor.run(
+            self.train_name, convert_to_numpy_ret_vals=True)[:3]
+        return loss_val, predict_y, y_val
 
     def train_once(self, step_num, epoch, part):
         localiter = range(step_num)
@@ -293,12 +293,12 @@ class EmbeddingTrainer(object):
         elif self.check_acc:
             train_acc = []
         for it in localiter:
-            loss_val, loss_val_mae,predict_y, y_val = self.train_step()
+            loss_val, predict_y, y_val = self.train_step()
             self.executor.multi_log(
-                {'epoch': epoch, 'part': part, 'train_loss': loss_val,'train_loss_mae':loss_val_mae})
+                {'epoch': epoch, 'part': part, 'train_loss': loss_val})
             self.executor.step_logger()
             train_loss.append(loss_val[0])
-            train_loss_mae.append(loss_val_mae[0])
+            #train_loss_mae.append(loss_val_mae[0])
             if self.check_auc:
                 ground_truth_y.append(y_val)
                 predicted_y.append(predict_y)
@@ -306,7 +306,7 @@ class EmbeddingTrainer(object):
                 acc_val = self.get_acc(y_val, predict_y)
                 train_acc.append(acc_val)
         train_loss = np.mean(train_loss)
-        train_loss_mae = np.mean(train_loss_mae)
+        #train_loss_mae = np.mean(train_loss_mae)
         result = train_loss
         if self.check_auc:
             train_auc = self.get_auc(ground_truth_y, predicted_y)
@@ -314,7 +314,7 @@ class EmbeddingTrainer(object):
         elif self.check_acc:
             train_acc = np.mean(train_acc)
             result = train_acc
-        return train_loss,train_loss_mae, result
+        return train_loss, result
 
     def evaluate_once(self, name, epoch=None, part=None):
         step_num = self.executor.get_batch_num(name)
@@ -329,10 +329,10 @@ class EmbeddingTrainer(object):
         elif self.check_acc:
             test_acc = []
         for it in localiter:
-            loss_value,loss_value_mae, test_y_predicted, y_test_value = self.executor.run(
+            loss_value, test_y_predicted, y_test_value = self.executor.run(
                 name, convert_to_numpy_ret_vals=True)
             test_loss.append(loss_value[0])
-            test_loss_mae.append(loss_value_mae[0])
+            #test_loss_mae.append(loss_value_mae[0])
             if self.check_auc:
                 ground_truth_y.append(y_test_value)
                 predicted_y.append(test_y_predicted)
@@ -341,7 +341,7 @@ class EmbeddingTrainer(object):
                     y_test_value, test_y_predicted)
                 test_acc.append(correct_prediction)
         test_loss = np.mean(test_loss)
-        test_loss_mae = np.mean(test_loss_mae)
+        #test_loss_mae = np.mean(test_loss_mae)
         new_result = test_loss
         if self.check_auc:
             test_auc = self.get_auc(ground_truth_y, predicted_y)
@@ -353,7 +353,7 @@ class EmbeddingTrainer(object):
             early_stopping = self.try_save_ckpt(new_result, (epoch, part))
         else:
             early_stopping = False
-        return test_loss,test_loss_mae, new_result, early_stopping
+        return test_loss, new_result, early_stopping
 
     def validate_once(self, epoch=None, part=None):
         return self.evaluate_once(self.validate_name, epoch=epoch, part=part)
@@ -536,11 +536,11 @@ class EmbeddingTrainer(object):
         log_file = open(self.result_file,
                         'w') if self.result_file is not None else None
         with self.timing():
-            test_loss,test_loss_mae, test_metric, _ = self.test_once()
+            test_loss, test_metric, _ = self.test_once()
         test_time = self.temp_time[0]
         results = {
             'avg_test_loss': test_loss,
-            'avg_test_loss_mae':test_loss_mae,
+            
             f'test_{self.monitor}': test_metric,
             'test_time': test_time,
         }
@@ -562,23 +562,23 @@ class EmbeddingTrainer(object):
     def get_eval_nodes(self):
         embed_input, dense_input, y_ = self.data_ops
         embeddings = self.get_embeddings(embed_input)
-        loss,loss2, prediction = self.model(
+        loss, prediction = self.model(
             embeddings, dense_input, y_)
         train_op = self.opt.minimize(loss)
         eval_nodes = {
-            self.train_name: [loss,loss2, prediction, y_, train_op],
-            self.validate_name: [loss,loss2, prediction, y_],
-            self.test_name: [loss,loss2, prediction, y_],
+            self.train_name: [loss, prediction, y_, train_op],
+            self.validate_name: [loss, prediction, y_],
+            self.test_name: [loss, prediction, y_],
         }
         return eval_nodes
 
     def get_eval_nodes_inference(self):
         embed_input, dense_input, y_ = self.data_ops
         embeddings = self.get_embeddings(embed_input)
-        loss, loss2,prediction = self.model(
+        loss, prediction = self.model(
             embeddings, dense_input, y_)
         eval_nodes = {
-            self.test_name: [loss,loss2, prediction, y_],
+            self.test_name: [loss, prediction, y_],
         }
         return eval_nodes
 
