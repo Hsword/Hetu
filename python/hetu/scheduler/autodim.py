@@ -261,7 +261,6 @@ class AutoDimTrainer(EmbeddingTrainer):
         test_time = self.temp_time[0]
         results = {
             'avg_test_loss': test_loss,
-            
             f'test_{self.monitor}': test_metric,
             'test_time': test_time,
         }
@@ -355,7 +354,7 @@ class AutoDimTrainer(EmbeddingTrainer):
 
     def get_eval_nodes_without_second_order(self):
         embed_input, dense_input, y_ = self.data_ops
-        loss,prediction = self.model(
+        loss, prediction = self.model(
             self.embed_layer(embed_input), dense_input, y_)
         train_op = self.opt.minimize(loss)
         param_opts = []

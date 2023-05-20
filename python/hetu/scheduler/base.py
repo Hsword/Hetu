@@ -231,7 +231,6 @@ class EmbeddingTrainer(object):
         train_time = self.temp_time[0]
         results = {
             'avg_train_loss': train_loss,
-            
             'train_time': train_time,
         }
         if self.monitor != 'loss':
@@ -244,7 +243,6 @@ class EmbeddingTrainer(object):
             val_time = self.temp_time[0]
             results.update({
                 'avg_val_loss': val_loss,
-                
                 'val_time': val_time,
             })
             if self.monitor != 'loss':
@@ -261,7 +259,6 @@ class EmbeddingTrainer(object):
             test_time = self.temp_time[0]
             results.update({
                 'avg_test_loss': test_loss,
-                
                 'test_time': test_time,
             })
             if self.monitor != 'loss':
@@ -298,7 +295,7 @@ class EmbeddingTrainer(object):
                 {'epoch': epoch, 'part': part, 'train_loss': loss_val})
             self.executor.step_logger()
             train_loss.append(loss_val[0])
-            #train_loss_mae.append(loss_val_mae[0])
+            # train_loss_mae.append(loss_val_mae[0])
             if self.check_auc:
                 ground_truth_y.append(y_val)
                 predicted_y.append(predict_y)
@@ -332,7 +329,7 @@ class EmbeddingTrainer(object):
             loss_value, test_y_predicted, y_test_value = self.executor.run(
                 name, convert_to_numpy_ret_vals=True)
             test_loss.append(loss_value[0])
-            #test_loss_mae.append(loss_value_mae[0])
+            # test_loss_mae.append(loss_value_mae[0])
             if self.check_auc:
                 ground_truth_y.append(y_test_value)
                 predicted_y.append(test_y_predicted)
@@ -540,7 +537,6 @@ class EmbeddingTrainer(object):
         test_time = self.temp_time[0]
         results = {
             'avg_test_loss': test_loss,
-            
             f'test_{self.monitor}': test_metric,
             'test_time': test_time,
         }

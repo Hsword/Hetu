@@ -203,12 +203,12 @@ class OptEmbedTrainer(EmbeddingTrainer):
         return auc, loss
 
     def eval_all_candidates(self):
-        aucs, losses,loss2es = [], [],[]
+        aucs, losses, loss2es = [], [], []
         for cand in self.cands:
             auc, loss = self.eval_one_candidate(cand)
             aucs.append(auc)
             losses.append(loss)
-            #loss2es.append(loss2)
+            # loss2es.append(loss2)
         return aucs, losses
 
     def init_random_candidates(self, nprs):
@@ -313,7 +313,6 @@ class OptEmbedTrainer(EmbeddingTrainer):
         test_time = self.temp_time[0]
         results = {
             'avg_test_loss': test_loss,
-            
             f'test_{self.monitor}': test_metric,
             'test_time': test_time,
         }

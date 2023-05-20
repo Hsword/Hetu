@@ -58,7 +58,6 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
             'epoch': ep, 'part': part, 'npart': self.num_test_every_epoch, 'args': self.get_args_for_saving()})
         results = {
             'avg_test_loss': test_loss,
-            
             f'test_{self.monitor}': test_metric,
             'test_time': test_time,
         }

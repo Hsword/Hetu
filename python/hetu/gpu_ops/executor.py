@@ -593,7 +593,7 @@ class Executor(object):
         from ..random import get_seed_status
         others['seed'] = get_seed_status()
         with open(os.path.join(file_path, file_name), "wb") as writer:
-            pickle.dump(others, writer,protocol=4)
+            pickle.dump(others, writer, protocol=4)
 
     def load(self, file_path: str, file_name: str, consider_splits: bool = False) -> None:
         assert os.path.isdir(

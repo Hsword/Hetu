@@ -22,7 +22,7 @@ class MSELoss(BaseLossLayer):
 
 
 class MAELoss(BaseLossLayer):
-    def __call__(self,inputs,targets):
+    def __call__(self, inputs, targets):
         loss = ht.abs_op(ht.minus_op(inputs, targets))
         return super().reduce(loss)
 
