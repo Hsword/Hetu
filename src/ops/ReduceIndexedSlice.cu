@@ -242,7 +242,7 @@ __global__ void adagrad_update_indexedslices_kernel(
     int index = indices[ind / dim];
     if (index < 0)
         return;
-    int offset = index * dim + ind % dim;
+    size_t offset = (size_t)index * dim + ind % dim;
     accum[offset] = accum[offset] + grads[ind] * grads[ind];
     output[ind] = params[ind] - lr * grads[ind] / (sqrtf(accum[offset]) + eps);
 }
@@ -285,7 +285,7 @@ __global__ void adam_update_indexedslices_kernel(
     int index = indices[ind / dim];
     if (index < 0)
         return;
-    int offset = index * dim + ind % dim;
+    size_t offset = (size_t)index * dim + ind % dim;
     m[offset] = beta1 * m[offset] + (1 - beta1) * grads[ind];
     v[offset] = beta2 * v[offset] + (1 - beta2) * grads[ind] * grads[ind];
     float m_local = m[offset] / (1 - betats[0]);
@@ -303,7 +303,7 @@ __global__ void amsgrad_update_indexedslices_kernel(
     int index = indices[ind / dim];
     if (index < 0)
         return;
-    int offset = index * dim + ind % dim;
+    size_t offset = (size_t)index * dim + ind % dim;
     m[offset] = beta1 * m[offset] + (1 - beta1) * grads[ind];
     v[offset] = beta2 * v[offset] + (1 - beta2) * grads[ind] * grads[ind];
     float m_local = m[offset] / (1 - betats[0]);
