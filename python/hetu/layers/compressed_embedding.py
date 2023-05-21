@@ -789,31 +789,12 @@ class AutoSrhEmbedding(SparseEmbedding):
             return ht.mul_op(embeddings, ht.reshape_to_op(alphas, embeddings))
 
 
-class AutoSrhRetrainEmbedding(SparseEmbedding):
-    def __init__(self, num_embeddings, embedding_dim, embedding_table=None, mask=None, form='csr', name='embedding', ctx=None):
-        self.num_embeddings = num_embeddings
-        self.embedding_dim = embedding_dim
-        self.name = name
-        self.ctx = ctx
-        if embedding_table is None:
-            self.embedding_table = ht.init.nulls(
-                (num_embeddings, embedding_dim), name=self.name, ctx=ctx)
-        else:
-            self.embedding_table = ht.placeholder_op(
-                value=embedding_table, name=self.name, ctx=ctx)
-        if mask is None:
-            self.mask = ht.init.nulls((num_embeddings, embedding_dim),
-                                      name=f'{name}_mask', trainable=False, ctx=self.ctx, dtype=np.int32)
-        else:
-            self.mask = ht.placeholder_op(
-                f'{name}_mask', value=mask, trainable=False, dtype=np.int32, ctx=self.ctx)
+class AutoSrhRetrainEmbedding(AutoSrhEmbedding):
+    def __init__(self, num_embeddings, embedding_dim, nsplit, group_indices, form='csr', initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+        super().__init__(num_embeddings, embedding_dim,
+                         nsplit, group_indices, initializer, name, ctx)
         self.form = form
-
-    def __call__(self, x):
-        with ht.context(self.ctx):
-            lookups = ht.embedding_lookup_op(self.embedding_table, x)
-            lookup_masks = ht.embedding_lookup_op(self.mask, x)
-            return ht.mask_op(lookups, lookup_masks)
+        self.alpha.trainable = False
 
 
 class QuantizedEmbedding(Embedding):

@@ -50,8 +50,7 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
         os.makedirs(self.save_dir, exist_ok=True)
         if self.save_topk > 0:
             # load the best ckpt for inference
-            best_meta = self.best_ckpts[0]
-            ep, part = best_meta
+            ep, part = self.get_best_meta()
         else:
             ep, part = self.cur_ep, self.cur_part
         infer_executor.save(self.save_dir, f'final_ep{ep}_{part}.pkl', {

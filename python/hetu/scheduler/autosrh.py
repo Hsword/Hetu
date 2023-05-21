@@ -1,11 +1,9 @@
 from .base import EmbeddingTrainer
 from .switchinference import SwitchInferenceTrainer
 from ..layers import AutoSrhEmbedding, AutoSrhRetrainEmbedding
-from ..ndarray import empty
-from ..gpu_links import multiply_grouping_alpha, num_less_than, set_mask_less_than
 from ..optimizer import SGDOptimizer
-from ..random import get_seed_status
 import numpy as np
+from copy import deepcopy
 
 
 class AutoSrhOverallTrainer(EmbeddingTrainer):
@@ -18,36 +16,49 @@ class AutoSrhOverallTrainer(EmbeddingTrainer):
     def assert_use_multi(self):
         assert self.use_multi == self.separate_fields == 0
 
+    def copy_args_with_stage(self, stage):
+        new_args = deepcopy(self.args)
+        new_args['embedding_args']['stage'] = stage
+        return new_args
+
     def fit(self):
         stage = self.args['embedding_args']['stage']
+        nsplit = self.embedding_args['nsplit']
+        grouping_indices = self.dataset.get_whole_frequency_grouping(
+            self.data_ops[0].dataloaders[self.train_name].raw_data, nsplit).astype(np.int32)
+        self.grouping_indices = grouping_indices
+        counter = [(grouping_indices == value).sum().item()
+                   for value in range(nsplit)]
+        self.log_func(f"AutoSrh feature nums (from low to high): {counter}")
         # three stages: warmup, training, retraining
         if stage == 1:
             self.warmup_trainer = EmbeddingTrainer(
-                self.dataset, self.model, self.opt, self.args, self.data_ops)
+                self.dataset, self.model, self.opt, self.copy_args_with_stage(1), self.data_ops)
         else:
             self.warmup_trainer = None
         if stage <= 2:
             self.trainer = AutoSrhTrainer(
-                self.dataset, self.model, self.opt, self.args)
+                self.dataset, self.model, self.opt, self.copy_args_with_stage(2))
+            self.trainer.grouping_indices = grouping_indices
             self.trainer.prepare_path_for_retrain('train')
         else:
             self.trainer = None
         self.retrainer = AutoSrhRetrainer(
-            self.dataset, self.model, self.opt, self.args, self.data_ops)
+            self.dataset, self.model, self.opt, self.copy_args_with_stage(3), self.data_ops)
+        self.retrainer.grouping_indices = grouping_indices
         self.retrainer.prepare_path_for_retrain('retrain')
 
         if self.warmup_trainer is not None:
             self.warmup_trainer.fit()
-            ep, part = self.warmup_trainer.best_ckpts[0]
+            ep, part = self.warmup_trainer.get_best_meta()
             self.trainer.load_ckpt = self.warmup_trainer.join(
                 f'ep{ep}_{part}.pkl')
             self.warmup_trainer.executor.return_tensor_values()
             del self.warmup_trainer
         if self.trainer is not None:
             self.trainer.fit()
-            ep, part = self.trainer.best_ckpts[0]
-            self.retrainer.load_ckpt = self.trainer.join(
-                f'final_ep{ep}_{part}.pkl')
+            ep, part = self.trainer.get_best_meta()
+            self.retrainer.load_ckpt = self.trainer.join(f'ep{ep}_{part}.pkl')
             del self.trainer
         self.retrainer.fit()
 
@@ -83,42 +94,27 @@ class AutoSrhTrainer(SwitchInferenceTrainer):
         meta = super().try_load_ckpt()
         assert meta is not None
         st = meta['state_dict']
-        # check whether from stage 1 or 2
-        keys = {
-            'Embedding': 1,
-            f'{self.sparse_name}_groupind': 2,
-        }
-        stage = None
-        for k in st:
-            if k in keys:
-                stage = keys[k]
-                break
+        stage = meta['args']['embedding_args']['stage']
+        assert stage in (1, 2)
         if stage == 1:
             assert self.sparse_name not in st
             st[self.sparse_name] = st.pop('Embedding')
             meta = self.load_only_parameters(meta)
-        else:
-            assert stage == 2 and self.sparse_name in st
         return meta
 
     def get_embed_layer(self):
-        nsplit = self.embedding_args['nsplit']
-        grouping_indices = self.dataset.get_whole_frequency_grouping(
-            self.data_ops[0].dataloaders[self.train_name].raw_data, nsplit).astype(np.int32)
-        counter = [(grouping_indices == value).sum().item()
-                   for value in range(nsplit)]
-        self.log_func(f"AutoSrh feature nums (from low to high): {counter}")
         return AutoSrhEmbedding(
             self.num_embed,
             self.embedding_dim,
             self.embedding_args['nsplit'],
-            grouping_indices,
+            self.grouping_indices,
             initializer=self.initializer,
             name=self.sparse_name,
             ctx=self.ectx,
         )
 
     def fit(self):
+        self.log_func('Start training...')
         assert self.load_ckpt is not None, 'Need to load the best ckpt for warm up!'
         assert self.save_topk > 0, 'Need to load the best ckpt for dimension selection; please set save_topk a positive integer.'
 
@@ -139,45 +135,6 @@ class AutoSrhTrainer(SwitchInferenceTrainer):
         stream.sync()
         self.load_best_ckpt()
         self.executor.return_tensor_values()
-        workspace = empty((self.num_embed, self.embedding_dim),
-                          ctx=self.ectx, dtype=np.int32)
-        prune_rate = empty((1,), ctx=self.ectx)
-        embed_arr = self.embed_layer.embedding_table.tensor_value
-        grouping_arr = self.embed_layer.group_indices.tensor_value
-        alpha_arr = self.embed_layer.alpha.tensor_value
-        multiply_grouping_alpha(embed_arr, grouping_arr, alpha_arr, stream)
-        l, r = 0., 100.
-        cnt = 0
-        while l < r:
-            cnt += 1
-            mid = (l + r) / 2
-            num_less_than(
-                embed_arr, workspace, prune_rate, mid, None, stream)
-            stream.sync()
-            sparse_items = prune_rate.asnumpy()[0]
-            sparse_rate = sparse_items / self.num_embed / self.embedding_dim
-            if abs(sparse_rate - self.prune_rate) < 1e-3 * self.compress_rate:
-                break
-            elif sparse_rate > self.prune_rate:
-                r = mid
-            else:
-                l = mid
-            if cnt > 100:
-                break
-        self.log_func(
-            f'Final prune rate: {sparse_rate} (target {self.prune_rate}); final threshold: {mid}')
-        set_mask_less_than(embed_arr, workspace, mid, stream)
-        meta = {'epoch': 0, 'part': -1, 'npart': self.num_test_every_epoch,
-                'args': self.get_args_for_saving()}
-        st = self.executor.state_dict()
-        _ = st.pop(f'{self.sparse_name}_groupind')
-        _ = st.pop(f'{self.sparse_name}_alpha')
-        st[f'{self.sparse_name}_mask'] = workspace.asnumpy()
-        meta['state_dict'] = st
-        meta['seed'] = get_seed_status()
-        meta = self.load_only_parameters(meta)
-        ep, part = self.best_ckpts[0]
-        self.dump(meta, self.join(f'final_ep{ep}_{part}.pkl'))
 
     def get_eval_nodes(self):
         from ..gpu_ops import add_op, reduce_sum_op, mul_byconst_op, abs_op, param_clip_op
@@ -237,56 +194,20 @@ class AutoSrhRetrainer(SwitchInferenceTrainer):
     def try_load_ckpt(self):
         meta = super().try_load_ckpt()
         assert meta is not None
-        st = meta['state_dict']
-        # check whether from stage 2 or 3
-        keys = {
-            f'{self.sparse_name}_groupind': 2,
-            f'{self.sparse_name}_mask': 3,
-        }
-        stage = None
-        for k in st:
-            if k in keys:
-                stage = keys[k]
-                break
+        stage = meta['args']['embedding_args']['stage']
+        assert stage in (2, 3)
         if stage == 2:
-            embed_arr = st.pop(self.sparse_name)
-            grouping_arr = st.pop(f'{self.sparse_name}_groupind')
-            alpha_arr = st.pop(f'{self.sparse_name}_alpha')
-            embed_arr = embed_arr * alpha_arr[grouping_arr.squeeze(-1)]
-            l, r = 0., 100.
-            cnt = 0
-            while l < r:
-                cnt += 1
-                mid = (l + r) / 2
-                sparse_items = (np.abs(embed_arr) < mid).sum()
-                sparse_rate = sparse_items / self.num_embed / self.embedding_dim
-                if abs(sparse_rate - self.prune_rate) < 1e-3 * self.compress_rate:
-                    break
-                elif sparse_rate > self.prune_rate:
-                    r = mid
-                else:
-                    l = mid
-                if cnt > 100:
-                    break
-            self.log_func(
-                f'Final prune rate: {sparse_rate} (target {self.prune_rate}); final threshold: {mid}')
-            mask = (np.abs(embed_arr) < mid)
-            embed_arr[mask] = 0
-            mask = 1 - mask.astype(np.int32)
-            st[self.sparse_name] = embed_arr
-            st[f'{self.sparse_name}_mask'] = mask
             meta = self.load_only_parameters(meta)
-        else:
-            assert stage == 3 and self.sparse_name in st
         return meta
 
-    def get_embed_layer(self, embedding_table=None, mask=None):
+    def get_embed_layer(self):
         return AutoSrhRetrainEmbedding(
             self.num_embed,
             self.embedding_dim,
-            embedding_table,
-            mask,
+            self.embedding_args['nsplit'],
+            self.grouping_indices,
             self.form,
+            initializer=self.initializer,
             name=self.sparse_name,
             ctx=self.ectx,
         )
@@ -305,5 +226,30 @@ class AutoSrhRetrainer(SwitchInferenceTrainer):
         stream.sync()
         self.load_best_ckpt()
         self.executor.return_tensor_values()
+
+        embed_arr = self.embed_layer.embedding_table.tensor_value.asnumpy()
+        grouping_arr = self.grouping_indices
+        alpha_arr = self.embed_layer.alpha.tensor_value.asnumpy()
+        embed_arr = embed_arr * alpha_arr[grouping_arr]
+        l, r = 0., 100.
+        cnt = 0
+        while l < r:
+            cnt += 1
+            mid = (l + r) / 2
+            sparse_items = (np.abs(embed_arr) < mid).sum()
+            sparse_rate = sparse_items / self.num_embed / self.embedding_dim
+            if abs(sparse_rate - self.prune_rate) < 1e-3 * self.compress_rate:
+                break
+            elif sparse_rate > self.prune_rate:
+                r = mid
+            else:
+                l = mid
+            if cnt > 100:
+                break
+        self.log_func(
+            f'Final prune rate: {sparse_rate} (target {self.prune_rate}); final threshold: {mid}')
+        mask = (np.abs(embed_arr) < mid)
+        embed_arr[mask] = 0
+        self.embed_layer.embedding_table.tensor_value[:] = embed_arr
 
         self.check_inference()

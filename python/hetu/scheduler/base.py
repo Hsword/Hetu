@@ -64,6 +64,7 @@ class EmbeddingTrainer(object):
             assert osp.isdir(
                 self.save_dir), f'save_dir {self.save_dir} not exists'
         self.load_ckpt = self.args.get('load_ckpt', False)
+        self.loaded_ep = None
         self.train_name = self.args.get('train_name', 'train')
         self.validate_name = self.args.get('validate_name', 'validate')
         self.test_name = self.args.get('test_name', 'test')
@@ -469,6 +470,7 @@ class EmbeddingTrainer(object):
             start_epoch = meta['epoch']
             start_part = meta['part'] + 1
             assert meta['npart'] == self.num_test_every_epoch
+            self.loaded_ep = (meta['epoch'], meta['part'])
             self.start_ep = start_epoch * self.num_test_every_epoch + start_part
             self.log_func(f'Load ckpt from {osp.split(self.load_ckpt)[-1]}.')
             return meta
@@ -504,11 +506,16 @@ class EmbeddingTrainer(object):
                 self.executor.set_dataloader_batch_index(
                     self.train_name, start_part * self.base_batch_num)
 
+    def get_best_meta(self):
+        best_meta = self.best_ckpts[0]
+        if best_meta is None:
+            best_meta = self.loaded_ep
+        return best_meta
+
     def load_best_ckpt(self):
         if self.save_topk > 0:
             # load the best ckpt for inference
-            best_meta = self.best_ckpts[0]
-            ep, part = best_meta
+            ep, part = self.get_best_meta()
             cur_meta = self.load(self.join(f'ep{ep}_{part}.pkl'))
             self.executor.load_dict(cur_meta['state_dict'])
             self.executor.load_seeds(cur_meta['seed'])
