@@ -557,21 +557,31 @@ class Executor(object):
         if self.config.nccl_stream is not None:
             self.config.nccl_stream.sync()
 
+    def state_dict(self):
+        state_dict = {}
+        for node, value in self.config.placeholder_to_arr_map.items():
+            if value is not None:
+                state_dict[node.name] = value.asnumpy()
+            else:
+                # feed node
+                assert node.shape is None
+        return state_dict
+
     def save(self, file_path: str, file_name: str, others: Optional[dict] = None) -> None:
+        if others is None:
+            others = {}
+        else:
+            assert 'state_dict' not in others
+
         self.sync_all_streams()
         assert os.path.isdir(
             file_path), 'Need to specify a work directory to save parameters.'
         assert others is None or 'state_dict' not in others
-        state_dic = {}
         if self.comm_mode in (None, 'AllReduce'):
             # when using allreduce, users need to specify the worker whose rank equals 0 to save
-            for node, value in self.config.placeholder_to_arr_map.items():
-                if value is not None:
-                    state_dic[node.name] = value.asnumpy()
-                else:
-                    # feed node
-                    assert node.shape is None
+            state_dict = self.state_dict()
         else:
+            state_dict = {}
             self.ps_comm.BarrierWorker()
             if self.config.rank == 0:
                 for node, value in self.config.placeholder_to_arr_map.items():
@@ -582,14 +592,10 @@ class Executor(object):
                             nodeid, ctypes.c_char_p(bytes(file_path, 'utf-8')))
                         self.ps_comm.Wait(nodeid)
                     else:
-                        state_dic[node.name] = value.asnumpy()
+                        state_dict[node.name] = value.asnumpy()
             self.ps_comm.BarrierWorker()
 
-        if others is None:
-            others = {}
-        else:
-            assert 'state_dict' not in others
-        others['state_dict'] = state_dic
+        others['state_dict'] = state_dict
         from ..random import get_seed_status
         others['seed'] = get_seed_status()
         with open(os.path.join(file_path, file_name), "wb") as writer:

@@ -99,8 +99,8 @@ def worker(args):
     elif args.method == 'autosrh':
         embed_layer_type = htl.AutoSrhEmbedding
         embedding_args = {
-            'nsplit': 10,
-            'warm_start_epochs': 1,
+            'nsplit': 6,
+            'stage': 1,
             'alpha_l1': 0.00001,
             'alpha_lr': 0.001,
         }

@@ -6,13 +6,13 @@ from ..gpu_ops import Executor
 
 
 class SwitchInferenceTrainer(EmbeddingTrainer):
-    def __init__(self, dataset, model, opt, args, **kargs):
-        super().__init__(dataset, model, opt, args, **kargs)
+    def __init__(self, dataset, model, opt, args, data_ops=None, **kargs):
+        super().__init__(dataset, model, opt, args, data_ops, **kargs)
         from .deeplight import DeepLightTrainer
         from .pep import PEPEmbTrainer
-        from .autosrh import AutoSrhTrainer
+        from .autosrh import AutoSrhTrainer, AutoSrhRetrainer
         self.use_sparse = isinstance(
-            self, (DeepLightTrainer, PEPEmbTrainer, AutoSrhTrainer))
+            self, (DeepLightTrainer, PEPEmbTrainer, AutoSrhTrainer, AutoSrhRetrainer))
         if self.use_sparse:
             real_dim = self.compress_rate * self.embedding_dim
             if real_dim >= 3:
@@ -36,13 +36,13 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
 
     def check_inference(self):
         # check inference; use sparse embedding
+        del self.executor
         if self.use_sparse:
             infer_eval_nodes = self.get_eval_nodes_test_inference()
         else:
             infer_eval_nodes = self.get_eval_nodes_inference()
         infer_executor = Executor(infer_eval_nodes, ctx=self.ctx,
                                   seed=self.seed, log_path=self.log_dir)
-        del self.executor
         self.executor = infer_executor
         with self.timing():
             test_loss, test_metric, _ = self.test_once()

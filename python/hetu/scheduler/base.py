@@ -16,7 +16,7 @@ from ..gpu_ops import Executor, concatenate_op
 
 
 class EmbeddingTrainer(object):
-    def __init__(self, dataset, model, opt, args, **kargs):
+    def __init__(self, dataset, model, opt, args, data_ops=None, **kargs):
         self.model = model
         self.opt = opt
 
@@ -83,8 +83,6 @@ class EmbeddingTrainer(object):
         self.check_auc = self.monitor == 'auc'
         self.result_file = self.args.get('result_file', None)
 
-        self.init_ckpts()
-
         if self.early_stop_steps > 0:
             self.early_stop_counter = 0
 
@@ -92,7 +90,9 @@ class EmbeddingTrainer(object):
 
         self.start_ep = 0
         self.dataset = dataset
-        self.data_ops = self.get_data()
+        if data_ops is None:
+            data_ops = self.get_data()
+        self.data_ops = data_ops
 
     @property
     def var2arr(self):
@@ -101,6 +101,18 @@ class EmbeddingTrainer(object):
     @property
     def stream(self):
         return self.executor.config.comp_stream
+
+    def join(self, path):
+        return osp.join(self.save_dir, path)
+
+    def load(self, path):
+        with open(path, 'rb') as fr:
+            results = pickle.load(fr)
+        return results
+
+    def dump(self, items, path):
+        with open(path, 'wb') as fw:
+            pickle.dump(items, fw)
 
     def init_ckpts(self):
         real_save_topk = max(1, self.save_topk)
@@ -385,8 +397,7 @@ class EmbeddingTrainer(object):
                     f'Current ckpts {self.best_ckpts} with aucs {self.best_results}.')
                 if rm_meta is not None:
                     ep, part = rm_meta
-                    os.remove(
-                        osp.join(self.save_dir, f'ep{ep}_{part}.pkl'))
+                    os.remove(self.join(f'ep{ep}_{part}.pkl'))
                     self.log_func(
                         f'Remove ep{ep}_{part}.pkl with {self.monitor}:{rm_res}.')
         elif self.save_topk <= 0 and new_result >= self.best_results[0]:
@@ -443,18 +454,17 @@ class EmbeddingTrainer(object):
 
     def assert_load_args(self, load_args):
         assert self.args['model'].__name__ == load_args['model']
-        for k in ['method', 'dim', 'dataset', 'separate_fields', 'use_multi', 'compress_rate', 'embedding_args']:
+        for k in ['method', 'dim', 'dataset', 'separate_fields', 'use_multi', 'compress_rate']:
             assert load_args[k] == self.args[
                 k], f'Current argument({k}) {self.args[k]} different from loaded {load_args[k]}'
-        for k in ['bs', 'opt', 'lr', 'num_test_every_epoch', 'seed']:
+        for k in ['bs', 'opt', 'lr', 'num_test_every_epoch', 'seed', 'embedding_args']:
             if load_args[k] != self.args[k]:
                 self.log_func(
                     f'Warning: current argument({k}) {self.args[k]} different from loaded {load_args[k]}')
 
     def try_load_ckpt(self):
         if self.load_ckpt is not None:
-            with open(self.load_ckpt, 'rb') as fr:
-                meta = pickle.load(fr)
+            meta = self.load(self.load_ckpt)
             self.assert_load_args(meta['args'])
             start_epoch = meta['epoch']
             start_part = meta['part'] + 1
@@ -465,13 +475,32 @@ class EmbeddingTrainer(object):
         else:
             return None
 
+    def load_only_parameters(self, meta):
+        meta['epoch'] = 0
+        meta['part'] = -1
+        self.start_ep = 0
+        st = meta['state_dict']
+        new_st = {}
+        opt_states = ('momentum_v', 'adagrad_accum', 'adam_m', 'adam_v',
+                      'adam_maxv', 'adamw_m', 'adamw_v', 'lamb_m', 'lamb_v')
+        for k, v in st.items():
+            if k.startswith('betats') or k.endswith(opt_states):
+                continue
+            new_st[k] = v
+        meta['state_dict'] = new_st
+        return meta
+
     def load_into_executor(self, meta):
         if meta is not None:
+            n_state = len(meta['state_dict'])
+            self.log_func(f'Loading {n_state} states from state_dict.')
             self.executor.load_dict(meta['state_dict'])
             self.executor.load_seeds(meta['seed'])
             start_part = meta['part'] + 1
             if self.train_name in self.executor.subexecutor:
                 self.init_base_batch_num()
+                self.log_func(
+                    f'Set dataloader batch index with start part: {start_part}.')
                 self.executor.set_dataloader_batch_index(
                     self.train_name, start_part * self.base_batch_num)
 
@@ -480,8 +509,7 @@ class EmbeddingTrainer(object):
             # load the best ckpt for inference
             best_meta = self.best_ckpts[0]
             ep, part = best_meta
-            with open(osp.join(self.save_dir, f'ep{ep}_{part}.pkl'), 'rb') as fr:
-                cur_meta = pickle.load(fr)
+            cur_meta = self.load(self.join(f'ep{ep}_{part}.pkl'))
             self.executor.load_dict(cur_meta['state_dict'])
             self.executor.load_seeds(cur_meta['seed'])
             self.log_func(
@@ -512,6 +540,7 @@ class EmbeddingTrainer(object):
 
     def fit(self):
         assert self.phase == 'train'
+        self.init_ckpts()
         self.embed_layer = self.get_embed_layer()
         self.log_func(f'Embedding layer: {self.embed_layer}')
         eval_nodes = self.get_eval_nodes()

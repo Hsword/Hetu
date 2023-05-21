@@ -768,12 +768,11 @@ class PEPRetrainEmbedding(SparseEmbedding):
 
 
 class AutoSrhEmbedding(SparseEmbedding):
-    def __init__(self, num_embeddings, embedding_dim, nsplit, group_indices, form, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+    def __init__(self, num_embeddings, embedding_dim, nsplit, group_indices, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.name = name
         self.ctx = ctx
-        self.form = form
         self.nsplit = nsplit
         self.embedding_table = initializer(
             shape=(num_embeddings, embedding_dim), name=name, ctx=self.ctx)
@@ -791,15 +790,23 @@ class AutoSrhEmbedding(SparseEmbedding):
 
 
 class AutoSrhRetrainEmbedding(SparseEmbedding):
-    def __init__(self, num_embeddings, embedding_dim, embedding_table, mask, form, name='embedding', ctx=None):
+    def __init__(self, num_embeddings, embedding_dim, embedding_table=None, mask=None, form='csr', name='embedding', ctx=None):
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.name = name
         self.ctx = ctx
-        self.embedding_table = ht.placeholder_op(
-            value=embedding_table, name=self.name, ctx=ctx)
-        self.mask = ht.placeholder_op(
-            f'{name}_mask', value=mask, trainable=False, dtype=np.int32, ctx=self.ctx)
+        if embedding_table is None:
+            self.embedding_table = ht.init.nulls(
+                (num_embeddings, embedding_dim), name=self.name, ctx=ctx)
+        else:
+            self.embedding_table = ht.placeholder_op(
+                value=embedding_table, name=self.name, ctx=ctx)
+        if mask is None:
+            self.mask = ht.init.nulls((num_embeddings, embedding_dim),
+                                      name=f'{name}_mask', trainable=False, ctx=self.ctx, dtype=np.int32)
+        else:
+            self.mask = ht.placeholder_op(
+                f'{name}_mask', value=mask, trainable=False, dtype=np.int32, ctx=self.ctx)
         self.form = form
 
     def __call__(self, x):

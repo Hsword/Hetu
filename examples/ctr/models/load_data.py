@@ -231,7 +231,7 @@ class CTRDataset(object):
         return remap_indices
 
     def get_whole_frequency_grouping(self, train_data, nsplit):
-        cache_path = self.join('freq_grouping.bin')
+        cache_path = self.join(f'freq_grouping_{nsplit}.bin')
         if osp.exists(cache_path):
             grouping = np.fromfile(cache_path, dtype=np.int32)
         else:

@@ -14,7 +14,7 @@ from .autodim import AutoDimTrainer
 from .optembed import OptEmbedTrainer
 from .deeplight import DeepLightTrainer
 from .pep import PEPEmbTrainer
-from .autosrh import AutoSrhTrainer
+from .autosrh import AutoSrhOverallTrainer
 from .quantize import QuantizeEmbTrainer
 from .alpt import ALPTEmbTrainer
 from ..layers import Embedding, HashEmbedding, \
@@ -41,7 +41,7 @@ _layer2trainer_mapping = {
     OptEmbedding: OptEmbedTrainer,
     DeepLightEmbedding: DeepLightTrainer,
     PEPEmbedding: PEPEmbTrainer,
-    AutoSrhEmbedding: AutoSrhTrainer,
+    AutoSrhEmbedding: AutoSrhOverallTrainer,
     QuantizedEmbedding: QuantizeEmbTrainer,
     ALPTEmbedding: ALPTEmbTrainer,
 }
