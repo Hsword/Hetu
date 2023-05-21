@@ -13,33 +13,26 @@ def main(args):
     dataset = get_dataset(args.dataset)(path=args.data_path)
 
     if args.method == 'full':
-        embed_layer_type = htl.Embedding
         embedding_args = {}
     elif args.method == 'hash':
-        embed_layer_type = htl.HashEmbedding
         embedding_args = {}
     elif args.method == 'compo':
-        embed_layer_type = htl.CompositionalEmbedding
         embedding_args = {
             'aggregator': 'mul',  # (mul, sum)
         }
     elif args.method == 'tt':
-        embed_layer_type = htl.TensorTrainEmbedding
         embedding_args = {}
     elif args.method == 'dhe':
-        embed_layer_type = htl.DeepHashEmbedding
         embedding_args = {
             'num_buckets': 1000000,
             'num_hash': 1024,
             'dist': 'uniform',
         }
     elif args.method == 'robe':
-        embed_layer_type = htl.RobeEmbedding
         embedding_args = {
             'Z': 1,
         }
     elif args.method == 'dpq':
-        embed_layer_type = htl.DPQEmbedding
         embedding_args = {
             'num_choices': 32,
             'num_parts': 8,
@@ -47,7 +40,6 @@ def main(args):
             'mode': 'vq',
         }
     elif args.method == 'mgqe':
-        embed_layer_type = htl.MGQEmbedding
         embedding_args = {
             'high_num_choices': 256,
             'low_num_choices': 64,
@@ -55,17 +47,14 @@ def main(args):
             'top_percent': 0.1,
         }
     elif args.method == 'adapt':
-        embed_layer_type = htl.AdaptiveEmbedding
         embedding_args = {
             'top_percent': 0.1,
         }
     elif args.method == 'md':
-        embed_layer_type = htl.MDEmbedding
         embedding_args = {
             'round_dim': True,
         }
     elif args.method == 'autodim':
-        embed_layer_type = htl.AutoDimEmbedding
         embedding_args = {
             'alpha_lr': 0.001,
             'r': 1e-2,
@@ -73,7 +62,6 @@ def main(args):
             'ignore_second': 0,  # 0 or 1
         }
     elif args.method == 'optembed':
-        embed_layer_type = htl.OptEmbedding
         embedding_args = {
             'alpha': 1e-5,  # the coef of regularization
             'keep_num': 0,
@@ -83,26 +71,22 @@ def main(args):
             'nepoch_search': 30,
         }
     elif args.method == 'deeplight':
-        embed_layer_type = htl.DeepLightEmbedding
         embedding_args = {
             'warm': 2,
         }
     elif args.method == 'pep':
-        embed_layer_type = htl.PEPEmbedding
         embedding_args = {
             'threshold_type': 'feature_dimension',
             'threshold_init': -150,
         }
     elif args.method == 'autosrh':
-        embed_layer_type = htl.AutoSrhEmbedding
         embedding_args = {
             'nsplit': 10,
-            'warm_start_epochs': 1,
+            'stage': 1,
             'alpha_l1': 0.00001,
             'alpha_lr': 0.001,
         }
     elif args.method == 'quantize':
-        embed_layer_type = htl.QuantizedEmbedding
         embedding_args = {
             'digit': 16,
             'scale': 0.01,
@@ -110,7 +94,6 @@ def main(args):
             'use_qparam': False,
         }
     elif args.method == 'alpt':
-        embed_layer_type = htl.ALPTEmbedding
         embedding_args = {
             'digit': 16,
             'init_scale': 0.01,
@@ -134,8 +117,7 @@ def main(args):
         optimizer = ht.optim.AMSGradOptimizer
     opt = optimizer(learning_rate=learning_rate)
 
-    trainer = ht.sched.get_trainer(embed_layer_type)(
-        dataset, model, opt, args)
+    trainer = ht.sched.get_trainer(args.method)(dataset, model, opt, args)
 
     if args.phase == 'train':
         trainer.fit()

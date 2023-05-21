@@ -17,44 +17,29 @@ from .pep import PEPEmbTrainer
 from .autosrh import AutoSrhOverallTrainer
 from .quantize import QuantizeEmbTrainer
 from .alpt import ALPTEmbTrainer
-from ..layers import Embedding, HashEmbedding, \
-    CompositionalEmbedding, TensorTrainEmbedding, \
-    DeepHashEmbedding, RobeEmbedding, \
-    DPQEmbedding, MGQEmbedding, AdaptiveEmbedding, \
-    MDEmbedding, AutoDimEmbedding, OptEmbedding, \
-    DeepLightEmbedding, PEPEmbedding, AutoSrhEmbedding, \
-    QuantizedEmbedding, ALPTEmbedding
 
 
 _layer2trainer_mapping = {
-    Embedding: EmbeddingTrainer,
-    HashEmbedding: HashEmbTrainer,
-    CompositionalEmbedding: CompoEmbTrainer,
-    TensorTrainEmbedding: TTEmbTrainer,
-    DeepHashEmbedding: DHETrainer,
-    RobeEmbedding: ROBETrainer,
-    DPQEmbedding: DPQTrainer,
-    MGQEmbedding: MGQETrainer,
-    AdaptiveEmbedding: AdaptEmbTrainer,
-    MDEmbedding: MDETrainer,
-    AutoDimEmbedding: AutoDimTrainer,
-    OptEmbedding: OptEmbedTrainer,
-    DeepLightEmbedding: DeepLightTrainer,
-    PEPEmbedding: PEPEmbTrainer,
-    AutoSrhEmbedding: AutoSrhOverallTrainer,
-    QuantizedEmbedding: QuantizeEmbTrainer,
-    ALPTEmbedding: ALPTEmbTrainer,
+    'full': EmbeddingTrainer,
+    'hash': HashEmbTrainer,
+    'compo': CompoEmbTrainer,
+    'tt': TTEmbTrainer,
+    'dhe': DHETrainer,
+    'robe': ROBETrainer,
+    'dpq': DPQTrainer,
+    'mgqe': MGQETrainer,
+    'adapt': AdaptEmbTrainer,
+    'md': MDETrainer,
+    'autodim': AutoDimTrainer,
+    'optembed': OptEmbedTrainer,
+    'deeplight': DeepLightTrainer,
+    'pep': PEPEmbTrainer,
+    'autosrh': AutoSrhOverallTrainer,
+    'quantize': QuantizeEmbTrainer,
+    'alpt': ALPTEmbTrainer,
 }
-
-_trainer2layer_mapping = {value: key for key,
-                          value in _layer2trainer_mapping.items()}
 
 
 def get_trainer(layer_type):
     trainer = _layer2trainer_mapping[layer_type]
     return trainer
-
-
-def get_layer_type(trainer):
-    layer_type = _trainer2layer_mapping[trainer]
-    return layer_type
