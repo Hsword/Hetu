@@ -389,14 +389,14 @@ class EmbeddingTrainer(object):
                 self.best_ckpts.insert(idx, cur_meta)
                 ep, part = cur_meta
                 self.executor.save(self.save_dir, f'ep{ep}_{part}.pkl', {
-                    'epoch': ep, 'part': part, 'npart': self.num_test_every_epoch, 'args': self.get_args_for_saving()})
+                    'epoch': ep, 'part': part, 'npart': self.num_test_every_epoch, 'args': self.get_args_for_saving(), 'metric': new_result})
                 rm_res = self.best_results.pop()
                 rm_meta = self.best_ckpts.pop()
                 self.log_func(
                     f'Save ep{ep}_{part}.pkl with {self.monitor}:{new_result}.')
                 self.log_func(
                     f'Current ckpts {self.best_ckpts} with aucs {self.best_results}.')
-                if rm_meta is not None:
+                if rm_meta is not None and rm_meta != self.loaded_ep:
                     ep, part = rm_meta
                     os.remove(self.join(f'ep{ep}_{part}.pkl'))
                     self.log_func(
@@ -470,9 +470,23 @@ class EmbeddingTrainer(object):
             start_epoch = meta['epoch']
             start_part = meta['part'] + 1
             assert meta['npart'] == self.num_test_every_epoch
-            self.loaded_ep = (meta['epoch'], meta['part'])
+            same_stage = meta['args']['embedding_args'].get(
+                'stage', None) == self.args['embedding_args'].get('stage', None)
+            if same_stage:
+                if 'metric' in meta and meta['args'].get('monitor', 'auc') == self.monitor:
+                    load_metric = meta['metric']
+                    self.best_ckpts[0] = (meta['epoch'], meta['part'])
+                    self.best_results[0] = load_metric
+                    self.log_func(
+                        f'Load ckpt from {osp.split(self.load_ckpt)[-1]} with the same metric {self.monitor}: {load_metric}')
+                else:
+                    self.log_func(
+                        f'Load ckpt from {osp.split(self.load_ckpt)[-1]}.')
+                self.loaded_ep = (meta['epoch'], meta['part'])
+            else:
+                self.log_func(
+                    f'Load ckpt from {osp.split(self.load_ckpt)[-1]}.')
             self.start_ep = start_epoch * self.num_test_every_epoch + start_part
-            self.log_func(f'Load ckpt from {osp.split(self.load_ckpt)[-1]}.')
             return meta
         else:
             return None
