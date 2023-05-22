@@ -4,6 +4,7 @@ from ..layers import AutoSrhEmbedding, AutoSrhRetrainEmbedding
 from ..optimizer import SGDOptimizer
 import numpy as np
 from copy import deepcopy
+import os.path as osp
 
 
 class AutoSrhOverallTrainer(EmbeddingTrainer):
@@ -64,6 +65,10 @@ class AutoSrhOverallTrainer(EmbeddingTrainer):
 
     def test(self):
         stage = self.args['embedding_args']['stage']
+        nsplit = self.embedding_args['nsplit']
+        grouping_indices = self.dataset.get_whole_frequency_grouping(
+            self.data_ops[0].dataloaders[self.train_name].raw_data, nsplit).astype(np.int32)
+        self.grouping_indices = grouping_indices
         assert stage >= 2
         if stage == 2:
             trainer = AutoSrhTrainer(
@@ -71,6 +76,7 @@ class AutoSrhOverallTrainer(EmbeddingTrainer):
         else:
             trainer = AutoSrhRetrainer(
                 self.dataset, self.model, self.opt, self.args, self.data_ops)
+        trainer.grouping_indices = grouping_indices
         trainer.test()
 
 
@@ -185,6 +191,9 @@ class AutoSrhTrainer(SwitchInferenceTrainer):
         self.executor.run('alpha')
         return loss_val, predict_y, y_val
 
+    def test(self):
+        EmbeddingTrainer.test(self)
+
 
 class AutoSrhRetrainer(SwitchInferenceTrainer):
     @property
@@ -253,3 +262,11 @@ class AutoSrhRetrainer(SwitchInferenceTrainer):
         self.embed_layer.embedding_table.tensor_value[:] = embed_arr
 
         self.check_inference()
+
+    def test(self):
+        # use filename to distinguish whether test middle ckpt or final ckpt
+        test_final = osp.split(self.load_ckpt)[-1].startswith('final')
+        if test_final:
+            super().test()
+        else:
+            EmbeddingTrainer.test(self)
