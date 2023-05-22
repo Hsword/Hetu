@@ -27,7 +27,6 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
                 f'Use {form} for sparse storage; final prune rate {self.prune_rate}, given target sparse rate {self.compress_rate}.')
 
     def fit(self):
-        self.save_dir = self.args['save_dir']
         super().fit()
         self.executor.config.comp_stream.sync()
         self.load_best_ckpt()

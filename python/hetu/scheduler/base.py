@@ -473,7 +473,7 @@ class EmbeddingTrainer(object):
             same_stage = meta['args']['embedding_args'].get(
                 'stage', None) == self.args['embedding_args'].get('stage', None)
             if same_stage:
-                if 'metric' in meta and meta['args'].get('monitor', 'auc') == self.monitor:
+                if self.phase == 'train' and 'metric' in meta and meta['args'].get('monitor', 'auc') == self.monitor:
                     load_metric = meta['metric']
                     self.best_ckpts[0] = (meta['epoch'], meta['part'])
                     self.best_results[0] = load_metric

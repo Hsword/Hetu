@@ -72,7 +72,7 @@ def main(args):
         }
     elif args.method == 'deeplight':
         embedding_args = {
-            'warm': 2,
+            'stage': args.stage,
         }
     elif args.method == 'pep':
         embedding_args = {
@@ -82,7 +82,7 @@ def main(args):
     elif args.method == 'autosrh':
         embedding_args = {
             'nsplit': 10,
-            'stage': 1,
+            'stage': args.stage,
             'alpha_l1': 0.00001,
             'alpha_lr': 0.001,
         }
@@ -172,8 +172,14 @@ if __name__ == '__main__':
                         help="logger to be used")
     parser.add_argument("--run_id", type=str, default=None,
                         help="run id to be logged")
+    parser.add_argument("--stage", type=int, default=1,
+                        help="the start stage for train/test")
     parser.add_argument("--load_ckpt", type=str, default=None,
                         help="ckpt to be used")
+    parser.add_argument("--log_dir", type=str, default=None,
+                        help="directory for logging")
+    parser.add_argument("--save_dir", type=str, default=None,
+                        help="directory for saving")
     parser.add_argument("--save_topk", type=int, default=0,
                         help="number of ckpts to be saved")
     parser.add_argument("--check_val", type=int, default=0,
@@ -218,10 +224,12 @@ if __name__ == '__main__':
     args.result_file = '_'.join(infos) + '.log'
     if args.phase == 'test':
         args.result_file = args.phase + args.result_file
-    args.log_dir = osp.join(osp.dirname(osp.abspath(__file__)), 'logs')
+    if args.log_dir is None:
+        args.log_dir = osp.join(osp.dirname(osp.abspath(__file__)), 'logs')
     os.makedirs(args.log_dir, exist_ok=True)
-    args.save_dir = osp.join(osp.dirname(
-        osp.abspath(__file__)), 'ckpts', args.result_file[:-4])
+    if args.save_dir is None:
+        args.save_dir = osp.join(osp.dirname(osp.abspath(__file__)), 'ckpts')
+    args.save_dir = osp.join(args.save_dir, args.result_file[:-4])
     args.result_file = osp.join(args.log_dir, args.result_file)
     if args.save_topk > 0:
         if osp.isdir(args.save_dir):

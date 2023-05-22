@@ -672,7 +672,7 @@ class SparseEmbedding(Embedding):
 
 
 class DeepLightEmbedding(SparseEmbedding):
-    def __init__(self, num_embeddings, embedding_dim, prune_rate, form, warm=2, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+    def __init__(self, num_embeddings, embedding_dim, prune_rate, form, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         assert form in ('coo', 'csr')
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -680,7 +680,6 @@ class DeepLightEmbedding(SparseEmbedding):
         self.ctx = ctx
         self.embedding_table = initializer(
             shape=(self.num_embeddings, self.embedding_dim), name=self.name, ctx=ctx)
-        self.warm = warm
         self.prune_rate = prune_rate
         self.form = form
 
@@ -689,7 +688,7 @@ class DeepLightEmbedding(SparseEmbedding):
             return ht.embedding_lookup_op(self.embedding_table, x)
 
     def make_adaptive_rate(self, batch_num):
-        ignore_iter = self.warm * batch_num
+        ignore_iter = 0 * batch_num
 
         def updater(n_iter):
             if n_iter <= ignore_iter:

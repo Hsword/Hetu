@@ -1,29 +1,22 @@
 from .base import EmbeddingTrainer
+from .multistage import MultiStageTrainer
 from .switchinference import SwitchInferenceTrainer
 from ..layers import AutoSrhEmbedding, AutoSrhRetrainEmbedding
 from ..optimizer import SGDOptimizer
 import numpy as np
-from copy import deepcopy
 import os.path as osp
 
 
-class AutoSrhOverallTrainer(EmbeddingTrainer):
+class AutoSrhOverallTrainer(MultiStageTrainer):
     # in autosrh, the parameters are inherited from the previous stage;
     # but the optimizer states is new in every stage
-    def __init__(self, dataset, model, opt, args, data_ops=None, **kargs):
-        super().__init__(dataset, model, opt, args, data_ops, **kargs)
-        assert self.save_topk > 0, 'Need to load the best ckpt for dimension selection; please set save_topk a positive integer.'
 
-    def assert_use_multi(self):
-        assert self.use_multi == self.separate_fields == 0
-
-    def copy_args_with_stage(self, stage):
-        new_args = deepcopy(self.args)
-        new_args['embedding_args']['stage'] = stage
-        return new_args
+    @property
+    def legal_stages(self):
+        return (1, 2, 3)
 
     def fit(self):
-        stage = self.args['embedding_args']['stage']
+        stage = self.stage
         nsplit = self.embedding_args['nsplit']
         grouping_indices = self.dataset.get_whole_frequency_grouping(
             self.data_ops[0].dataloaders[self.train_name].raw_data, nsplit).astype(np.int32)
@@ -64,7 +57,7 @@ class AutoSrhOverallTrainer(EmbeddingTrainer):
         self.retrainer.fit()
 
     def test(self):
-        stage = self.args['embedding_args']['stage']
+        stage = self.stage
         nsplit = self.embedding_args['nsplit']
         grouping_indices = self.dataset.get_whole_frequency_grouping(
             self.data_ops[0].dataloaders[self.train_name].raw_data, nsplit).astype(np.int32)

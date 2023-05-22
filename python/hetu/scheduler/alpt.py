@@ -1,7 +1,6 @@
 from .base import EmbeddingTrainer
 from ..layers import ALPTEmbedding
 from ..gpu_links import reorder_into_lookup, assign_alpt_embedding
-from ..optimizer import AdamOptimizer
 import math
 
 
