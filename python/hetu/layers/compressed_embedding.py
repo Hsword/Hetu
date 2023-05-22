@@ -525,18 +525,14 @@ class AutoDimEmbedding(Embedding):
 
 
 class AutoDimRetrainEmbedding(Embedding):
-    def __init__(self, num_embeddings, compressed_dim, embedding_dim, embedding_table=None, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
+    def __init__(self, num_embeddings, compressed_dim, embedding_dim, initializer=ht.init.GenXavierNormal(), name='embedding', ctx=None):
         self.num_embeddings = num_embeddings
         self.compressed_dim = compressed_dim
         self.embedding_dim = embedding_dim
         self.name = name
         self.ctx = ctx
-        if embedding_table is not None:
-            self.embedding_table = ht.placeholder_op(
-                name, value=embedding_table, ctx=self.ctx)
-        else:
-            self.embedding_table = initializer(
-                shape=(num_embeddings, compressed_dim), name=name, ctx=self.ctx)
+        self.embedding_table = initializer(
+            shape=(num_embeddings, compressed_dim), name=name, ctx=self.ctx)
         self.weight = initializer(
             shape=(compressed_dim, embedding_dim), name=f'{name}_weight', ctx=self.ctx)
         self.bias = ht.init.zeros(

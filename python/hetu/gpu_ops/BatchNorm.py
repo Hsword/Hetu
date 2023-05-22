@@ -26,7 +26,34 @@ class Batch_NormalizationOp(Op):
         self.save_mean = None
         self.save_var = None
 
+    def try_init_running_states(self, channel):
+        if self.running_mean is None:
+            if self.on_cpu:
+                if DNNL_LIB['DnnlBatchNorm']:
+                    self.running_mean = ndarray.array(
+                        np.zeros((channel,), dtype=np.float32), ctx=self.ctx)
+                    self.running_var = ndarray.array(
+                        np.ones((channel,), dtype=np.float32), ctx=self.ctx)
+                    self.save_mean = ndarray.empty(
+                        (channel,), ctx=self.ctx)
+                    self.save_var = ndarray.empty((channel,), ctx=self.ctx)
+                else:
+                    self.running_mean = np.zeros(
+                        (channel,), dtype=np.float32)
+                    self.running_var = np.ones(
+                        (channel,), dtype=np.float32)
+                    self.save_mean = np.empty((channel,), dtype=np.float32)
+                    self.save_var = np.empty((channel,), dtype=np.float32)
+            else:
+                self.save_mean = ndarray.empty((channel,), ctx=self.ctx)
+                self.save_var = ndarray.empty((channel,), ctx=self.ctx)
+                self.running_mean = ndarray.array(
+                    np.zeros((channel,)), ctx=self.ctx)
+                self.running_var = ndarray.array(
+                    np.ones((channel,)), ctx=self.ctx)
+
     def compute(self, input_vals, output_val, stream_handle=None, inference=False):
+        self.try_init_running_states(input_vals[0].shape[1])
         if inference:
             if self.on_cpu:
                 if DNNL_LIB['DnnlBatchNorm_Inference']:
@@ -41,38 +68,12 @@ class Batch_NormalizationOp(Op):
         else:
             if self.on_cpu:
                 if DNNL_LIB['DnnlBatchNorm']:
-                    if self.running_mean is None:
-                        channel = input_vals[0].shape[1]
-                        self.running_mean = ndarray.array(
-                            np.zeros((channel,), dtype=np.float32), ctx=self.ctx)
-                        self.running_var = ndarray.array(
-                            np.ones((channel,), dtype=np.float32), ctx=self.ctx)
-                        self.save_mean = ndarray.empty(
-                            (channel,), ctx=self.ctx)
-                        self.save_var = ndarray.empty((channel,), ctx=self.ctx)
                     cpu_batch_norm(input_vals[0], input_vals[1], input_vals[2], output_val,
                                    self.running_mean, self.running_var, self.save_mean, self.save_var, self.momentum, self.eps)
                 else:
-                    if self.running_mean is None:
-                        channel = input_vals[0].shape[1]
-                        self.running_mean = np.zeros(
-                            (channel,), dtype=np.float32)
-                        self.running_var = np.ones(
-                            (channel,), dtype=np.float32)
-                        self.save_mean = np.empty((channel,), dtype=np.float32)
-                        self.save_var = np.empty((channel,), dtype=np.float32)
                     output_val[:], self.running_mean[:], self.running_var[:], self.save_mean[:], self.save_var[:] = batchnorm_forward(
                         input_vals[0].asnumpy(), input_vals[1].asnumpy(), input_vals[2].asnumpy(), self.running_mean, self.running_var, self.momentum, self.eps)
             else:
-                if self.running_mean is None:
-                    channel = input_vals[0].shape[1]
-                    self.save_mean = ndarray.empty((channel,), ctx=self.ctx)
-                    self.save_var = ndarray.empty((channel,), ctx=self.ctx)
-                    self.running_mean = ndarray.array(
-                        np.zeros((channel,)), ctx=self.ctx)
-                    self.running_var = ndarray.array(
-                        np.ones((channel,)), ctx=self.ctx)
-
                 CuDNN_Batch_Normalization(input_vals[0], input_vals[1], input_vals[2], output_val, self.running_mean,
                                           self.running_var, self.save_mean, self.save_var, self.momentum, self.eps, stream_handle)
 

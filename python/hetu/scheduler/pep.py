@@ -7,6 +7,7 @@ import numpy as np
 
 
 class PEPEmbTrainer(SwitchInferenceTrainer):
+    # TODO: need improvements; using MultiStageTrainer
     def __init__(self, dataset, model, opt, args, **kargs):
         super().__init__(dataset, model, opt, args, **kargs)
         self.best_prune_rate = 0.

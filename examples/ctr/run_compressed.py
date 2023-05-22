@@ -59,10 +59,11 @@ def worker(args):
         }
     elif args.method == 'autodim':
         embedding_args = {
+            'stage': args.stage,
             'alpha_lr': 0.001,
             'r': 1e-2,
-            'reset_retrain': 1,  # 0 or 1
-            'ignore_second': 0,  # 0 or 1
+            # 'reset_retrain': 0,
+            'ignore_second': 1,  # 0 or 1
         }
     elif args.method == 'optembed':
         embedding_args = {
@@ -204,8 +205,6 @@ if __name__ == '__main__':
         args.use_multi = 0
     elif args.method in ('compo', 'md', 'tt', 'dhe', 'mgqe', 'adapt'):
         # dhe, mgqe, adapt both is ok; use multi is better according to semantic meaning.
-        args.use_multi = 1
-    if args.method == 'autodim' and args.phase == 'test':
         args.use_multi = 1
     if args.method == 'robe':
         # robe use multi, separate fields controls whether using slot coefficient

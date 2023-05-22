@@ -10,7 +10,7 @@ from .dpq import DPQTrainer
 from .mgqe import MGQETrainer
 from .adapt import AdaptEmbTrainer
 from .md import MDETrainer
-from .autodim import AutoDimTrainer
+from .autodim import AutoDimOverallTrainer
 from .optembed import OptEmbedTrainer
 from .deeplight import DeepLightOverallTrainer
 from .pep import PEPEmbTrainer
@@ -30,7 +30,7 @@ _layer2trainer_mapping = {
     'mgqe': MGQETrainer,
     'adapt': AdaptEmbTrainer,
     'md': MDETrainer,
-    'autodim': AutoDimTrainer,
+    'autodim': AutoDimOverallTrainer,
     'optembed': OptEmbedTrainer,
     'deeplight': DeepLightOverallTrainer,
     'pep': PEPEmbTrainer,

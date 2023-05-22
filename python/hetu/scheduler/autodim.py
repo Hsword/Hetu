@@ -1,117 +1,120 @@
-import numpy as np
-
 from .base import EmbeddingTrainer
+from .multistage import MultiStageTrainer
 from ..layers import AutoDimEmbedding, AutoDimRetrainEmbedding
 from ..ndarray import empty
 from ..gpu_links import all_fro_norm, matrix_elementwise_divide_const, \
     all_add_, div_n_mul_, matrix_elementwise_minus, matrix_elementwise_add_simple, \
     sgd_update, assign_embedding_with_indexedslices
+import numpy as np
+from copy import deepcopy
+
+
+class AutoDimOverallTrainer(MultiStageTrainer):
+    @property
+    def legal_stages(self):
+        return (1, 2)
+
+    def assert_use_multi(self):
+        pass
+
+    def get_data(self):
+        pass
+
+    def copy_args_with_stage(self, stage):
+        new_args = deepcopy(self.args)
+        new_args['embedding_args']['stage'] = stage
+        if stage == 1:
+            new_args['use_multi'] = new_args['separate_fields'] = 0
+        else:
+            new_args['use_multi'] = new_args['separate_fields'] = 1
+        return new_args
+
+    def fit(self):
+        stage = self.stage
+        self.dim_candidates = [2]
+        while self.dim_candidates[-1] < self.embedding_dim:
+            self.dim_candidates.append(2 * self.dim_candidates[-1])
+        self.dim_candidates[-1] = self.embedding_dim
+        self.log_func(f'Dimension candidates: {self.dim_candidates}')
+        self.num_cands = len(self.dim_candidates)
+        # two stages: training, retraining
+        if stage == 1:
+            self.trainer = AutoDimTrainer(
+                self.dataset, self.model, self.opt, self.copy_args_with_stage(1))
+            self.trainer.set_dim_candidates(self.dim_candidates)
+        else:
+            self.trainer = None
+        self.retrainer = AutoDimRetrainer(
+            self.dataset, self.model, self.opt, self.copy_args_with_stage(2))
+        self.retrainer.set_dim_candidates(self.dim_candidates)
+        self.retrainer.prepare_path_for_retrain('retrain')
+
+        if self.trainer is not None:
+            self.trainer.fit()
+            ep, part = self.trainer.get_best_meta()
+            self.retrainer.load_ckpt = self.trainer.join(f'ep{ep}_{part}.pkl')
+            del self.trainer
+        self.retrainer.fit()
+
+    def test(self):
+        stage = self.stage
+        self.dim_candidates = [2]
+        while self.dim_candidates[-1] < self.embedding_dim:
+            self.dim_candidates.append(2 * self.dim_candidates[-1])
+        self.dim_candidates[-1] = self.embedding_dim
+        self.log_func(f'Dimension candidates: {self.dim_candidates}')
+        self.num_cands = len(self.dim_candidates)
+        if stage == 1:
+            trainer = AutoDimTrainer(
+                self.dataset, self.model, self.opt, self.copy_args_with_stage(1))
+        else:
+            trainer = AutoDimRetrainer(
+                self.dataset, self.model, self.opt, self.copy_args_with_stage(2))
+        trainer.set_dim_candidates(self.dim_candidates)
+        trainer.test()
 
 
 class AutoDimTrainer(EmbeddingTrainer):
-    def __init__(self, dataset, model, opt, args, **kargs):
-        self.retraining = (args.phase == 'test')
-        super().__init__(dataset, model, opt, args, **kargs)
-
     def assert_use_multi(self):
-        assert self.use_multi == self.separate_fields == int(self.retraining)
+        assert self.use_multi == self.separate_fields == 0
 
-    def assert_load_args(self, load_args):
-        assert self.args['model'].__name__ == load_args['model']
-        for k in ['method', 'dim', 'dataset', 'compress_rate', 'embedding_args']:
-            assert load_args[k] == self.args[
-                k], f'Current argument({k}) {self.args[k]} different from loaded {load_args[k]}'
-        for k in ['bs', 'opt', 'lr', 'num_test_every_epoch', 'seed']:
-            if load_args[k] != self.args[k]:
-                self.log_func(
-                    f'Warning: current argument({k}) {self.args[k]} different from loaded {load_args[k]}')
+    def set_dim_candidates(self, dim_candidates):
+        self.dim_candidates = dim_candidates
+        self.num_cands = len(dim_candidates)
 
     def fit(self):
-        self.save_dir = self.args['save_dir']
         self.r = self.embedding_args['r']
         self.alpha_lr = self.embedding_args['alpha_lr']
-        meta = self.try_load_ckpt()
 
-        if meta is None or meta['args']['stage'] == 1:
-            # first stage
-            self.args['stage'] = 1
-            assert self.save_topk > 0, 'Need to load the best ckpt for dimension selection; please set save_topk a positive integer.'
-            self.log_func('Training the first stage')
-            self.embed_layer = self.get_embed_layer()
-            self.alpha = self.embed_layer.alpha
-            self.log_func(f'Embedding layer: {self.embed_layer}')
-            if self.embedding_args['ignore_second']:
-                eval_nodes = self.get_eval_nodes_without_second_order()
-            else:
-                eval_nodes = self.get_eval_nodes()
-            self.lookups = self.embed_layer.lookups
-            self.init_executor(eval_nodes)
-            self.load_into_executor(meta)
-
-            if self.embedding_args['ignore_second']:
-                self.executor.subexecutor['alpha'].inference = True
-                self.train_step = self.first_stage_train_step_without_second_order
-            else:
-                self.executor.subexecutor['alpha'].inference = False
-                self.executor.subexecutor['lookups'].inference = False
-                self.executor.subexecutor['allgrads'].inference = False
-                self.get_arch_params(
-                    self.executor.config.placeholder_to_arr_map)
-                self.train_step = self.first_stage_train_step
-
-            self.run_once()
-
-            self.load_best_ckpt()
-
-            # re-init executor
-            self.executor.return_tensor_values()
-            dim_choices = self.make_retrain(self.executor.config.comp_stream)
-            self.args['dim_choices'] = dim_choices
-
-            if self.embedding_args['reset_retrain']:
-                self.reset_for_retrain()
-                init_embed = None
-            else:
-                stream = self.stream
-                ori_embed_tables = {k: v.tensor_value for k,
-                                    v in self.embed_layer.embedding_tables.items()}
-                init_embed = []
-                feature_offset = 0
-                for nemb, ndim in zip(self.num_embed_separate, dim_choices):
-                    cur_init_embed = empty((nemb, ndim), ctx=self.ectx)
-                    cur_init_embed._async_copyfrom_offset(
-                        ori_embed_tables[ndim], stream, feature_offset * ndim, 0, nemb * ndim)
-                    init_embed.append(cur_init_embed)
-                    feature_offset += nemb
-                stream.sync()
-                del self.executor
-                del self.embed_layer
-        else:
-            dim_choices = meta['args']['dim_choices']
-            init_embed = None
-
-        self.set_use_multi(1)
-        self.retraining = True
-        self.args['stage'] = 2
-        self.log_func('Switch to re-training stage!!!')
-        # re-init save topk
-        self.prepare_path_for_retrain()
+        # first stage
+        self.log_func('Training the first stage')
         self.init_ckpts()
-        self.data_ops = self.get_data()
-        self.embed_layer = self.get_embed_layer_retrain(
-            dim_choices, init_embed)
-        self.log_func(f'New embedding layer: {self.embed_layer}')
-        eval_nodes = super().get_eval_nodes()
-
-        self.seed += 1  # use a different seed
-
+        self.embed_layer = self.get_embed_layer()
+        self.alpha = self.embed_layer.alpha
+        self.log_func(f'Embedding layer: {self.embed_layer}')
+        if self.embedding_args['ignore_second']:
+            eval_nodes = self.get_eval_nodes_without_second_order()
+        else:
+            eval_nodes = self.get_eval_nodes()
+        self.lookups = self.embed_layer.lookups
         self.init_executor(eval_nodes)
-        if meta is not None and meta['args']['stage'] == 2:
-            self.load_into_executor(meta)
-        self.train_step = super().train_step
+        self.load_into_executor(self.try_load_ckpt())
 
-        # re-run
+        if self.embedding_args['ignore_second']:
+            self.executor.subexecutor['alpha'].inference = True
+            self.train_step = self.first_stage_train_step_without_second_order
+        else:
+            self.executor.subexecutor['alpha'].inference = False
+            self.executor.subexecutor['lookups'].inference = False
+            self.executor.subexecutor['allgrads'].inference = False
+            self.get_arch_params(
+                self.executor.config.placeholder_to_arr_map)
+            self.train_step = self.first_stage_train_step
+
         self.run_once()
+
+        self.load_best_ckpt()
+        self.executor.return_tensor_values()
 
     @property
     def all_train_names(self):
@@ -240,43 +243,7 @@ class AutoDimTrainer(EmbeddingTrainer):
         self.executor.run('alpha')
         return results[:3]
 
-    def test(self):
-        assert self.phase == 'test' and self.load_ckpt is not None, 'Checkpoint should be given in testing.'
-        meta = self.try_load_ckpt()
-        assert meta['args']['stage'] == 2, 'Not support test the first stage.'
-        self.set_use_multi(1)
-        self.retraining = True
-        self.embed_layer = self.get_embed_layer_retrain(
-            meta['args']['dim_choices'])
-        self.data_ops = self.get_data()
-        self.log_func(f'Embedding layer: {self.embed_layer}')
-        eval_nodes = self.get_eval_nodes_inference()
-        self.init_executor(eval_nodes)
-        self.load_into_executor(meta)
-
-        log_file = open(self.result_file,
-                        'w') if self.result_file is not None else None
-        with self.timing():
-            test_loss, test_metric, _ = self.test_once()
-        test_time = self.temp_time[0]
-        results = {
-            'avg_test_loss': test_loss,
-            f'test_{self.monitor}': test_metric,
-            'test_time': test_time,
-        }
-        printstr = ', '.join(
-            [f'{key}: {value:.4f}' for key, value in results.items()])
-        self.log_func(printstr)
-        if log_file is not None:
-            print(printstr, file=log_file, flush=True)
-
     def get_embed_layer(self):
-        self.dim_candidates = [2]
-        while self.dim_candidates[-1] < self.embedding_dim:
-            self.dim_candidates.append(2 * self.dim_candidates[-1])
-        self.dim_candidates[-1] = self.embedding_dim
-        self.log_func(f'Dimension candidates: {self.dim_candidates}')
-        self.num_cands = len(self.dim_candidates)
         return AutoDimEmbedding(
             self.num_embed,
             self.dim_candidates,
@@ -286,20 +253,6 @@ class AutoDimTrainer(EmbeddingTrainer):
             name='AutoDimEmb',
             ctx=self.ectx,
         )
-
-    def get_embed_layer_retrain(self, dim_choices, init_embed=None):
-        emb = []
-        for i, (nemb, cdim) in enumerate(zip(self.num_embed_separate, dim_choices)):
-            emb.append(AutoDimRetrainEmbedding(
-                nemb,
-                cdim,
-                self.embedding_dim,
-                embedding_table=init_embed[i] if init_embed is not None else None,
-                initializer=self.initializer,
-                name=f'AutoDimNew_{i}',
-                ctx=self.ectx,
-            ))
-        return emb
 
     def get_eval_nodes(self):
         from ..gpu_ops.AssignWithIndexedSlices import AssignWithIndexedSlicesOp
@@ -375,13 +328,99 @@ class AutoDimTrainer(EmbeddingTrainer):
 
         return eval_nodes
 
-    def make_retrain(self, stream):
-        from ..gpu_links import argmax
-        from ..ndarray import empty
-        dim_choice = empty((self.num_slot, ), ctx=self.ctx, dtype=np.int32)
-        argmax(self.alpha.tensor_value, dim_choice, 1, stream=stream)
-        stream.sync()
-        dim_choice = [self.dim_candidates[int(ind)]
-                      for ind in dim_choice.asnumpy()]
+
+class AutoDimRetrainer(EmbeddingTrainer):
+    def assert_use_multi(self):
+        assert self.use_multi == self.separate_fields == 1
+
+    def assert_load_args(self, load_args):
+        assert self.args['model'].__name__ == load_args['model']
+        for k in ['method', 'dim', 'dataset', 'compress_rate']:
+            assert load_args[k] == self.args[
+                k], f'Current argument({k}) {self.args[k]} different from loaded {load_args[k]}'
+        for k in ['bs', 'opt', 'lr', 'num_test_every_epoch', 'seed', 'embedding_args']:
+            if load_args[k] != self.args[k]:
+                self.log_func(
+                    f'Warning: current argument({k}) {self.args[k]} different from loaded {load_args[k]}')
+
+    def set_dim_candidates(self, dim_candidates):
+        self.dim_candidates = dim_candidates
+        self.num_cands = len(dim_candidates)
+
+    def try_load_ckpt(self):
+        meta = super().try_load_ckpt()
+        assert meta is not None
+        st = meta['state_dict']
+        stage = meta['args']['embedding_args']['stage']
+        assert stage in (1, 2)
+        if stage == 1:
+            dim_choices = self.make_retrain(st['alphas'])
+            self.args['dim_choices'] = dim_choices
+            src_embeddings = {k: st.pop(f'AutoDimEmb{k}')
+                              for k in self.dim_candidates}
+            feature_offset = 0
+            for i, (nemb, ndim) in enumerate(zip(self.num_embed_separate, dim_choices)):
+                ending_offset = feature_offset + nemb
+                st[f'AutoDimNew_{i}'] = src_embeddings[ndim][feature_offset:ending_offset]
+                feature_offset = ending_offset
+            meta = self.load_only_parameters(meta)
+        else:
+            dim_choices = meta['args']['dim_choices']
+            self.args['dim_choices'] = dim_choices
+        return meta
+
+    def fit(self):
+        self.log_func('Start retraining...')
+        # self.prepare_path_for_retrain()
+        self.init_ckpts()
+        meta = self.try_load_ckpt()
+        self.embed_layer = self.get_embed_layer(self.args['dim_choices'])
+        self.log_func(f'New embedding layer: {self.embed_layer}')
+        eval_nodes = self.get_eval_nodes()
+        self.init_executor(eval_nodes)
+        self.load_into_executor(meta)
+        self.run_once()
+
+    def test(self):
+        assert self.phase == 'test' and self.load_ckpt is not None, 'Checkpoint should be given in testing.'
+        meta = self.try_load_ckpt()
+        self.embed_layer = self.get_embed_layer(self.args['dim_choices'])
+        self.log_func(f'Embedding layer: {self.embed_layer}')
+        eval_nodes = self.get_eval_nodes_inference()
+        self.init_executor(eval_nodes)
+        self.load_into_executor(meta)
+
+        log_file = open(self.result_file,
+                        'w') if self.result_file is not None else None
+        with self.timing():
+            test_loss, test_metric, _ = self.test_once()
+        test_time = self.temp_time[0]
+        results = {
+            'avg_test_loss': test_loss,
+            f'test_{self.monitor}': test_metric,
+            'test_time': test_time,
+        }
+        printstr = ', '.join(
+            [f'{key}: {value:.4f}' for key, value in results.items()])
+        self.log_func(printstr)
+        if log_file is not None:
+            print(printstr, file=log_file, flush=True)
+
+    def get_embed_layer(self, dim_choices):
+        emb = []
+        for i, (nemb, cdim) in enumerate(zip(self.num_embed_separate, dim_choices)):
+            emb.append(AutoDimRetrainEmbedding(
+                nemb,
+                cdim,
+                self.embedding_dim,
+                initializer=self.initializer,
+                name=f'AutoDimNew_{i}',
+                ctx=self.ectx,
+            ))
+        return emb
+
+    def make_retrain(self, alpha):
+        dim_choice = np.argmax(alpha, axis=1)
+        dim_choice = [self.dim_candidates[int(ind)] for ind in dim_choice]
         self.log_func('Dimension choices:', dim_choice)
         return dim_choice

@@ -56,10 +56,11 @@ def main(args):
         }
     elif args.method == 'autodim':
         embedding_args = {
+            'stage': args.stage,
             'alpha_lr': 0.001,
             'r': 1e-2,
-            'reset_retrain': 1,  # 0 or 1
-            'ignore_second': 0,  # 0 or 1
+            # 'reset_retrain': 0,
+            'ignore_second': 1,  # 0 or 1
         }
     elif args.method == 'optembed':
         embedding_args = {
