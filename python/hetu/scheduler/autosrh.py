@@ -15,8 +15,7 @@ class AutoSrhOverallTrainer(MultiStageTrainer):
     def legal_stages(self):
         return (1, 2, 3)
 
-    def fit(self):
-        stage = self.stage
+    def get_grouping_indices(self):
         nsplit = self.embedding_args['nsplit']
         grouping_indices = self.dataset.get_whole_frequency_grouping(
             self.data_ops[0].dataloaders[self.train_name].raw_data, nsplit).astype(np.int32)
@@ -24,6 +23,10 @@ class AutoSrhOverallTrainer(MultiStageTrainer):
         counter = [(grouping_indices == value).sum().item()
                    for value in range(nsplit)]
         self.log_func(f"AutoSrh feature nums (from low to high): {counter}")
+
+    def fit(self):
+        stage = self.stage
+        self.get_grouping_indices()
         # three stages: warmup, training, retraining
         if stage == 1:
             self.warmup_trainer = EmbeddingTrainer(
@@ -33,13 +36,13 @@ class AutoSrhOverallTrainer(MultiStageTrainer):
         if stage <= 2:
             self.trainer = AutoSrhTrainer(
                 self.dataset, self.model, self.opt, self.copy_args_with_stage(2))
-            self.trainer.grouping_indices = grouping_indices
+            self.trainer.set_grouping_indices(self.grouping_indices)
             self.trainer.prepare_path_for_retrain('train')
         else:
             self.trainer = None
         self.retrainer = AutoSrhRetrainer(
             self.dataset, self.model, self.opt, self.copy_args_with_stage(3), self.data_ops)
-        self.retrainer.grouping_indices = grouping_indices
+        self.retrainer.set_grouping_indices(self.grouping_indices)
         self.retrainer.prepare_path_for_retrain('retrain')
 
         if self.warmup_trainer is not None:
@@ -58,10 +61,7 @@ class AutoSrhOverallTrainer(MultiStageTrainer):
 
     def test(self):
         stage = self.stage
-        nsplit = self.embedding_args['nsplit']
-        grouping_indices = self.dataset.get_whole_frequency_grouping(
-            self.data_ops[0].dataloaders[self.train_name].raw_data, nsplit).astype(np.int32)
-        self.grouping_indices = grouping_indices
+        self.get_grouping_indices()
         assert stage >= 2
         if stage == 2:
             trainer = AutoSrhTrainer(
@@ -69,7 +69,7 @@ class AutoSrhOverallTrainer(MultiStageTrainer):
         else:
             trainer = AutoSrhRetrainer(
                 self.dataset, self.model, self.opt, self.args, self.data_ops)
-        trainer.grouping_indices = grouping_indices
+        trainer.set_grouping_indices(self.grouping_indices)
         trainer.test()
 
 
@@ -88,6 +88,9 @@ class AutoSrhTrainer(SwitchInferenceTrainer):
     @property
     def sparse_name(self):
         return 'AutoSrhEmb'
+
+    def set_grouping_indices(self, grouping_indices):
+        self.grouping_indices = grouping_indices
 
     def try_load_ckpt(self):
         meta = super().try_load_ckpt()
@@ -192,6 +195,9 @@ class AutoSrhRetrainer(SwitchInferenceTrainer):
     @property
     def sparse_name(self):
         return 'AutoSrhEmb'
+
+    def set_grouping_indices(self, grouping_indices):
+        self.grouping_indices = grouping_indices
 
     def try_load_ckpt(self):
         meta = super().try_load_ckpt()

@@ -482,7 +482,7 @@ class AutoDimEmbedding(Embedding):
 
     def make_embed(self, lookups):
         middle_results = []
-        for dim, lookup in zip(self.dim_candidates, lookups.values()):
+        for dim, lookup in lookups.items():
             # (bs, nslot, cdim)
             cur_x = ht.transpose_op(lookup, (1, 0, 2))
             # (nslot, bs, cdim)

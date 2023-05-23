@@ -29,14 +29,17 @@ class AutoDimOverallTrainer(MultiStageTrainer):
             new_args['use_multi'] = new_args['separate_fields'] = 1
         return new_args
 
-    def fit(self):
-        stage = self.stage
+    def get_dim_candidates(self):
         self.dim_candidates = [2]
         while self.dim_candidates[-1] < self.embedding_dim:
             self.dim_candidates.append(2 * self.dim_candidates[-1])
         self.dim_candidates[-1] = self.embedding_dim
         self.log_func(f'Dimension candidates: {self.dim_candidates}')
         self.num_cands = len(self.dim_candidates)
+
+    def fit(self):
+        stage = self.stage
+        self.get_dim_candidates()
         # two stages: training, retraining
         if stage == 1:
             self.trainer = AutoDimTrainer(
@@ -58,12 +61,7 @@ class AutoDimOverallTrainer(MultiStageTrainer):
 
     def test(self):
         stage = self.stage
-        self.dim_candidates = [2]
-        while self.dim_candidates[-1] < self.embedding_dim:
-            self.dim_candidates.append(2 * self.dim_candidates[-1])
-        self.dim_candidates[-1] = self.embedding_dim
-        self.log_func(f'Dimension candidates: {self.dim_candidates}')
-        self.num_cands = len(self.dim_candidates)
+        self.get_dim_candidates()
         if stage == 1:
             trainer = AutoDimTrainer(
                 self.dataset, self.model, self.opt, self.copy_args_with_stage(1))
