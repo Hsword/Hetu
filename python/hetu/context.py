@@ -909,6 +909,7 @@ class GraphStatus(object):
         for node in self.node_list:
             if isinstance(node, OptimizerOp):
                 opt = node.optimizer
+                break
         self.opt = opt
         if opt is not None:
             self.bf_map = self.opt.backward2forward

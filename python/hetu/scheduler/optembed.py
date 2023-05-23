@@ -1,11 +1,63 @@
 from .base import EmbeddingTrainer
+from .multistage import MultiStageTrainer
 from ..layers import OptEmbedding, OptEmbeddingAfterRowPruning
 from ..ndarray import empty
 from ..random import get_np_rand
+from ..optimizer import SGDOptimizer
+from ..random import get_seed_status
 import numpy as np
 
 
-class OptEmbedTrainer(EmbeddingTrainer):
+class OptEmbedOverallTrainer(MultiStageTrainer):
+    # in OptEmbed, the parameters are inherited from the previous stage;
+    # but the optimizer states is new in every stage
+    @property
+    def legal_stages(self):
+        return (1, 2, 3)
+
+    def fit(self):
+        stage = self.stage
+        # three stages: supernet-training, evolutionary search, re-training
+        if stage == 1:
+            self.supernet_trainer = OptEmbedSuperNetTrainer(
+                self.dataset, self.model, self.opt, self.copy_args_with_stage(1), self.data_ops)
+        else:
+            self.supernet_trainer = None
+        if stage <= 2:
+            self.evo_trainer = OptEmbedEvoTrainer(
+                self.dataset, self.model, self.opt, self.copy_args_with_stage(2), self.data_ops)
+            self.evo_trainer.prepare_path_for_retrain('evo')
+        else:
+            self.evo_trainer = None
+        self.retrainer = OptEmbedRetrainer(
+            self.dataset, self.model, self.opt, self.copy_args_with_stage(3), self.data_ops)
+        self.retrainer.prepare_path_for_retrain('retrain')
+
+        if self.supernet_trainer is not None:
+            self.supernet_trainer.fit()
+            ep, part = self.supernet_trainer.get_best_meta()
+            self.evo_trainer.load_ckpt = self.supernet_trainer.join(
+                f'final_ep{ep}_{part}.pkl')
+            self.supernet_trainer.executor.return_tensor_values()
+            del self.supernet_trainer
+        if self.evo_trainer is not None:
+            self.evo_trainer.fit()
+            self.retrainer.load_ckpt = self.evo_trainer.join('final.pkl')
+            del self.evo_trainer
+        self.retrainer.fit()
+
+    def test(self):
+        stage = self.stage
+        if stage == 1:
+            trainer = OptEmbedSuperNetTrainer(
+                self.dataset, self.model, self.opt, self.args, self.data_ops)
+        else:
+            trainer = OptEmbedRetrainer(
+                self.dataset, self.model, self.opt, self.args, self.data_ops)
+        trainer.test()
+
+
+class OptEmbedSuperNetTrainer(EmbeddingTrainer):
     def get_embed_layer(self):
         return OptEmbedding(
             self.num_embed,
@@ -14,18 +66,6 @@ class OptEmbedTrainer(EmbeddingTrainer):
             self.batch_size,
             initializer=self.initializer,
             name='OptEmbed',
-            ctx=self.ectx,
-        )
-
-    def get_embed_layer_evolution(self, new_embeddings, remap_indices):
-        return OptEmbeddingAfterRowPruning(
-            self.pruned_num_embed,
-            self.embedding_dim,
-            self.num_slot,
-            self.batch_size,
-            new_embeddings,
-            remap_indices.reshape(-1, 1),
-            name='OptEmbedAfterRowPruning',
             ctx=self.ectx,
         )
 
@@ -38,10 +78,21 @@ class OptEmbedTrainer(EmbeddingTrainer):
         regloss = mul_byconst_op(reduce_sum_op(exp_op(opposite_op(
             self.embed_layer.threshold)), axes=0, keepdims=False,), self.embedding_args['alpha'])
         loss = add_op(loss, regloss)
-        #loss2 =add_op(loss2,regloss)
         train_op = self.opt.minimize(loss)
+        threshold_update = None
+        param_opts = []
+        for op in train_op:
+            if op.inputs[0] is self.embed_layer.threshold:
+                threshold_update = op
+            else:
+                param_opts.append(op)
+        assert threshold_update is not None
+        threshold_opt = SGDOptimizer(
+            learning_rate=self.embedding_args['thresh_lr'])
+        new_threshold_update = threshold_opt.opt_op_type(
+            self.embed_layer.threshold, threshold_update.inputs[1], threshold_opt)
         eval_nodes = {
-            self.train_name: [loss, prediction, y_, train_op],
+            self.train_name: [loss, prediction, y_, param_opts, new_threshold_update],
         }
         val_embeddings = self.embed_layer.make_inference(embed_input)
         val_loss, val_pred = self.model(
@@ -50,61 +101,68 @@ class OptEmbedTrainer(EmbeddingTrainer):
         eval_nodes[self.test_name] = [val_loss, val_pred, y_],
         return eval_nodes
 
+    def get_eval_nodes_inference(self):
+        embed_input, dense_input, y_ = self.data_ops
+        val_embeddings = self.embed_layer.make_inference(embed_input)
+        val_loss, val_pred = self.model(val_embeddings, dense_input, y_)
+        eval_nodes = {self.test_name: [val_loss, val_pred, y_]}
+        return eval_nodes
+
     def calc_row_sparsity(self, embedding_table, threshold, stream):
-        from ..gpu_links import num_less_than_tensor_threshold, array_set, concatenate, reduce_norm1
+        from ..gpu_links import binary_step_forward, array_set, concatenate, reduce_norm1, matrix_elementwise_minus, reduce_sum
         stream.sync()
         npthreshold = threshold.asnumpy().reshape(-1)
         for field, value in zip(self.fields_arr, npthreshold):
             array_set(field, value, stream)
         concatenate(self.fields_arr, self.row_thresh_arr, 0, stream)
         reduce_norm1(embedding_table, self.norm1_arr, [1], stream)
-        num_less_than_tensor_threshold(
-            self.norm1_arr, self.norm1_arr, self.row_sparse_arr, self.row_thresh_arr, stream)
+        matrix_elementwise_minus(
+            self.norm1_arr, self.row_thresh_arr, self.norm1_arr, stream)
+        binary_step_forward(self.norm1_arr, self.norm1_arr, stream)
+        reduce_sum(self.norm1_arr, self.row_sparse_arr, [0], stream)
         stream.sync()
-        row_sparse_num = self.row_sparse_arr.asnumpy()[0]
-        return 1 - row_sparse_num / self.num_embed
+        row_reserving_num = self.row_sparse_arr.asnumpy()[0]
+        return row_reserving_num / self.num_embed
 
     def prune_row(self):
         var2arr = self.var2arr
         stream = self.stream
-        stream.sync()
-        npembedding = var2arr[self.embed_layer.embedding_table].asnumpy()
-        nprow_threhold = var2arr[self.embed_layer.threshold].asnumpy(
-        ).reshape(-1)
-        npnorm1 = np.abs(npembedding).sum(axis=1)
-        all_reserving = []
-        offset = 0
+        embedding_arr = var2arr[self.embed_layer.embedding_table]
+        threshold_arr = var2arr[self.embed_layer.threshold]
+        row_compress_rate = self.calc_row_sparsity(
+            embedding_arr, threshold_arr, stream)
+        reserving = self.norm1_arr.asnumpy().astype(np.bool_)
+        reserving = reserving.reshape(-1)
         pruned_num_embed_separate = []
-        for i, nemb in enumerate(self.num_embed_separate):
-            cur_reserving = (
-                np.tile(nprow_threhold[i], nemb) < npnorm1[offset:offset+nemb])
-            offset += nemb
-            all_reserving.append(cur_reserving)
-            pruned_num_embed_separate.append(cur_reserving.sum())
-        reserving = np.concatenate(all_reserving, axis=0)
+        offset = 0
+        for nemb in self.num_embed_separate:
+            ending_offset = offset + nemb
+            pruned_num_embed_separate.append(
+                reserving[offset:ending_offset].sum().item())
+            offset = ending_offset
         num_reserving = sum(pruned_num_embed_separate)
         self.pruned_num_embed_separate = pruned_num_embed_separate
         self.pruned_num_embed = num_reserving
-        self.args['pruned_num_embed'] = num_reserving
         self.args['pruned_num_embed_separate'] = pruned_num_embed_separate
+        self.args['pruned_num_embed'] = num_reserving
         self.log_func(
-            f'Pruning with final row sparse rate {num_reserving / self.num_embed}')
+            f'Pruning with final row compress rate {row_compress_rate}')
         remap_indices = np.full(
             (self.num_embed, ), fill_value=-1, dtype=np.int32)
         new_indices = np.arange(num_reserving, dtype=np.int32)
         remap_indices[reserving] = new_indices
-        new_embedding_table = npembedding[reserving]
+        new_embedding_table = embedding_arr.asnumpy()[reserving]
         self.log_func(
             f'New num embed separate: {self.pruned_num_embed_separate}')
         return new_embedding_table, remap_indices
 
-    def supernet_run_epoch(self, train_batch_num, epoch, part, log_file=None):
+    def run_epoch(self, train_batch_num, epoch, part, log_file=None):
         results = super().run_epoch(train_batch_num, epoch, part, log_file)
         var2arr = self.var2arr
         stream = self.stream
-        row_sparse_rate = self.calc_row_sparsity(
+        row_compress_rate = self.calc_row_sparsity(
             var2arr[self.embed_layer.embedding_table], var2arr[self.embed_layer.threshold], stream)
-        self.log_func(f'Row sparse rate: {row_sparse_rate}')
+        self.log_func(f'Row compress rate: {row_compress_rate}')
         return results
 
     def fit(self):
@@ -115,66 +173,98 @@ class OptEmbedTrainer(EmbeddingTrainer):
                            for nemb in self.num_embed_separate]
         self.row_thresh_arr = empty((self.num_embed, 1), ctx=self.ctx)
 
-        meta = self.try_load_ckpt()
-
-        if meta is None or meta['args']['stage'] == 1:
-            # train supernet
-            self.args['stage'] = 1
-            assert self.save_topk > 0, 'Need to load the best ckpt for dimension selection; please set save_topk a positive integer.'
-            self.run_epoch = self.supernet_run_epoch
-            self.embed_layer = self.get_embed_layer()
-            self.log_func(f'Embedding layer: {self.embed_layer}')
-            eval_nodes = self.get_eval_nodes()
-            self.init_executor(eval_nodes)
-            self.load_into_executor(meta)
-
-            self.run_once()
-
-            self.load_best_ckpt()
-
-            # then prune the row to zero
-            self.executor.return_tensor_values()
-            new_embeddings, remap_indices = self.prune_row()
-            del self.executor
-        else:
-            state_dict = meta['state_dict']
-            new_embeddings = state_dict['OptEmbedAfterRowPruning']
-            remap_indices = state_dict['OptEmbedAfterRowPruning_remap']
-            self.pruned_num_embed = meta['args']['pruned_num_embed']
-            self.pruned_num_embed_separate = meta['args']['pruned_num_embed_separate']
-
-        # prepare for search and retrain
-        self.args['stage'] = 2
-        self.run_epoch = super().run_epoch
-        self.embed_layer = self.get_embed_layer_evolution(
-            new_embeddings, remap_indices)
-        self.log_func(f'Evolution embedding layer: {self.embed_layer}')
-        eval_nodes = super().get_eval_nodes()
-        self.init_executor(eval_nodes)
-        if meta is None or meta['args']['stage'] <= 2:
-            if meta is None or meta['args']['stage'] == 1:
-                self.executor.save(self.save_dir, f'evo_start.pkl', {
-                    'epoch': 0, 'part': 0, 'npart': self.num_test_every_epoch, 'args': self.get_args_for_saving()})
-            else:
-                self.load_into_executor(meta)
-
-            # Evolutionary Search Hyper-params
-            self.keep_num = self.embedding_args['keep_num']
-            self.mutation_num = self.embedding_args['mutation_num']
-            self.crossover_num = self.embedding_args['crossover_num']
-            self.population_num = self.keep_num + self.mutation_num + self.crossover_num
-            self.m_prob = self.embedding_args['m_prob']
-            nepoch_search = self.embedding_args['nepoch_search']
-            self.evolution_search(nepoch_search)
-
-        # then retrain, start from supernet parameters
-        self.args['stage'] = 3
-        self.log_func(f'Switch to retraining.')
-        if meta is not None and meta['args']['stage'] == 3:
-            self.load_into_executor(meta)
-        self.prepare_path_for_retrain()
+        # train supernet
+        assert self.save_topk > 0, 'Need to load the best ckpt for dimension selection; please set save_topk a positive integer.'
         self.init_ckpts()
+        self.embed_layer = self.get_embed_layer()
+        self.log_func(f'Embedding layer: {self.embed_layer}')
+        eval_nodes = self.get_eval_nodes()
+        self.init_executor(eval_nodes)
+        self.load_into_executor(self.try_load_ckpt())
         self.run_once()
+
+        # then prune the row to zero
+        self.load_best_ckpt()
+        self.executor.return_tensor_values()
+        ep, part = self.get_best_meta()
+        new_embeddings, remap_indices = self.prune_row()
+        state_dict = self.executor.state_dict()
+        state_dict.pop('OptEmbed')
+        state_dict.pop('OptEmbed_threshold')
+        state_dict['OptEmbedAfterRowPruning'] = new_embeddings
+        state_dict['OptEmbedAfterRowPruning_remap'] = remap_indices.reshape(
+            -1, 1)
+        meta = {'npart': self.num_test_every_epoch,
+                'args': self.get_args_for_saving(), 'state_dict': state_dict}
+        meta['seed'] = get_seed_status()
+        meta = self.load_only_parameters(meta)
+        self.dump(meta, self.join(f'final_ep{ep}_{part}.pkl'))
+
+
+class OptEmbedRowPrunedTrainer(EmbeddingTrainer):
+    def get_embed_layer(self):
+        return OptEmbeddingAfterRowPruning(
+            self.pruned_num_embed,
+            self.num_embed,
+            self.embedding_dim,
+            self.num_slot,
+            self.batch_size,
+            name='OptEmbedAfterRowPruning',
+            ctx=self.ectx,
+        )
+
+    def set_pruned_num_embed(self, meta):
+        self.pruned_num_embed_separate = self.args[
+            'pruned_num_embed_separate'] = meta['args']['pruned_num_embed_separate']
+        self.pruned_num_embed = self.args['pruned_num_embed'] = meta['args']['pruned_num_embed']
+
+    def test(self):
+        assert self.phase == 'test'
+        meta = self.try_load_ckpt()
+        self.set_pruned_num_embed(meta)
+        self.embed_layer = self.get_embed_layer()
+        self.log_func(f'Embedding layer: {self.embed_layer}')
+        assert self.load_ckpt is not None, 'Checkpoint should be given in testing.'
+        eval_nodes = self.get_eval_nodes_inference()
+        self.init_executor(eval_nodes)
+
+        self.load_into_executor(meta)
+
+        log_file = open(self.result_file,
+                        'w') if self.result_file is not None else None
+        with self.timing():
+            test_loss, test_metric, _ = self.test_once()
+        test_time = self.temp_time[0]
+        results = {
+            'avg_test_loss': test_loss,
+            f'test_{self.monitor}': test_metric,
+            'test_time': test_time,
+        }
+        printstr = ', '.join(
+            [f'{key}: {value:.4f}' for key, value in results.items()])
+        self.log_func(printstr)
+        if log_file is not None:
+            print(printstr, file=log_file, flush=True)
+
+
+class OptEmbedEvoTrainer(OptEmbedRowPrunedTrainer):
+    def fit(self):
+        meta = self.try_load_ckpt()
+        self.set_pruned_num_embed(meta)
+        self.embed_layer = self.get_embed_layer()
+        self.log_func(f'Evolution embedding layer: {self.embed_layer}')
+        eval_nodes = self.get_eval_nodes()
+        self.init_executor(eval_nodes)
+        self.load_into_executor(meta)
+
+        # Evolutionary Search Hyper-params
+        self.keep_num = self.embedding_args['keep_num']
+        self.mutation_num = self.embedding_args['mutation_num']
+        self.crossover_num = self.embedding_args['crossover_num']
+        self.population_num = self.keep_num + self.mutation_num + self.crossover_num
+        self.m_prob = self.embedding_args['m_prob']
+        nepoch_search = self.embedding_args['nepoch_search']
+        self.evolution_search(nepoch_search)
 
     def calc_col_sparsity(self, cand=None):
         base = self.num_embed * self.embedding_dim
@@ -232,6 +322,7 @@ class OptEmbedTrainer(EmbeddingTrainer):
             origin = self.cands[i]
             for j in range(self.num_slot):
                 if nprs.random() < self.m_prob:
+                    # TODO: check why low==0 in original optembed repo
                     origin[j] = nprs.randint(low=0, high=self.embedding_dim)
             mutation.append(origin)
         return mutation
@@ -287,37 +378,20 @@ class OptEmbedTrainer(EmbeddingTrainer):
             f'Best candidate: {acc_cand}')
         self.log_func(f'with AUC {acc_auc}; Loss {acc_loss}; CR {acc_cr}')
         self.set_candidate(acc_cand)
+        self.executor.return_tensor_values()
+        self.executor.save(self.save_dir, 'final.pkl', {
+                           'epoch': 0, 'part': -1, 'npart': self.num_test_every_epoch, 'args': self.get_args_for_saving()})
 
-    def test(self):
-        assert self.phase == 'test' and self.load_ckpt is not None, 'Checkpoint should be given in testing.'
+
+class OptEmbedRetrainer(OptEmbedRowPrunedTrainer):
+    def fit(self):
+        self.init_ckpts()
         meta = self.try_load_ckpt()
-        assert meta['args']['stage'] >= 2, 'Not support test the first stage.'
-        state_dict = meta['state_dict']
-        new_embeddings = state_dict['OptEmbedAfterRowPruning']
-        remap_indices = state_dict['OptEmbedAfterRowPruning_remap']
-        self.pruned_num_embed = meta['args']['pruned_num_embed']
-        self.pruned_num_embed_separate = meta['args']['pruned_num_embed_separate']
-
-        self.embed_layer = self.get_embed_layer_evolution(
-            new_embeddings, remap_indices)
-        self.data_ops = self.get_data()
-        self.log_func(f'Embedding layer: {self.embed_layer}')
-        eval_nodes = self.get_eval_nodes_inference()
+        meta = self.load_only_parameters(meta)
+        self.set_pruned_num_embed(meta)
+        self.embed_layer = self.get_embed_layer()
+        self.log_func(f'Start retraining...')
+        eval_nodes = self.get_eval_nodes()
         self.init_executor(eval_nodes)
         self.load_into_executor(meta)
-
-        log_file = open(self.result_file,
-                        'w') if self.result_file is not None else None
-        with self.timing():
-            test_loss, test_metric, _ = self.test_once()
-        test_time = self.temp_time[0]
-        results = {
-            'avg_test_loss': test_loss,
-            f'test_{self.monitor}': test_metric,
-            'test_time': test_time,
-        }
-        printstr = ', '.join(
-            [f'{key}: {value:.4f}' for key, value in results.items()])
-        self.log_func(printstr)
-        if log_file is not None:
-            print(printstr, file=log_file, flush=True)
+        self.run_once()

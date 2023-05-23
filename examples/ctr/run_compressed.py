@@ -67,7 +67,9 @@ def worker(args):
         }
     elif args.method == 'optembed':
         embedding_args = {
-            'alpha': 1e-5,  # the coef of regularization
+            'stage': args.stage,
+            'alpha': 1e-5,  # the coef of regularization; 1e-6 or 1e-5 or 1e-4 for criteo and avazu
+            'thresh_lr': 1e-4,  # lr for threshold, 1e-4 or same scale with lr
             'keep_num': 0,
             'mutation_num': 10,
             'crossover_num': 10,

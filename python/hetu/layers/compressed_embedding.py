@@ -608,7 +608,7 @@ class OptEmbedding(Embedding):
 
 
 class OptEmbeddingAfterRowPruning(OptEmbedding):
-    def __init__(self, num_embeddings, embedding_dim, num_slot, batch_size, embedding_table, remap_indices, name='embedding', ctx=None):
+    def __init__(self, num_embeddings, original_num_embeddings, embedding_dim, num_slot, batch_size, name='embedding', ctx=None):
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.num_slot = num_slot
@@ -617,14 +617,14 @@ class OptEmbeddingAfterRowPruning(OptEmbedding):
         self.ctx = ctx
 
         self.target_shape = (batch_size, num_slot, embedding_dim)
-        self.embedding_table = ht.placeholder_op(
-            name=name, value=embedding_table, ctx=ctx)
-        self.remap_indices = ht.placeholder_op(
-            name=f'{name}_remap', value=remap_indices, dtype=np.int32, trainable=False, ctx=ctx)
+        self.embedding_table = ht.init.nulls(
+            name=name, shape=(num_embeddings, embedding_dim), ctx=ctx)
+        self.remap_indices = ht.init.nulls(
+            name=f'{name}_remap', shape=(original_num_embeddings, 1), dtype=np.int32, trainable=False, ctx=ctx)
         self.potential_field_masks = ht.placeholder_op(
             name=f'{name}_pmask', value=self.pre_potential_field_mask(), trainable=False, ctx=ctx)
-        self.candidate = ht.init.GenEmpty()(shape=(self.num_slot,),
-                                            name=f'{name}_candidate', trainable=False, dtype=np.int32, ctx=ctx)
+        self.candidate = ht.init.nulls(shape=(
+            self.num_slot,), name=f'{name}_candidate', trainable=False, dtype=np.int32, ctx=ctx)
 
     def __call__(self, x):
         with ht.context(self.ctx):

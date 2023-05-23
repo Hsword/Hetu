@@ -13,7 +13,8 @@ class BaseInit(object):
 
     def __call__(self, node, stream=None):
         self.node = node
-        node.tensor_value = ndarray.empty(self.shape, ctx=node.ctx)
+        node.tensor_value = ndarray.empty(
+            self.shape, ctx=node.ctx, dtype=node.dtype)
         if ndarray.is_gpu_ctx(node.ctx):
             self.init_on_gpu(stream)
         else:
