@@ -352,20 +352,29 @@ class AutoDimRetrainer(EmbeddingTrainer):
     def try_load_ckpt(self):
         meta = super().try_load_ckpt()
         assert meta is not None
-        st = meta['state_dict']
         stage = meta['args']['embedding_args']['stage']
         assert stage in (1, 2)
         if stage == 1:
-            dim_choices = self.make_retrain(st['alphas'])
+            dim_choices = self.make_retrain(meta['state_dict']['alphas'])
             self.args['dim_choices'] = dim_choices
-            src_embeddings = {k: st.pop(f'AutoDimEmb{k}')
-                              for k in self.dim_candidates}
-            feature_offset = 0
-            for i, (nemb, ndim) in enumerate(zip(self.num_embed_separate, dim_choices)):
-                ending_offset = feature_offset + nemb
-                st[f'AutoDimNew_{i}'] = src_embeddings[ndim][feature_offset:ending_offset]
-                feature_offset = ending_offset
             meta = self.load_only_parameters(meta)
+            st = meta['state_dict']
+            if self.embedding_args['reset_retrain']:
+                meta['state_dict'] = {}
+                self.log_func('Reset parameters! Retrain from scratch.')
+            else:
+                src_embeddings = {k: st.pop(f'AutoDimEmb{k}')
+                                for k in self.dim_candidates}
+                src_weights = {k: st.pop(f'weight{k}') for k in self.dim_candidates}
+                src_biases = {k: st.pop(f'bias{k}') for k in self.dim_candidates}
+                feature_offset = 0
+                for i, (nemb, ndim) in enumerate(zip(self.num_embed_separate, dim_choices)):
+                    ending_offset = feature_offset + nemb
+                    st[f'AutoDimNew_{i}'] = src_embeddings[ndim][feature_offset:ending_offset]
+                    st[f'AutoDimNew_{i}_weight'] = src_weights[ndim][i]
+                    st[f'AutoDimNew_{i}_bias'] = src_biases[ndim][i].squeeze(0)
+                    feature_offset = ending_offset
+                self.log_func('Retrain from pre-trained ckpt.')
         else:
             dim_choices = meta['args']['dim_choices']
             self.args['dim_choices'] = dim_choices

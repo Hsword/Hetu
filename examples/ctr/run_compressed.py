@@ -62,7 +62,7 @@ def worker(args):
             'stage': args.stage,
             'alpha_lr': 0.001,
             'r': 1e-2,
-            # 'reset_retrain': 0,
+            'reset_retrain': 0,
             'ignore_second': 1,  # 0 or 1
         }
     elif args.method == 'optembed':
