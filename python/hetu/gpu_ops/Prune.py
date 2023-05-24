@@ -36,7 +36,7 @@ class PruneLowMagnitudeOp(Op):
                 stream_handle.sync()
                 sparse_items = self.output.asnumpy()[0]
                 sparse_rate = sparse_items / self.nparam
-                if abs(sparse_rate - cur_rate) < 1e-3 * (1 - cur_rate):
+                if abs(sparse_rate - cur_rate) < min(1e-4, 1e-3 * (1 - cur_rate)):
                     break
                 elif sparse_rate > cur_rate:
                     r = mid

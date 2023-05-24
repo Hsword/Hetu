@@ -3,6 +3,7 @@ from .multistage import MultiStageTrainer
 from .switchinference import SwitchInferenceTrainer
 from ..layers import DeepLightEmbedding
 import os.path as osp
+import math
 
 
 class DeepLightOverallTrainer(MultiStageTrainer):
@@ -41,9 +42,28 @@ class DeepLightOverallTrainer(MultiStageTrainer):
 
 
 class DeepLightTrainer(SwitchInferenceTrainer):
+    def __init__(self, dataset, model, opt, args, data_ops=None, **kargs):
+        super().__init__(dataset, model, opt, args, data_ops, **kargs)
+        stop_deviation = self.embedding_args['stop_deviation']
+        stop_niter = math.log(
+            stop_deviation, 0.99) * 100
+        stop_npart = math.ceil(
+            stop_niter * self.num_test_every_epoch / self.data_ops[0].get_batch_num('train'))
+        self.start_try_save = (
+            stop_npart // self.num_test_every_epoch, stop_npart % self.num_test_every_epoch)
+        self.log_func(
+            f'Given deviation {stop_deviation}, the niter is {stop_niter} and stop meta is {self.start_try_save}.')
+
     @property
     def sparse_name(self):
         return 'DeepLightEmb'
+
+    def try_save_ckpt(self, new_result, cur_meta):
+        if cur_meta < self.start_try_save:
+            result = False
+        else:
+            result = super().try_save_ckpt(new_result, cur_meta)
+        return result
 
     def try_load_ckpt(self):
         meta = super().try_load_ckpt()

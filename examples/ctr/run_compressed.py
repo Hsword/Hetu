@@ -79,7 +79,9 @@ def worker(args):
     elif args.method == 'deeplight':
         embedding_args = {
             'stage': args.stage,
-            'buffer_conf': 'feature_dim', # candidates: (feature_dim, feature, dim), most to least buffer size
+            # candidates: (feature_dim, feature, dim), most to least buffer size
+            'buffer_conf': 'feature_dim',
+            'stop_deviation': 1e-3,
         }
     elif args.method == 'pep':
         embedding_args = {
