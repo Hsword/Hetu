@@ -25,6 +25,8 @@ class SwitchInferenceTrainer(EmbeddingTrainer):
             self.form = form
             self.log_func(
                 f'Use {form} for sparse storage; final prune rate {self.prune_rate}, given target sparse rate {self.compress_rate}.')
+        else:
+            self.save_dir = self.args['save_dir']
 
     def fit(self):
         super().fit()

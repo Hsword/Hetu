@@ -334,14 +334,6 @@ class MGQEmbedding(DPQEmbedding):
         self.frequency = ht.placeholder_op(
             f'{name}_frequency', value=frequency, dtype=np.int32, trainable=False)
 
-    def make_matries(self, initializer, name):
-        if self.share_weights:
-            shape = (self.num_choices, self.part_embedding_dim)
-        else:
-            shape = (self.num_parts * self.num_choices,
-                     self.part_embedding_dim)
-        return initializer(shape=shape, name='{}'.format(name), ctx=self.ctx)
-
     def __call__(self, x):
         with ht.context(self.ctx):
             # table: (nembed, dim), x: (bs, slot)
