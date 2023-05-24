@@ -907,7 +907,7 @@ class GraphStatus(object):
         self.node_list: List[Op] = node_list
         opt = None
         for node in self.node_list:
-            if isinstance(node, OptimizerOp):
+            if isinstance(node, OptimizerOp) and hasattr(node.optimizer, 'backward2forward'):
                 opt = node.optimizer
                 break
         self.opt = opt

@@ -5,6 +5,7 @@ from ..ndarray import empty
 from ..gpu_links import all_fro_norm, matrix_elementwise_divide_const, \
     all_add_, div_n_mul_, matrix_elementwise_minus, matrix_elementwise_add_simple, \
     sgd_update, assign_embedding_with_indexedslices
+from ..optimizer import SGDOptimizer
 import numpy as np
 from copy import deepcopy
 
@@ -309,19 +310,22 @@ class AutoDimTrainer(EmbeddingTrainer):
             self.embed_layer(embed_input), dense_input, y_)
         train_op = self.opt.minimize(loss)
         param_opts = []
-        alpha_opt = None
+        alpha_update = None
         for op in train_op:
             if op.inputs[0] is self.alpha:
-                alpha_opt = op
+                alpha_update = op
             else:
                 param_opts.append(op)
-        assert alpha_opt is not None
+        assert alpha_update is not None
+        alpha_optimizer = SGDOptimizer(learning_rate=self.alpha_lr)
+        new_alpha_update = alpha_optimizer.opt_op_type(
+            self.alpha, alpha_update.inputs[1], alpha_optimizer)
 
         eval_nodes = {
             self.train_name: [loss, prediction, y_, param_opts],
             self.validate_name: [loss, prediction, y_],
             self.test_name: [loss, prediction, y_],
-            'alpha': [alpha_opt],
+            'alpha': [new_alpha_update],
         }
 
         return eval_nodes
