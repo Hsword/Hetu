@@ -9,10 +9,12 @@ from ..gpu_links import num_less_than, set_less_than
 
 
 class PruneLowMagnitudeOp(Op):
-    def __init__(self, node, rate, ctx=None):
+    def __init__(self, node, rate, buffer_conf='feature_dim', ctx=None):
+        assert buffer_conf in ('feature_dim', 'feature', 'dim')
         super().__init__(PruneLowMagnitudeOp, [node], ctx)
         self.rate_updater = rate
         self.niter = 0
+        self.buffer_conf = buffer_conf
 
     def compute(self, input_vals, output_val, stream_handle=None):
         input_val = input_vals[0]
@@ -52,11 +54,16 @@ class PruneLowMagnitudeOp(Op):
     def infer_shape(self, input_shapes):
         input_shape = input_shapes[0]
         self.nparam = np.prod(input_shape, dtype=int)
-        self.buffer = empty(input_shape, ctx=self.ctx)
+        if self.buffer_conf == 'feature_dim':
+            self.buffer = empty(input_shape, ctx=self.ctx)
+        elif self.buffer_conf == 'feature':
+            self.buffer = empty((input_shape[0],), ctx=self.ctx)
+        elif self.buffer_conf == 'dim':
+            self.buffer = empty((input_shape[1],), ctx=self.ctx)
         self.output = empty((1,), ctx=self.ctx)
-        self.axes = tuple(range(len(input_shape)))
+        self.axes = tuple(range(len(self.buffer.shape)))
         return None
 
 
-def prune_low_magnitude_op(node, rate, ctx=None):
-    return PruneLowMagnitudeOp(node, rate, ctx=ctx)
+def prune_low_magnitude_op(node, rate, buffer_conf='feature_dim', ctx=None):
+    return PruneLowMagnitudeOp(node, rate, buffer_conf=buffer_conf, ctx=ctx)

@@ -10,7 +10,7 @@ def num_less_than(in_arr, mid_arr, out_arr, threshold, axes=None, stream=None):
     assert isinstance(mid_arr, _nd.NDArray)
     assert isinstance(out_arr, _nd.NDArray)
     if axes is None:
-        axes = list(range(len(in_arr.shape)))
+        axes = list(range(len(mid_arr.shape)))
     pointer_func = ctypes.c_int * len(axes)
     pointer = pointer_func(*list(axes))
     _LIB.DLGpuNumLessThan(in_arr.handle, mid_arr.handle, out_arr.handle, ctypes.c_float(

@@ -8,22 +8,51 @@ __global__ void less_const_kernel(const float *input, float *output,
     output[ind] = (abs(input[ind]) < threshold);
 }
 
+__global__ void less_const_kernel_1d_buffer(const float *input, float *output,
+                                            float threshold, size_t dim,
+                                            size_t size) {
+    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
+    if (ind >= size)
+        return;
+    const float *src_ptr = input + ind * dim;
+    float result = 0;
+    for (size_t i = 0; i < dim; ++i) {
+        result += (abs(src_ptr[i]) < threshold);
+    }
+    output[ind] = result;
+}
+
 int DLGpuNumLessThan(const DLArrayHandle input, DLArrayHandle middle,
                      DLArrayHandle output, float threshold, int *axes,
                      int num_ax, DLStreamHandle stream_handle = NULL) {
     size_t size = ArrSize(input);
+    size_t dim = input->shape[1];
     const float *input_data = (const float *)input->data;
     float *middle_data = (float *)middle->data;
+    if (middle->ndim == 1) {
+        dim = size / middle->shape[0];
+        size = middle->shape[0];
+    }
     dim3 blocks;
     dim3 threads;
     ThreadBlock1D(threads, blocks, size);
-    if (stream_handle)
-        less_const_kernel<<<blocks, threads, 0,
-                            *(cudaStream_t *)stream_handle->handle>>>(
-            input_data, middle_data, threshold, size);
-    else
-        less_const_kernel<<<blocks, threads>>>(input_data, middle_data,
-                                               threshold, size);
+    if (middle->ndim == 1) {
+        if (stream_handle)
+            less_const_kernel_1d_buffer<<<
+                blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
+                input_data, middle_data, threshold, dim, size);
+        else
+            less_const_kernel_1d_buffer<<<blocks, threads>>>(
+                input_data, middle_data, threshold, dim, size);
+    } else {
+        if (stream_handle)
+            less_const_kernel<<<blocks, threads, 0,
+                                *(cudaStream_t *)stream_handle->handle>>>(
+                input_data, middle_data, threshold, size);
+        else
+            less_const_kernel<<<blocks, threads>>>(input_data, middle_data,
+                                                   threshold, size);
+    }
     return DLGpuReduceSum(middle, output, axes, num_ax, stream_handle);
 }
 

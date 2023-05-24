@@ -699,10 +699,10 @@ class DeepLightEmbedding(SparseEmbedding):
             return adaptive_sparse
         return updater
 
-    def make_prune_op(self, y_):
+    def make_prune_op(self, y_, buffer_conf):
         batch_num = y_.get_batch_num('train')
         rate_updater = self.make_adaptive_rate(batch_num)
-        return ht.prune_low_magnitude_op(self.embedding_table, rate_updater)
+        return ht.prune_low_magnitude_op(self.embedding_table, rate_updater, buffer_conf=buffer_conf)
 
 
 class PEPEmbedding(Embedding):
