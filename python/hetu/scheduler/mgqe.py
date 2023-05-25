@@ -39,11 +39,12 @@ class MGQETrainer(SwitchInferenceTrainer):
         if self.use_multi:
             codebook = self._get_codebook_memory()
             emb = []
+            threshold = self.embedding_args['threshold']
             for i, nemb in enumerate(self.num_embed_separate):
                 orimem = nemb * self.embedding_dim
                 newmem = nemb * \
                     (self.embedding_args['num_parts'] + 1) + codebook
-                if orimem > newmem:
+                if nemb > threshold and orimem > newmem:
                     emb.append(self.get_single_embed_layer(
                         nemb, self.freq_data[i], self.batch_size, f'MGQEmb_{i}'))
                 else:

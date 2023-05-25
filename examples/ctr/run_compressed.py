@@ -18,18 +18,24 @@ def worker(args):
     if args.method == 'full':
         embedding_args = {}
     elif args.method == 'hash':
-        embedding_args = {}
+        embedding_args = {
+            'threshold': args.threshold,
+        }
     elif args.method == 'compo':
         embedding_args = {
             'aggregator': 'mul',  # (mul, sum)
+            'threshold': args.threshold,
         }
     elif args.method == 'tt':
-        embedding_args = {}
+        embedding_args = {
+            'threshold': args.threshold,
+        }
     elif args.method == 'dhe':
         embedding_args = {
             'num_buckets': 1000000,
             'num_hash': 1024,
             'dist': 'uniform',
+            'threshold': args.threshold,
         }
     elif args.method == 'robe':
         embedding_args = {
@@ -41,6 +47,7 @@ def worker(args):
             'num_parts': 8,
             'share_weights': False,
             'mode': 'vq',
+            'threshold': args.threshold,
         }
     elif args.method == 'mgqe':
         embedding_args = {
@@ -48,11 +55,13 @@ def worker(args):
             'low_num_choices': 64,
             'num_parts': 4,
             'top_percent': 0.1,
+            'threshold': args.threshold,
         }
     elif args.method == 'adapt':
         embedding_args = {
             'top_percent': 0.1,
             'exact_split': 0,
+            'threshold': args.threshold,
         }
     elif args.method == 'md':
         embedding_args = {
@@ -184,6 +193,8 @@ if __name__ == '__main__':
                         help="run id to be logged")
     parser.add_argument("--debug", action="store_true",
                         help="whether in debug mode")
+    parser.add_argument("--threshold", type=int, default=0,
+                        help="the threshold for inter-feature compression")
     parser.add_argument("--stage", type=int, default=1,
                         help="the start stage for train/test")
     parser.add_argument("--load_ckpt", type=str, default=None,

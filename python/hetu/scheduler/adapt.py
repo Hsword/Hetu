@@ -40,10 +40,11 @@ class AdaptEmbTrainer(EmbeddingTrainer):
         assert self.embedding_args['top_percent'] < self.compress_rate
         if self.use_multi:
             emb = []
+            threshold = self.embedding_args['threshold']
             for i, nemb in enumerate(self.num_embed_separate):
                 nfreq, nrare = self._split_freq_rare(
                     nemb, self.remap_indices[i])
-                if nrare > 0 and nfreq + nrare < nemb:
+                if nemb > threshold and nrare > 0 and nfreq + nrare < nemb:
                     emb.append(self.get_single_embed_layer(
                         nfreq, nrare, self.remap_indices[i], f'AdaptEmb_{i}'))
                 else:

@@ -83,11 +83,12 @@ class TTEmbTrainer(EmbeddingTrainer):
         all_size = 0
         if self.use_multi:
             emb = []
+            threshold = self.embedding_args['threshold']
             for i, nemb in enumerate(self.num_embed_separate):
                 newmem = self._get_single_memory(
                     decomp_nembs[i], decomp_ndim, rank)
                 orimem = nemb * self.embedding_dim
-                if newmem < orimem:
+                if nemb > threshold and newmem < orimem:
                     all_size += newmem
                     emb.append(self.get_single_embed_layer(
                         decomp_nembs[i], decomp_ndim, rank, f'TTEmb({self.compress_rate})_{i}'))

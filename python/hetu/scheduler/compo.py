@@ -55,9 +55,10 @@ class CompoEmbTrainer(EmbeddingTrainer):
         all_size = 0
         if self.use_multi:
             emb = []
+            threshold = self.embedding_args['threshold']
             for i, nemb in enumerate(self.num_embed_separate):
                 cur_compo = self._decompo(nemb, collision)
-                if isinstance(cur_compo, tuple):
+                if nemb > threshold and isinstance(cur_compo, tuple):
                     all_size += self._get_single_memory(nemb, collision)
                     emb.append(self.get_single_embed_layer(
                         nemb, collision, f'CompoEmb({self.compress_rate})_{i}'))

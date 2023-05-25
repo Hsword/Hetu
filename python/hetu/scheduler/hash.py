@@ -19,8 +19,15 @@ class HashEmbTrainer(EmbeddingTrainer):
 
     def get_embed_layer(self):
         if self.use_multi:
-            emb = [self.get_single_embed_layer(
-                self._compress_nemb(nemb), f'HashEmb({self.compress_rate})_{i}') for i, nemb in enumerate(self.num_embed_separate)]
+            emb = []
+            threshold = self.embedding_args['threshold']
+            for i, nemb in enumerate(self.num_embed_separate):
+                if nemb > threshold:
+                    cur_emb = self.get_single_embed_layer(
+                        self._compress_nemb(nemb), f'HashEmb({self.compress_rate})_{i}')
+                else:
+                    cur_emb = super().get_single_embed_layer(nemb, f'Emb_{i}')
+                emb.append(cur_emb)
         else:
             emb = self.get_single_embed_layer(
                 self._compress_nemb(self.num_embed), f'HashEmb({self.compress_rate})')

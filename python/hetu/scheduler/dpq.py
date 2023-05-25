@@ -30,10 +30,11 @@ class DPQTrainer(SwitchInferenceTrainer):
         if self.use_multi:
             codebook = self._get_codebook_memory()
             emb = []
+            threshold = self.embedding_args['threshold']
             for i, nemb in enumerate(self.num_embed_separate):
                 orimem = nemb * self.embedding_dim
                 newmem = nemb * self.embedding_args['num_parts'] + codebook
-                if orimem > newmem:
+                if nemb > threshold and orimem > newmem:
                     emb.append(self.get_single_embed_layer(
                         nemb, self.batch_size, f'DPQEmb_{i}'))
                 else:

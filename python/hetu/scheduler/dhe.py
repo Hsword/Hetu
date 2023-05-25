@@ -57,14 +57,15 @@ class DHETrainer(EmbeddingTrainer):
         nprs = get_np_rand(1)
         all_size = 0
         if self.use_multi:
-            threshold = self._get_single_memory(fcdim, nhash)
+            threshold = max(self._get_single_memory(fcdim, nhash),
+                            self.embedding_args['threshold'] * self.embedding_dim)
             emb = []
             for i, nemb in enumerate(self.num_embed_separate):
                 orimem = nemb * self.embedding_dim
                 if orimem > threshold:
                     all_size += threshold
                     emb.append(self.get_single_embed_layer(
-                        fcdim, nprs, f'DHEmb({self.compress_rate}_{i}'))
+                        fcdim, nprs, f'DHEmb({self.compress_rate}_{i})'))
                 else:
                     all_size += orimem
                     emb.append(super().get_single_embed_layer(
