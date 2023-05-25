@@ -16,13 +16,17 @@ class DHETrainer(EmbeddingTrainer):
             memory = 0
             for nemb in self.num_embed_separate:
                 orimem = nemb * self.embedding_dim
-                memory += min(orimem, newmem)
+                if nemb > threshold:
+                    memory += min(orimem, newmem)
+                else:
+                    memory += orimem
             return memory - target_memory
 
         def single_evaluate(x):
             memory = self._get_single_memory(x, num_hash)
             return memory - target_memory
 
+        threshold = self.embedding_args['threshold']
         target_memory = self.num_embed * self.embedding_dim * self.compress_rate
         if self.use_multi:
             evaluate = multi_evaluate

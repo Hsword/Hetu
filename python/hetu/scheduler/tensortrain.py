@@ -43,14 +43,18 @@ class TTEmbTrainer(EmbeddingTrainer):
             memory = 0
             for nemb, dn in zip(self.num_embed_separate, decomp_nembs):
                 orimem = nemb * self.embedding_dim
-                newmem = self._get_single_memory(dn, decomp_ndim, x)
-                memory += min(orimem, newmem)
+                if nemb > threshold:
+                    newmem = self._get_single_memory(dn, decomp_ndim, x)
+                    memory += min(orimem, newmem)
+                else:
+                    memory += orimem
             return memory - target_memory
 
         def single_evaluate(x):
             memory = self._get_single_memory(decomp_nembs, decomp_ndim, x)
             return memory - target_memory
 
+        threshold = self.embedding_args['threshold']
         if self.use_multi:
             evaluate = multi_evaluate
         else:

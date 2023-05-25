@@ -12,14 +12,18 @@ class CompoEmbTrainer(EmbeddingTrainer):
         def multi_evaluate(x):
             memory = 0
             for nemb in self.num_embed_separate:
-                newmem = self._get_single_memory(nemb, x)
-                memory += min(nemb, newmem)
+                if nemb > threshold:
+                    newmem = self._get_single_memory(nemb, x)
+                    memory += min(nemb, newmem)
+                else:
+                    memory += nemb
             return target_nemb - memory
 
         def single_evaluate(x):
             memory = self._get_single_memory(self.num_embed, x)
             return target_nemb - memory
 
+        threshold = self.embedding_args['threshold']
         if self.use_multi:
             evaluate = multi_evaluate
         else:
