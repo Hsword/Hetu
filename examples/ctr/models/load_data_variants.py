@@ -11,15 +11,19 @@ else:
 default_data_path = osp.join(
     osp.split(osp.abspath(__file__))[0], '../datasets')
 default_criteo_path = osp.join(default_data_path, 'criteo')
+default_criteo2core_path = osp.join(default_data_path, 'criteo2core')
 
 
 class Criteo2CoreDataset(CTRDataset):
-    def __init__(self, path, criteo_path=None):
-        super().__init__(path)
+    def __init__(self, path=None, criteo_path=None):
+        if path is None:
+            path = default_criteo2core_path
         if criteo_path is None:
             criteo_path = default_criteo_path
-        assert criteo_path != self.path
+        assert criteo_path != path
         self.criteo_path = criteo_path
+        self.criteo2core_path = path
+        super().__init__(path)
 
     @property
     def num_dense(self):
@@ -40,6 +44,29 @@ class Criteo2CoreDataset(CTRDataset):
 
     def criteo_join(self, path):
         return osp.join(self.criteo_path, path)
+
+    def criteo2core_join(self, path):
+        return osp.join(self.criteo2core_path, path)
+
+    def symlink(self):
+        if not osp.exists(self.join('dense.bin')):
+            os.symlink(self.criteo2core_join(
+                'dense.bin'), self.join('dense.bin'))
+        if not osp.exists(self.join('label.bin')):
+            os.symlink(self.criteo2core_join(
+                'label.bin'), self.join('label.bin'))
+
+    def save_counts_n_sep(self, counts, sparse):
+        print('Processed counts:', counts)
+        assert counts == self.num_embed_separate
+        counts = np.array(counts, dtype=np.int32)
+        counts.tofile(self.join('count.bin'))
+        accum = self.count_to_accum(counts)
+        accum = np.array(accum, dtype=np.int32)
+        accum.tofile(self.join('accum.bin'))
+        for i in range(self.num_sparse):
+            sparse[:, i] -= accum[i]
+        sparse.tofile(self.join('sparse_sep.bin'))
 
     def transform_from_criteo(self):
         from sklearn.preprocessing import LabelEncoder
@@ -67,16 +94,7 @@ class Criteo2CoreDataset(CTRDataset):
             counts.append(cur_column.max() + 1)
             offset += counts[-1]
         criteo_sparse.tofile(self.join('sparse.bin'))
-        print('Processed counts:', counts)
-        assert counts == self.num_embed_separate
-        counts = np.array(counts, dtype=np.int32)
-        counts.tofile(self.join('count.bin'))
-        accum = self.count_to_accum(counts)
-        accum = np.array(accum, dtype=np.int32)
-        accum.tofile(self.join('accum.bin'))
-        for i in range(self.num_sparse):
-            criteo_sparse[:, i] -= accum[i]
-        criteo_sparse.tofile(self.join('sparse_sep.bin'))
+        self.save_counts_n_sep(counts, criteo_sparse)
 
         os.symlink(self.criteo_join('kaggle_processed_dense.bin'),
                    self.join('dense.bin'))
@@ -124,41 +142,132 @@ class Criteo2CoreDataset(CTRDataset):
         return dense_data, sparse_data, label_data
 
 
-def sparsify(x):
-    x = x.reshape(-1, 26).T.reshape(-1)
-    ad = np.empty(x.shape, dtype=x.dtype)
-    y = np.bincount(x)
-    d = {}
-    for i in tqdm(range(x.shape[0])):
-        value = x[i]
-        if value not in d:
-            nx = y[value]
-            seq = np.zeros(nx, dtype=np.int32)
-            nones = round(nx/2+np.random.random()-0.5)
-            seq[:int(nones)] = 1
-            np.random.shuffle(seq)
-            d[value] = [seq, 0]
-        dseq, dind = d[value]
-        ad[i] = dseq[dind]
-        dind += 1
-        if dind == len(dseq):
-            _ = d.pop(value)
-        else:
-            d[value][1] = dind
-    x = 2 * x + ad
-    ny = np.bincount(x)
-    assert len(ny) == 2 * len(y) and (ny > 0).all()  # test
-    return x
+class Criteo2CoreSparsifiedDataset(Criteo2CoreDataset):
+    def __init__(self, path=None, criteo2core_path=None):
+        if path is None:
+            path = osp.join(default_data_path, 'criteo2core_sparsified')
+        if criteo2core_path is None:
+            criteo2core_path = default_criteo2core_path
+        assert criteo2core_path != path
+        self.criteo2core_path = criteo2core_path
+        CTRDataset.__init__(self, path)
+
+    @property
+    def num_embed(self):
+        return 13558422
+
+    @property
+    def num_embed_separate(self):
+        return [2920, 1140, 3091784, 1336442, 610, 48, 24798, 1266, 6, 149658, 11114, 3036406, 6388,
+                54, 27766, 2462892, 20, 10620, 4300, 8, 2875354, 36, 30, 314924, 206, 199632]
+
+    def transform_from_criteo(self):
+        # actually transform from criteo2core
+        self.symlink()
+
+        ori_sparse_path = self.criteo2core_join('sparse.bin')
+        ori_sparse = np.fromfile(
+            ori_sparse_path, dtype=np.int32).reshape(-1, self.num_sparse)
+        # transpose to alleviate the burden of dict
+        x = ori_sparse.T.reshape(-1)
+        ad = np.empty(x.shape, dtype=x.dtype)
+        y = np.bincount(x)
+        d = {}
+        np.random.seed(123)
+        for i in tqdm(range(x.shape[0]), desc='Sparsifying'):
+            value = x[i]
+            if value not in d:
+                nx = y[value]
+                seq = np.zeros(nx, dtype=np.int32)
+                nones = round(nx/2+np.random.random()-0.5)
+                seq[:int(nones)] = 1
+                np.random.shuffle(seq)
+                d[value] = [seq, 0]
+            dseq, dind = d[value]
+            ad[i] = dseq[dind]
+            dind += 1
+            if dind == len(dseq):
+                _ = d.pop(value)
+            else:
+                d[value][1] = dind
+        ad.tofile(self.join('addend.bin'))
+        x = 2 * x + ad
+        ny = np.bincount(x)
+        assert len(ny) == 2 * len(y) and (ny > 0).all()  # test
+        new_sparse = x.reshape(self.num_sparse, -1).T.reshape(-1)
+        new_sparse.tofile(self.join('sparse.bin'))
+        new_sparse = new_sparse.reshape(-1, self.num_sparse)
+
+        counts = []
+        for i in range(self.num_sparse):
+            cur_column = new_sparse[:, i]
+            counts.append(cur_column.max() - cur_column.min() + 1)
+        self.save_counts_n_sep(counts, new_sparse)
 
 
-def densify(x):
-    ...
+class Criteo2CoreDensifiedDataset(Criteo2CoreDataset):
+    def __init__(self, path=None, criteo2core_path=None):
+        if path is None:
+            path = osp.join(default_data_path, 'criteo2core_densified')
+        if criteo2core_path is None:
+            criteo2core_path = default_criteo2core_path
+        assert criteo2core_path != path
+        self.criteo2core_path = criteo2core_path
+        CTRDataset.__init__(self, path)
+
+    @property
+    def num_embed(self):
+        return 3389612
+
+    @property
+    def num_embed_separate(self):
+        return [730, 285, 772946, 334111, 153, 12, 6200, 317, 2, 37415, 2779, 759102, 1597,
+                14, 6942, 615723, 5, 2655, 1075, 2, 718839, 9, 8, 78731, 52, 49908]
+
+    def transform_from_criteo(self):
+        # actually transform from criteo2core
+        self.symlink()
+
+        ori_sparse_path = self.criteo2core_join('sparse.bin')
+        sparse = np.fromfile(
+            ori_sparse_path, dtype=np.int32).reshape(-1, self.num_sparse)
+
+        np.random.seed(124)
+        counts = []
+        offset = 0
+        for i in range(self.num_sparse):
+            ori_column = sparse[:, i]
+            ori_column = ori_column - ori_column.min()
+            ori_count = super().num_embed_separate[i]
+            assert ori_count == ori_column.max() + 1
+            new_count = (ori_count + 1) // 2
+            counts.append(new_count)
+            new_indices = np.arange(ori_count, dtype=np.int32)
+            np.random.shuffle(new_indices)
+            new_indices = new_indices % new_count
+            new_column = new_indices[ori_column]
+            sparse[:, i] = new_column + offset
+            offset += new_count
+        sparse.tofile(self.join('sparse.bin'))
+
+        self.save_counts_n_sep(counts, sparse)
 
 
 if __name__ == '__main__':
-    target_path = osp.join(default_data_path, 'criteo2core')
+    # # 2-core
+    # target_path = default_criteo2core_path
+    # os.makedirs(target_path, exist_ok=True)
+    # dataset = Criteo2CoreDataset(target_path)
+
+    # # sparsified
+    # target_path = osp.join(default_data_path, 'criteo2core_sparsified')
+    # os.makedirs(target_path, exist_ok=True)
+    # dataset = Criteo2CoreSparsifiedDataset(target_path)
+
+    # densified
+    target_path = osp.join(default_data_path, 'criteo2core_densified')
     os.makedirs(target_path, exist_ok=True)
-    dataset = Criteo2CoreDataset(target_path)
+    dataset = Criteo2CoreDensifiedDataset(target_path)
     dense, sparse, label = dataset.process_all_data()
     print([d.shape for d in dense])
     print([d.shape for d in sparse])
