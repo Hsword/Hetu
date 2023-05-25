@@ -7,12 +7,13 @@ class AdaptEmbTrainer(EmbeddingTrainer):
     def get_data(self):
         top_percent = self.embedding_args['top_percent']
         embed_input, dense_input, y_ = super().get_data()
+        exact_split = bool(self.embedding_args['exact_split'])
         if self.use_multi:
             remap_indices = self.dataset.get_separate_remap(
-                [op.dataloaders[self.train_name].raw_data for op in embed_input], top_percent)
+                [op.dataloaders[self.train_name].raw_data for op in embed_input], top_percent, exact_split=exact_split)
         else:
             remap_indices = self.dataset.get_whole_remap(
-                embed_input.dataloaders[self.train_name].raw_data, top_percent)
+                embed_input.dataloaders[self.train_name].raw_data, top_percent, exact_split=exact_split)
         self.remap_indices = remap_indices
         return embed_input, dense_input, y_
 

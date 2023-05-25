@@ -146,10 +146,11 @@ class CTRDataset(object):
             counter.tofile(fpath)
         return counter
 
-    def get_single_frequency_split(self, train_data, num_embed, top_percent, fpath):
+    def get_single_frequency_split(self, train_data, num_embed, top_percent, fpath, exact_split=False):
         fpath_parts = fpath.split('.')
+        suffix = '_exact' if exact_split else ''
         real_fpath = '.'.join(
-            fpath_parts[:-1]) + '_' + str(top_percent) + '.' + fpath_parts[-1]
+            fpath_parts[:-1]) + '_' + str(top_percent) + suffix + '.' + fpath_parts[-1]
         if osp.exists(real_fpath):
             result = np.fromfile(real_fpath, dtype=np.int32)
         else:
@@ -162,27 +163,42 @@ class CTRDataset(object):
                 np.min(counter), np.max(counter) + 1, counter, nhigh)
             print(f'The threshold for high frequency is {kth}.')
             result = (counter >= kth).astype(np.int32)
+            if exact_split:
+                nhigh = round(nhigh)
+                cur_nhigh = result.sum()
+                if cur_nhigh < nhigh:
+                    further_result = (counter == kth - 1).nonzero()[0]
+                    further_result = np.random.choice(
+                        further_result, size=nhigh - cur_nhigh, replace=False)
+                    result[further_result] = 1
+                    assert result.sum() == nhigh
+                elif cur_nhigh > nhigh:
+                    further_remove = (counter == kth).nonzero()[0]
+                    further_remove = np.random.choice(
+                        further_remove, size=cur_nhigh - nhigh, replace=False)
+                    result[further_remove] = 0
+                    assert result.sum() == nhigh
             print(
                 f'Real ratio of high frequency is {np.sum(result) / len(result)}.')
             result.tofile(real_fpath)
         return result
 
-    def get_whole_frequency_split(self, train_data, top_percent):
+    def get_whole_frequency_split(self, train_data, top_percent, exact_split=False):
         # now the filename is not correlated to top percent;
         # if modify top percent, MUST modify the fpath!
         freq_path = self.join('freq_split.bin')
         result = self.get_single_frequency_split(
-            train_data, self.num_embed, top_percent, freq_path)
+            train_data, self.num_embed, top_percent, freq_path, exact_split)
         return result
 
-    def get_separate_frequency_split(self, train_data, top_percent):
+    def get_separate_frequency_split(self, train_data, top_percent, exact_split=False):
         # now the filename is not correlated to top percent;
         # if modify top percent, MUST modify the fpath!
         separate_dir = self.join('freq_split_separate')
         os.makedirs(separate_dir, exist_ok=True)
         freq_paths = [
             osp.join(separate_dir, f'fields{i}.bin') for i in range(self.num_sparse)]
-        results = [self.get_single_frequency_split(data, nemb, top_percent, fp) for data, nemb, fp in zip(
+        results = [self.get_single_frequency_split(data, nemb, top_percent, fp, exact_split) for data, nemb, fp in zip(
             train_data, self.num_embed_separate, freq_paths)]
         return results
 
@@ -199,31 +215,34 @@ class CTRDataset(object):
                 lidx += 1
         return remap_indices
 
-    def get_whole_remap(self, train_data, top_percent):
+    def get_whole_remap(self, train_data, top_percent, exact_split=False):
         # now the filename is not correlated to top percent;
         # if modify top percent, MUST modify the fpath!
-        remap_path = self.join(f'freq_remap{top_percent}.bin')
+        suffix = '_exact' if exact_split else ''
+        remap_path = self.join(f'freq_remap{top_percent}{suffix}.bin')
         if osp.exists(remap_path):
             remap_indices = np.fromfile(remap_path, dtype=np.int32)
         else:
-            result = self.get_whole_frequency_split(train_data, top_percent)
+            result = self.get_whole_frequency_split(
+                train_data, top_percent, exact_split)
             remap_indices = self.remap_split_frequency(result)
             remap_indices.tofile(remap_path)
         return remap_indices
 
-    def get_separate_remap(self, train_data, top_percent):
+    def get_separate_remap(self, train_data, top_percent, exact_split=False):
         # now the filename is not correlated to top percent;
         # if modify top percent, MUST modify the fpath!
         separate_dir = self.join('freq_split_separate')
         os.makedirs(separate_dir, exist_ok=True)
+        suffix = '_exact' if exact_split else ''
         remap_path = [
-            osp.join(separate_dir, f'remap_fields{i}_{top_percent}.bin') for i in range(self.num_sparse)]
+            osp.join(separate_dir, f'remap_fields{i}_{top_percent}{suffix}.bin') for i in range(self.num_sparse)]
         if self.all_exists(remap_path):
             remap_indices = [np.fromfile(rp, dtype=np.int32)
                              for rp in remap_path]
         else:
             results = self.get_separate_frequency_split(
-                train_data, top_percent)
+                train_data, top_percent, exact_split)
             remap_indices = [self.remap_split_frequency(
                 res) for res in results]
             for ind, rp in zip(remap_indices, remap_path):

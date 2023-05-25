@@ -52,6 +52,7 @@ def worker(args):
     elif args.method == 'adapt':
         embedding_args = {
             'top_percent': 0.1,
+            'exact_split': 0,
         }
     elif args.method == 'md':
         embedding_args = {
