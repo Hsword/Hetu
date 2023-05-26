@@ -12,7 +12,11 @@ default_avazu_path = osp.join(default_data_path, 'avazu')
 
 
 def get_dataset(dataset):
-    from .load_data_variants import Criteo2CoreDataset, Criteo2CoreSparsifiedDataset, Criteo2CoreDensifiedDataset
+    from .load_data_variants import Criteo2CoreDataset, \
+        Criteo2CoreSparsifiedDataset, \
+        Criteo2CoreDensifiedDataset, \
+        Criteo2CoreMoreSkewedDataset, \
+        Criteo2CoreLessSkewedDataset
     if dataset == 'criteo':
         return CriteoDataset
     elif dataset == 'avazu':
@@ -25,6 +29,10 @@ def get_dataset(dataset):
         return Criteo2CoreSparsifiedDataset
     elif dataset == 'densified':
         return Criteo2CoreDensifiedDataset
+    elif dataset == 'moreskewed':
+        return Criteo2CoreMoreSkewedDataset
+    elif dataset == 'lessskewed':
+        return Criteo2CoreLessSkewedDataset
 
 
 class CTRDataset(object):

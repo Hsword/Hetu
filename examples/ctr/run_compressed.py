@@ -172,7 +172,7 @@ if __name__ == '__main__':
     parser.add_argument("--lr", type=float, default=1e-3,
                         help="learning rate to be used")
     parser.add_argument("--dataset", type=str, default='criteo',
-                        help="dataset to be used", choices=['criteo', 'avazu', 'criteotb', 'criteo2core', 'sparsified', 'densified'])
+                        help="dataset to be used", choices=['criteo', 'avazu', 'criteotb', 'criteo2core', 'sparsified', 'densified', 'moreskewed', 'lessskewed'])
     parser.add_argument("--data_path", type=str, default=None,
                         help="path to dataset")
     parser.add_argument("--nepoch", type=float, default=0.1,
