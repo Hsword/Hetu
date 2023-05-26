@@ -260,15 +260,19 @@ class Criteo2CoreDensifiedDataset(Criteo2CoreDataset):
         counts = []
         offset = 0
         for i in range(self.num_sparse):
+            # here features with the same frequency are hashed together
+            # so as to maintain the skewness
             ori_column = sparse[:, i]
             ori_column = ori_column - ori_column.min()
             ori_count = super().num_embed_separate[i]
-            assert ori_count == ori_column.max() + 1
+            cnts = np.bincount(ori_column)
+            assert ori_count == cnts.shape[0]
             new_count = (ori_count + 1) // 2
             counts.append(new_count)
-            new_indices = np.arange(ori_count, dtype=np.int32)
-            np.random.shuffle(new_indices)
-            new_indices = new_indices % new_count
+            sorted_indices = np.argsort(-cnts)
+            new_indices = np.empty(ori_count, dtype=np.int32)
+            new_indices[sorted_indices] = np.arange(
+                ori_count, dtype=np.int32) // 2
             new_column = new_indices[ori_column]
             sparse[:, i] = new_column + offset
             offset += new_count
@@ -353,10 +357,11 @@ class Criteo2CoreMoreSkewedDataset(Criteo2CoreDataset):
             ind_mapping[sp_indices] = np.arange(
                 n_tosparsify, dtype=np.int32) * 2
             new_de_indices = np.arange(n_todensify, dtype=np.int32)
-            np.random.shuffle(new_de_indices)
+            if len(new_de_indices) % 2 == 1:
+                new_de_indices += 1
             new_sp_count = n_tosparsify * 2
             new_de_count = (n_todensify + 1) // 2
-            new_de_indices = new_de_indices % new_de_count + new_sp_count
+            new_de_indices = new_de_indices // 2 + new_sp_count
             ind_mapping[de_indices] = new_de_indices
             new_column = ind_mapping[ori_column]
             new_column = new_column + np.maximum(ad, 0)
@@ -471,43 +476,51 @@ class Criteo2CoreLessSkewedDataset(Criteo2CoreDataset):
         self.save_counts_n_sep(counts, sparse)
 
 
-if __name__ == '__main__':
-    # # 2-core
-    # print('2-core dataset')
-    # target_path = default_criteo2core_path
-    # os.makedirs(target_path, exist_ok=True)
-    # dataset = Criteo2CoreDataset(target_path)
+def _gen_data_n_test(dataset):
+    # generate and check data
+    dense, sparse, label = dataset.process_all_data()
+    print([d.shape for d in dense])
+    print([d.shape for d in sparse])
+    print([d.shape for d in label])
 
-    # # sparsified
-    # print('sparsified dataset')
-    # target_path = osp.join(default_data_path, 'criteo2core_sparsified')
-    # os.makedirs(target_path, exist_ok=True)
-    # dataset = Criteo2CoreSparsifiedDataset(target_path)
+    # get sparsity and skewness
+    print('sparsity', dataset.get_sparsity())
+    print('skewness', dataset.get_skewness())
+    print()
+
+
+if __name__ == '__main__':
+    # 2-core
+    print('2-core dataset')
+    target_path = default_criteo2core_path
+    os.makedirs(target_path, exist_ok=True)
+    dataset = Criteo2CoreDataset(target_path)
+    _gen_data_n_test(dataset)
+
+    # sparsified
+    print('sparsified dataset')
+    target_path = osp.join(default_data_path, 'criteo2core_sparsified')
+    os.makedirs(target_path, exist_ok=True)
+    dataset = Criteo2CoreSparsifiedDataset(target_path)
+    _gen_data_n_test(dataset)
 
     # densified
     print('densified dataset')
     target_path = osp.join(default_data_path, 'criteo2core_densified')
     os.makedirs(target_path, exist_ok=True)
     dataset = Criteo2CoreDensifiedDataset(target_path)
+    _gen_data_n_test(dataset)
 
-    # # more skewed
-    # print('more skewed dataset')
-    # target_path = osp.join(default_data_path, 'criteo2core_moreskewed')
-    # os.makedirs(target_path, exist_ok=True)
-    # dataset = Criteo2CoreMoreSkewedDataset(target_path)
+    # more skewed
+    print('more skewed dataset')
+    target_path = osp.join(default_data_path, 'criteo2core_moreskewed')
+    os.makedirs(target_path, exist_ok=True)
+    dataset = Criteo2CoreMoreSkewedDataset(target_path)
+    _gen_data_n_test(dataset)
 
-    # # less skewed
-    # print('less skewed dataset')
-    # target_path = osp.join(default_data_path, 'criteo2core_lessskewed')
-    # os.makedirs(target_path, exist_ok=True)
-    # dataset = Criteo2CoreLessSkewedDataset(target_path)
-
-    # # generate and check data
-    # dense, sparse, label = dataset.process_all_data()
-    # print([d.shape for d in dense])
-    # print([d.shape for d in sparse])
-    # print([d.shape for d in label])
-
-    # get sparsity and skewness
-    print('sparsity', dataset.get_sparsity())
-    print('skewness', dataset.get_skewness())
+    # less skewed
+    print('less skewed dataset')
+    target_path = osp.join(default_data_path, 'criteo2core_lessskewed')
+    os.makedirs(target_path, exist_ok=True)
+    dataset = Criteo2CoreLessSkewedDataset(target_path)
+    _gen_data_n_test(dataset)
