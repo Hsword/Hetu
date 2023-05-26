@@ -48,7 +48,7 @@ class ALPTEmbTrainer(EmbeddingTrainer):
                 dense_param_opt.append(op)
 
         self.var_lookup = GenEmpty()(
-            (self.batch_size, self.num_slot, self.embedding_dim), f'lookup', False, self.ctx)
+            (self.batch_size, self.num_slot, self.embedding_dim), name=f'lookup', trainable=False, ctx=self.ctx)
         scale = self.embed_layer.scale
         lookuped_scale = embedding_lookup_op(scale, embed_input, ctx=self.ctx)
         broadcasted_lookuped_scale = broadcastto_op(

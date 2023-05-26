@@ -288,7 +288,7 @@ class AutoDimTrainer(EmbeddingTrainer):
         assert dalpha_op is not None
 
         self.var_lookups = {dim: GenEmpty()(
-            (self.batch_size, self.num_slot, dim), f'lookups{dim}', False, self.ctx) for dim in self.dim_candidates}
+            (self.batch_size, self.num_slot, dim), name=f'lookups{dim}', trainable=False, ctx=self.ctx) for dim in self.dim_candidates}
         new_loss, new_pred = self.model(self.embed_layer.make_embed(
             self.var_lookups), dense_input, y_)
         alpha_grad = gradients(new_loss, [self.alpha])
@@ -364,9 +364,11 @@ class AutoDimRetrainer(EmbeddingTrainer):
                 self.log_func('Reset parameters! Retrain from scratch.')
             else:
                 src_embeddings = {k: st.pop(f'AutoDimEmb{k}')
-                                for k in self.dim_candidates}
-                src_weights = {k: st.pop(f'weight{k}') for k in self.dim_candidates}
-                src_biases = {k: st.pop(f'bias{k}') for k in self.dim_candidates}
+                                  for k in self.dim_candidates}
+                src_weights = {k: st.pop(f'weight{k}')
+                               for k in self.dim_candidates}
+                src_biases = {k: st.pop(f'bias{k}')
+                              for k in self.dim_candidates}
                 feature_offset = 0
                 for i, (nemb, ndim) in enumerate(zip(self.num_embed_separate, dim_choices)):
                     ending_offset = feature_offset + nemb
