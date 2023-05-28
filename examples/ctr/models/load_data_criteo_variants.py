@@ -114,7 +114,7 @@ class Criteo2CoreDataset(CTRDataset):
                 cur_column[cnt[cur_column] == 1] = 0
                 label_encoder = LabelEncoder()
                 cur_column = label_encoder.fit_transform(cur_column)
-                criteo_sparse[:, i] = cur_column + offset
+            criteo_sparse[:, i] = cur_column + offset
             counts.append(cur_column.max() + 1)
             offset += counts[-1]
         criteo_sparse.tofile(self.join('sparse.bin'))
@@ -333,8 +333,8 @@ class Criteo2CoreMoreSkewedDataset(Criteo2CoreDataset):
             if isinstance(ads, list):
                 ad = np.full(ori_column.shape, fill_value=-1, dtype=np.int32)
                 d = {}
-                for i in tqdm(range(ori_column.shape[0]), desc=f'Sparsifying {i}'):
-                    value = ori_column[i]
+                for j in tqdm(range(ori_column.shape[0]), desc=f'Sparsifying {i}'):
+                    value = ori_column[j]
                     if sp_mask[value]:
                         if value not in d:
                             nx = cnts[value]
@@ -344,7 +344,7 @@ class Criteo2CoreMoreSkewedDataset(Criteo2CoreDataset):
                             np.random.shuffle(seq)
                             d[value] = [seq, 0]
                         dseq, dind = d[value]
-                        ad[i] = dseq[dind]
+                        ad[j] = dseq[dind]
                         dind += 1
                         if dind == len(dseq):
                             _ = d.pop(value)
@@ -431,8 +431,8 @@ class Criteo2CoreLessSkewedDataset(Criteo2CoreDataset):
             if isinstance(ads, list):
                 ad = np.full(ori_column.shape, fill_value=-1, dtype=np.int32)
                 d = {}
-                for i in tqdm(range(ori_column.shape[0]), desc=f'Sparsifying {i}'):
-                    value = ori_column[i]
+                for j in tqdm(range(ori_column.shape[0]), desc=f'Sparsifying {i}'):
+                    value = ori_column[j]
                     if sp_mask[value]:
                         if value not in d:
                             nx = cnts[value]
@@ -442,7 +442,7 @@ class Criteo2CoreLessSkewedDataset(Criteo2CoreDataset):
                             np.random.shuffle(seq)
                             d[value] = [seq, 0]
                         dseq, dind = d[value]
-                        ad[i] = dseq[dind]
+                        ad[j] = dseq[dind]
                         dind += 1
                         if dind == len(dseq):
                             _ = d.pop(value)
