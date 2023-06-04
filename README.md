@@ -194,3 +194,7 @@ The prerequisites for different modules in Hetu is listed as follows:
   2. build zeromq by 'mkdir /path/to/build && cd /path/to/build && cmake /path/to/root && make -j8`
   3. modify ZMQ_ROOT to /path/to/build in cmake/config.cmake
   ```
+
+
+## Codes for "Experimental Analysis of High-dimensional Learnable Vector Storage Compression"
+* We provide the scripts of paper "Experimental Analysis of High-dimensional Learnable Vector Storage Compression" in [examples/ctr](https://github.com/Anonymous-222/EmbeddingCompression/tree/embedmem/examples/ctr) directory.
