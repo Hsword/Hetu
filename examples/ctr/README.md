@@ -165,3 +165,20 @@ Currently we support Avazu and Criteo datasets.
 * Embedding compression methods are implemented in [EmbeddingCompression/python/hetu/layers/compressed_embedding.py](https://github.com/Anonymous-222/EmbeddingCompression/blob/embedmem/python/hetu/layers/compressed_embedding.py). It is possible to implement custom compression methods inheriting `Embedding` class.
 * Trainers are located in [EmbeddingCompression/python/hetu/scheduler](https://github.com/Anonymous-222/EmbeddingCompression/tree/embedmem/python/hetu/scheduler). New trainers must be implemented for custom compression methods.
 * Related gpu operators are implemented in [EmbeddingCompression/python/hetu/gpu_ops](https://github.com/Anonymous-222/EmbeddingCompression/tree/embedmem/python/hetu/gpu_ops).
+
+
+## Configurations of Embedding Compression Methods
+- CompoEmb: we multiple the embeddings from different tables as in the original paper; we only compress the fields that achieve less memory after compression.
+- TT-Rec: we decompose the tensor into three small tensors, and vary the rank to adapt to different memory budgets; we only compress the fields that achieve less memory after compression.
+- DHE: we use 1000000 buckets and 1024 hash functions as in the original paper, and we use uniform distribution for the input of MLP; we only compress the fields that achieve less memory after compression.
+- ROBE: we use Z=1 so that the embedding is not split.
+- MGQE: we provide 256 choices for high-frequency features and 64 choices for low-frequency features as in the original paper; we vary number of split parts to adapt to different memory budgets; we use top_percent=0.1, which means the top 10% features are considered high-frequency features.
+- AdaptEmb: we use 'top_percent' to denote the ratio of high-frequency features; for different memory budgets, we use different top percent.
+- INT8/16: 'digit' can be 8 or 16 for INT8 and INT16 respectively; 'middle' is set to zero to enforce symmetry; 'scale' is tested among several values as in the original paper.
+- ALPT: 'digit' can be 8 or 16 for INT8 and INT16 respectively; 'init_scale' is the initial value for scaling; 'scale_lr' is the learning rate for scale, which we set 2e-5.
+- AutoDim: we test several configurations, whether ignore the second order term in the gradient of alpha or whether retrain from pre-trained parameters; we set alpha_lr=0.001 as in the original paper.
+- OptEmbed: we set the hyperparameters according to the original paper, including 'alpha', 'thresh_lr', 'keep_num', 'mutation_num', 'crossover_num', 'm_prob', 'nepoch_search'.
+- DeepLight: we set stop_deviation=1e-3 to ensure the deviation between final pruning ratio and target ratio is smaller than 1e-3.
+- AutoSrh: we set nsplit=6, alpha_l1=0.00001 and alpha_lr=0.001.
+
+
