@@ -13,7 +13,7 @@ __global__ void cumsum_with_bias(const float* input_data, float* output_data, in
     float pre_sum = 0;
     for(int i = 0; i < this_dim; i++){
         pre_sum += *(input_ptr + offset * i);
-        *(output_ptr + offset * i) = pre_sum - 1;
+        *(output_ptr + offset * i) = pre_sum + bias;
     }
 }
 

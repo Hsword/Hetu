@@ -126,6 +126,54 @@ class Array_Reshape_GradientOp(Op):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
 
 
+class FlattenOp(Op):
+    def __init__(self, node, start_dim=0, end_dim=-1, ctx=None):
+        super().__init__(FlattenOp, [node], ctx)
+        self.start_dim = start_dim
+        self.end_dim = end_dim
+        self.output_shape = None
+
+    def compute(self, input_vals, output_val, stream_handle=None):
+        output_shape = self.output_shape
+        if self.on_cpu:
+            if DNNL_LIB['cpu_Reshape']:
+                cpu_reshape(input_vals[0], output_val)
+            else:
+                output_val[:] = input_vals[0].asnumpy().reshape(output_shape)
+        else:
+            if self.inplace:
+                input_vals[0].reshape(output_shape, output_val)
+            else:
+                array_reshape(input_vals[0], output_val, stream_handle)
+
+    def gradient(self, output_grad):
+        return [array_reshape_gradient_op(self, output_grad, ctx=self.raw_ctx)]
+
+    def infer_shape(self, input_shapes):
+        assert (len(input_shapes) == 1)
+        input_shape = input_shapes[0]
+        ndim = len(input_shape)
+        if self.start_dim < 0:
+            self.start_dim += ndim 
+            assert self.start_dim>=0 and  self.start_dim<ndim
+        if self.end_dim < 0:
+            self.end_dim += ndim 
+            assert self.end_dim>=0 and  self.end_dim<ndim
+            assert self.start_dim <= self.end_dim
+        
+        output_shape = []
+        for i in range(ndim):
+            if i < self.start_dim or i > self.end_dim:
+                output_shape.append(input_shape[i])
+
+        output_shape = tuple(output_shape)
+        self.output_shape = output_shape
+        return output_shape
+
+    def backward_hook(self, config):
+        self.inplace = config.enable_lazy and self not in config.eval_node_list
+
+
 def array_reshape_op(node, output_shape, ctx=None):
     """Reshapes an input array without copy.
 
@@ -160,3 +208,23 @@ def array_reshape_gradient_op(node_in, node_out, ctx=None):
 
     """
     return Array_Reshape_GradientOp(node_in, node_out, ctx=ctx)
+
+
+def flatten_op(node, start_dim=0, end_dim=-1, ctx=None):
+    """Flatten an input array.
+
+    Parameters:
+    ----
+    node : Node
+        Input variable.
+    start_dim: Int
+        The first dim to flatten.
+    end_dim: Int
+        The last dim to flatten.        
+
+    Returns:
+    ----
+    A new Node instance created by Op.
+
+    """
+    return FlattenOp(node, start_dim, end_dim, ctx=ctx)

@@ -1,17 +1,90 @@
 from __future__ import absolute_import
 import os
 import numpy as np
+from PIL import Image
 import multiprocessing as mp
-
+import random
 from . import ndarray
 from .gpu_ops.Node import Op
 
 
+IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif',
+                  '.tiff', '.webp')
+                  
+class ImageFolder(object):
+    def __init__(self, root, loader=None, extensions=None, transform=None, is_valid_file=None):
+        self.root = root
+        classes, class_to_idx = self._find_classes(self.root)
+        if extensions is None:
+            extensions = IMG_EXTENSIONS
+        self.extensions = extensions
+        
+        samples = []
+        targets = []
+        path = os.path.expanduser(root)
+
+        for root, _, fnames in sorted(os.walk(path, followlinks=True)):
+            for fname in sorted(fnames):
+                f = os.path.join(root, fname)
+                if f.lower().endswith(extensions):
+                    samples.append(f)
+                    targets.append(class_to_idx[root.split('/')[-1]])
+
+        if len(samples) == 0:
+            raise (RuntimeError("Found 0 files in subfolders of: " + self.root +
+                                "\n"
+                                "Supported extensions are: " +
+                                ",".join(extensions)))
+        
+        sample = Image.open(samples[0])
+        sample = np.array(sample)
+        self.shape = (len(samples), ) + sample.shape
+        self.samples = np.array(samples)
+        self.targets = np.array(targets)
+        self.transform = transform
+
+    def _find_classes(self, dir):
+        classes = [d.name for d in os.scandir(dir) if d.is_dir()]
+        classes.sort()
+        class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
+        return classes, class_to_idx
+        
+        
+    def __getitem__(self, index):
+        if isinstance(index, int):
+            path = self.samples[index]
+            sample = Image.open(path)
+            if self.transform is not None:
+                sample = self.transform(sample)
+            sample = np.array(sample)
+            return sample
+        
+        path = self.samples[index]
+        samples = []
+        for i in range(len(index)):
+            p = path[i]
+            sample = Image.open(p).convert('RGB')
+            if self.transform is not None:
+                sample = self.transform(sample)
+            sample = np.array(sample)
+            samples.append(sample)
+        return np.array(samples)
+
+    def __len__(self):
+        return self.samples.shape[0]
+        
+    def shuffle(self):
+        n_samples = len(self.samples)
+        sample_id = list(range(n_samples))
+        random.shuffle(sample_id)
+        self.samples = self.samples[sample_id]
+        self.targets = self.targets[sample_id]
+                          
 # Multi-Process not useful now, since we don't have memory to CPU bottleneck
 class Dataloader(object):
     def __init__(self, raw_data, batch_size, name='default', func=None, drop_last=True):
         self.func = func if func else lambda x: x
-        self.raw_data = np.array(self.func(raw_data), np.float32)
+        self.raw_data = np.array(self.func(raw_data), np.float32) if not isinstance(raw_data, ImageFolder) else raw_data
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.name = str(name)

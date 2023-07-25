@@ -1,0 +1,10 @@
+shared :
+  DMLC_PS_ROOT_URI : 127.0.0.1
+  DMLC_PS_ROOT_PORT : 13100
+  DMLC_NUM_WORKER : 1
+  DMLC_NUM_SERVER : 0
+launch :
+  worker : 1
+  server : 0
+  graph_server : 1
+  scheduler : true

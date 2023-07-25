@@ -45,7 +45,7 @@ class Op(object):
         return self.name + \
             '(' + ', '.join([inp.name for inp in self.inputs]) + ')'
 
-    def __add__(self, other: Union[Op, int]) -> Op:
+    def __add__(self, other: Union[Op, float]) -> Op:
         from .AddElewise import add_op
         from .AddConst import addbyconst_op
 
@@ -59,18 +59,52 @@ class Op(object):
             new_node = addbyconst_op(self, other)
         return new_node
 
-    def __mul__(self, other: Union[Op, int]) -> Op:
+    def __sub__(self, other: Union[Op, float]) -> Op:
+        from .AddConst import addbyconst_op
+        from .MinusElewise import minus_op
+
+        if isinstance(other, Op):
+            new_node = minus_op(self, other)
+        else:
+            new_node = addbyconst_op(self, -other)
+        return new_node
+
+    def __rsub__(self, other: Union[Op, float]) -> Op:
+        from .MinusElewise import minus_op
+        from .MinusByConst import minus_byconst_op
+        
+        if isinstance(other, Op):
+            new_node = minus_op(other, self)
+        else:
+            new_node = minus_byconst_op(self, other)
+        return new_node
+        
+    def __mul__(self, other: Union[Op, float]) -> Op:
         from .MultiplyElewise import mul_op
         from .MultiplyConst import mul_byconst_op
 
         if isinstance(other, Op):
             new_node = mul_op(self, other)
         else:
-            # Mul by a constant stores the constant in new node's const_attr
-            # 'other' argument is a constant
             new_node = mul_byconst_op(self, other)
         return new_node
 
+    def __mod__(self, other: float) -> Op:
+        from .Fmod import fmod_op
+
+        new_node = fmod_op(self, other)
+        return new_node
+        
+    def __truediv__(self, other: Union[Op, int]) -> Op:
+        from .Division import div_op, div_const_op
+        from .MultiplyConst import mul_byconst_op
+
+        if isinstance(other, Op):
+            new_node = div_op(self, other)
+        else:
+            new_node = mul_byconst_op(self, 1/other)
+        return new_node
+        
     # Allow left-hand-side add and multiply.
     __radd__ = __add__
     __rmul__ = __mul__

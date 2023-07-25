@@ -9,6 +9,7 @@ from .AddElewise import add_op
 from .Addmm import addmm_op, addmm_gradient_op
 from .Arange import arange_op
 from .Argsort import argsort_op
+from .AsStrided import as_strided_op, as_strided_gradient_op
 from .Argmax import argmax_op
 from .AvgPool import avg_pool2d_op, avg_pool2d_gradient_op
 from .Baddbmm import baddbmm_op
@@ -28,8 +29,11 @@ from .Division import div_op, div_const_op
 from .Dropout import dropout_op, dropout_gradient_op
 from .Dropout2d import dropout2d_op, dropout2d_gradient_op
 from .Exp import exp_op
+from .Eye import eye_op
+from .Flip import flip_op
 from .Floor import floor_op
 from .Full import full_op, full_like_op
+from .Fmod import fmod_op
 from .Gather import gather_op, gather_gradient_op
 from .Interpolate import interpolate_op, interpolate_grad_op
 from .MaskedFill import masked_fill_op
@@ -41,9 +45,11 @@ from .MinusByConst import minus_byconst_op
 from .MinusElewise import minus_op
 from .MultiplyConst import mul_byconst_op
 from .MultiplyElewise import mul_op
+from .Ne import ne_op
 from .Norm import norm_op, norm_gradient_op
 from .OnesLike import oneslike_op
 from .Opposite import opposite_op
+from .Outer import outer_op
 from .Pad import pad_op, pad_gradient_op
 from .Pow import pow_op, pow_gradient_op
 from .Rand import rand_op
@@ -53,7 +59,7 @@ from .Repeat import repeat_op, repeat_gradient_op
 from .Roll import roll_op
 from .Gelu import gelu_op, gelu_gradient_op
 from .LeakyRelu import leaky_relu_op, leaky_relu_gradient_op
-from .Reshape import array_reshape_op, array_reshape_gradient_op
+from .Reshape import array_reshape_op, array_reshape_gradient_op, flatten_op
 from .Sigmoid import sigmoid_op
 from .Sin import sin_op, cos_op
 from .Slice import slice_op, slice_gradient_op
@@ -69,6 +75,8 @@ from .Sqrt import sqrt_op, rsqrt_op
 from .Sum import sum_op
 from .Tanh import tanh_op, tanh_gradient_op
 from .Transpose import transpose_op
+from .Triu import tril_op, triu_op
+from .Unsqueeze import unsqueeze_op, squeeze_op
 from .Variable import Variable, placeholder_op
 from .ZerosLike import zeroslike_op
 from .EmbeddingLookUp import embedding_lookup_op, embedding_lookup_gradient_op
@@ -106,6 +114,7 @@ from .ReverseLayoutTransform import reverse_layout_transform_gradient_gate_op
 from .ReverseLayoutTransform import reverse_layout_transform_op
 from .BalanceAssignment import balance_assignment_op
 from .Indexing import indexing_op
+from .IndexSelect import index_select_op, index_select_grad_op
 from .Scatter1D import scatter1d_op, scatter1d_grad_op
 from .LogElewise import log_op, log_grad_op
 from .NllLoss import nll_loss_op, nll_loss_grad_op
@@ -138,6 +147,8 @@ __all__ = [
     'arange_op',
     'argsort_op',
     'argmax_op',
+    'as_strided_op',
+    'as_strided_gradient_op',
     'avg_pool2d_op',
     'avg_pool2d_gradient_op',
     'baddbmm_op',
@@ -170,7 +181,11 @@ __all__ = [
     'dropout2d_op',
     'dropout2d_gradient_op',
     'exp_op',
+    'eye_op',
+    'flatten_op',
+    'flip_op',
     'floor_op',
+    'fmod_op',
     'full_op',
     'full_like_op',
     'gather_op',
@@ -187,10 +202,12 @@ __all__ = [
     'minus_op',
     'mul_byconst_op',
     'mul_op',
+    'ne_op',
     'norm_op',
     'norm_gradient_op',
     'oneslike_op',
     'opposite_op',
+    'outer_op',
     'pad_op',
     'pad_gradient_op',
     'pow_op',
@@ -234,6 +251,10 @@ __all__ = [
     'tanh_op',
     'tanh_gradient_op',
     'transpose_op',
+    'tril_op',
+    'triu_op',
+    'unsqueeze_op',
+    'squeeze_op',
     'Variable',
     'worker_init',
     'worker_finish',
@@ -281,6 +302,8 @@ __all__ = [
     'reverse_layout_transform_gradient_gate_op',
     'balance_assignment_op',
     'indexing_op',
+    'index_select_op',
+    'index_select_grad_op',
     'scatter1d_op',
     'scatter1d_grad_op',
     'log_op',

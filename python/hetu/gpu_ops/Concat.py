@@ -31,6 +31,9 @@ class ConcatOp(Op):
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 2
         assert len(input_shapes[0]) == len(input_shapes[1])
+        if self.axis<0:
+            self.axis += len(input_shapes[0])
+
         for i in range(self.axis):
             assert input_shapes[0][i] == input_shapes[1][i]
         for i in range(self.axis+1, len(input_shapes[0])):
@@ -38,7 +41,6 @@ class ConcatOp(Op):
         out_shape = list(input_shapes[0])
         out_shape[self.axis] = out_shape[self.axis] + \
             input_shapes[1][self.axis]
-
         return tuple(out_shape)
 
 
@@ -65,6 +67,8 @@ class Concat_gradientOP(Op):
 
     def infer_shape(self, input_shapes):
         assert len(input_shapes) == 2
+        if self.axis<0:
+            self.axis += len(input_shapes[0])
         return input_shapes[1]
 
 

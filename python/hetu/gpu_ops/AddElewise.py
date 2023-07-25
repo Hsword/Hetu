@@ -19,6 +19,8 @@ class AddOp(Op):
         super().__init__(AddOp, [node_A, node_B], ctx)
         self.lazy_execution = True
         self.compute_to_be_config = False
+        self.grad_node_A = None
+        self.grad_node_B = None
 
     def _compute_with_index(self, input_vals, output_val, stream_handle=None):
         def cpu_oneside_add(sparse, dense):
@@ -127,9 +129,14 @@ class AddOp(Op):
             self.check_reset = False
 
     def gradient(self, output_grad):
-        return [output_grad, output_grad]
+        from .ReduceSum import reduce_sum_op
+        self.grad_node_A = reduce_sum_op(
+            output_grad, None, None, ctx=self.raw_ctx)
+        self.grad_node_B = reduce_sum_op(
+            output_grad, None, None, ctx=self.raw_ctx)        
+        return [self.grad_node_A, self.grad_node_B]
 
-    def infer_shape(self, input_shapes):
+    def infer_shape(self, input_shapes):      
         """Need to handle input_vals[0].shape != input_vals[1].shape"""
         assert len(input_shapes) == 2
         no_broadcast = input_shapes[0] == input_shapes[1]
@@ -139,6 +146,9 @@ class AddOp(Op):
         elif not has_const:
             first_size = np.prod(input_shapes[0])
             second_size = np.prod(input_shapes[1])
+            diff = abs(len(input_shapes[0])-len(input_shapes[1]))
+            axes = list(range(diff))
+            keepdims = [False] * diff
             if first_size > second_size:
                 long_shapes = input_shapes[0]
                 short_shapes = input_shapes[1]
@@ -151,6 +161,17 @@ class AddOp(Op):
                 if short_shapes[i] != 1 and short_shapes[i] != long_shapes[len(long_shapes)-len(short_shapes) + i]:
                     assert False, "can't add variables of shapes  " + \
                         str(input_shapes[0])+str(input_shapes[1])
+                if short_shapes[i] == 1 and long_shapes[i + diff] > 1:
+                    axes.append(i + diff)
+                    keepdims.append(True)
+            if first_long:
+                if self.grad_node_B is not None:
+                    self.grad_node_B.axes = axes
+                    self.grad_node_B.keepdims = keepdims
+            else:
+                 if self.grad_node_A is not None:
+                    self.grad_node_A.axes = axes
+                    self.grad_node_A.keepdims = keepdims               
             output = long_shapes
         if self.compute_to_be_config:
             if has_const:
