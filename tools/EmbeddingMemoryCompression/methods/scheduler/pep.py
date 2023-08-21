@@ -1,8 +1,8 @@
 from .switchinference import SwitchInferenceTrainer
 from ..layers import PEPEmbedding, PEPRetrainEmbedding
-from ..ndarray import empty, array
-from ..gpu_links import get_larger_than, sigmoid, num_less_than_tensor_threshold, mask_func
-from ..random import set_random_seed, reset_seed_seqnum
+from hetu.ndarray import empty, array
+from hetu.gpu_links import get_larger_than, sigmoid, num_less_than_tensor_threshold, mask_func
+from hetu.random import set_random_seed, reset_seed_seqnum
 import numpy as np
 
 
@@ -43,6 +43,7 @@ class PEPEmbTrainer(SwitchInferenceTrainer):
 
     def fit(self):
         self.save_dir = self.args['save_dir']
+        self.init_ckpts()
         meta = self.try_load_ckpt()
         if meta is None or meta['args']['stage'] == 1:
             # the first stage

@@ -1,11 +1,11 @@
 from .base import EmbeddingTrainer
 from .multistage import MultiStageTrainer
 from ..layers import AutoDimEmbedding, AutoDimRetrainEmbedding
-from ..ndarray import empty
-from ..gpu_links import all_fro_norm, matrix_elementwise_divide_const, \
+from hetu.ndarray import empty
+from hetu.gpu_links import all_fro_norm, matrix_elementwise_divide_const, \
     all_add_, div_n_mul_, matrix_elementwise_minus, matrix_elementwise_add_simple, \
     sgd_update, assign_embedding_with_indexedslices
-from ..optimizer import SGDOptimizer
+from hetu.optimizer import SGDOptimizer
 import numpy as np
 from copy import deepcopy
 
@@ -254,9 +254,9 @@ class AutoDimTrainer(EmbeddingTrainer):
         )
 
     def get_eval_nodes(self):
-        from ..gpu_ops.AssignWithIndexedSlices import AssignWithIndexedSlicesOp
-        from ..gpu_ops import gradients
-        from ..initializers import GenEmpty
+        from hetu.gpu_ops.AssignWithIndexedSlices import AssignWithIndexedSlicesOp
+        from hetu.gpu_ops import gradients
+        from hetu.initializers import GenEmpty
         embed_input, dense_input, y_ = self.data_ops
         loss, prediction = self.model(
             self.embed_layer(embed_input), dense_input, y_)

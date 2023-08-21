@@ -1,6 +1,6 @@
 from .base import EmbeddingTrainer
 from ..layers import DeepHashEmbedding
-from ..random import get_np_rand, set_random_seed
+from hetu.random import get_np_rand, set_random_seed
 import math
 
 

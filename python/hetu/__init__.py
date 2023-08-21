@@ -12,4 +12,3 @@ from . import random
 from . import distributed_strategies as dist
 from .profiler import HetuProfiler, NCCLProfiler, HetuSimulator
 from .tokenizers import *
-from . import scheduler as sched

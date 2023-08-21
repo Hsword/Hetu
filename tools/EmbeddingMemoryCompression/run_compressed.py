@@ -1,9 +1,7 @@
 import hetu as ht
-import hetu.layers as htl
 
 import os
 import os.path as osp
-import numpy as np
 import argparse
 
 
@@ -136,7 +134,8 @@ def worker(args):
         optimizer = ht.optim.AMSGradOptimizer
     opt = optimizer(learning_rate=learning_rate)
 
-    trainer = ht.sched.get_trainer(args.method)(dataset, model, opt, args)
+    from methods import get_trainer
+    trainer = get_trainer(args.method)(dataset, model, opt, args)
 
     if args.phase == 'train':
         trainer.fit()

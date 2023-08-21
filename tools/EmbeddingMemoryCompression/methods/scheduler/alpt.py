@@ -1,6 +1,6 @@
 from .base import EmbeddingTrainer
 from ..layers import ALPTEmbedding
-from ..gpu_links import reorder_into_lookup, assign_alpt_embedding
+from hetu.gpu_links import reorder_into_lookup, assign_alpt_embedding
 import math
 
 
@@ -24,14 +24,14 @@ class ALPTEmbTrainer(EmbeddingTrainer):
         )
 
     def get_eval_nodes(self):
-        from ..gpu_ops.AssignWithIndexedSlices import AssignWithIndexedSlicesOp, assign_with_indexedslices_op
-        from ..gpu_ops.QuantizeALPTEmb import alpt_rounding_op
-        from ..gpu_ops.Division import div_op
-        from ..gpu_ops.Broadcast import broadcastto_op
-        from ..gpu_ops.EmbeddingLookUp import embedding_lookup_op
-        from ..gpu_ops.MultiplyConst import mul_byconst_op
-        from ..gpu_ops.executor import gradients
-        from ..initializers import GenEmpty
+        from hetu.gpu_ops.AssignWithIndexedSlices import AssignWithIndexedSlicesOp, assign_with_indexedslices_op
+        from hetu.gpu_ops.QuantizeALPTEmb import alpt_rounding_op
+        from hetu.gpu_ops.Division import div_op
+        from hetu.gpu_ops.Broadcast import broadcastto_op
+        from hetu.gpu_ops.EmbeddingLookUp import embedding_lookup_op
+        from hetu.gpu_ops.MultiplyConst import mul_byconst_op
+        from hetu.gpu_ops.executor import gradients
+        from hetu.initializers import GenEmpty
         embed_input, dense_input, y_ = self.data_ops
         embeddings = self.embed_layer(embed_input)
         loss, prediction = self.model(

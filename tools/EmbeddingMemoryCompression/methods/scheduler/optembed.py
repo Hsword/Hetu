@@ -1,10 +1,10 @@
 from .base import EmbeddingTrainer
 from .multistage import MultiStageTrainer
 from ..layers import OptEmbedding, OptEmbeddingAfterRowPruning
-from ..ndarray import empty
-from ..random import get_np_rand
-from ..optimizer import SGDOptimizer
-from ..random import get_seed_status
+from hetu.ndarray import empty
+from hetu.random import get_np_rand
+from hetu.optimizer import SGDOptimizer
+from hetu.random import get_seed_status
 import numpy as np
 
 
@@ -70,7 +70,7 @@ class OptEmbedSuperNetTrainer(EmbeddingTrainer):
         )
 
     def get_eval_nodes(self):
-        from ..gpu_ops import mul_byconst_op, reduce_sum_op, exp_op, opposite_op, add_op
+        from hetu.gpu_ops import mul_byconst_op, reduce_sum_op, exp_op, opposite_op, add_op
         embed_input, dense_input, y_ = self.data_ops
         embeddings = self.embed_layer(embed_input)
         loss, prediction = self.model(
@@ -109,7 +109,7 @@ class OptEmbedSuperNetTrainer(EmbeddingTrainer):
         return eval_nodes
 
     def calc_row_sparsity(self, embedding_table, threshold, stream):
-        from ..gpu_links import binary_step_forward, array_set, concatenate, reduce_norm1, matrix_elementwise_minus, reduce_sum
+        from hetu.gpu_links import binary_step_forward, array_set, concatenate, reduce_norm1, matrix_elementwise_minus, reduce_sum
         stream.sync()
         npthreshold = threshold.asnumpy().reshape(-1)
         for field, value in zip(self.fields_arr, npthreshold):

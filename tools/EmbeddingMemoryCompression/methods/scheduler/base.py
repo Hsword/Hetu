@@ -8,11 +8,7 @@ from sklearn import metrics
 import contextlib
 import pickle
 
-from ..layers import Embedding
-from ..initializers import GenUniform
-from ..dataloader import Dataloader, dataloader_op
-from ..ndarray import cpu, gpu
-from ..gpu_ops import Executor, concatenate_op
+import hetu as ht
 
 
 class EmbeddingTrainer(object):
@@ -39,7 +35,7 @@ class EmbeddingTrainer(object):
         self.initializer = self.args.get('initializer', None)
         if self.initializer is None:
             border = np.sqrt(1 / max(self.num_embed_separate))
-            self.initializer = GenUniform(minval=-border, maxval=border)
+            self.initializer = ht.init.GenUniform(minval=-border, maxval=border)
         self.embedding_args = self.args.get('embedding_args', {})
 
         self.ctx = self.get_ctx(self.args['ctx'])
@@ -155,13 +151,13 @@ class EmbeddingTrainer(object):
     def make_dataloader_op(self, tr_data, va_data, te_data, dtype=np.float32):
         # train_dataloader = Dataloader(
         #     tr_data, self.batch_size, self.all_train_names, dtype=dtype, shuffle=True)
-        train_dataloader = Dataloader(
+        train_dataloader = ht.Dataloader(
             tr_data, self.batch_size, self.all_train_names, dtype=dtype)
-        valid_dataloader = Dataloader(
+        valid_dataloader = ht.Dataloader(
             va_data, self.batch_size, self.all_validate_names, dtype=dtype)
-        test_dataloader = Dataloader(
+        test_dataloader = ht.Dataloader(
             te_data, self.batch_size, self.test_name, dtype=dtype)
-        data_op = dataloader_op(
+        data_op = ht.dataloader_op(
             [train_dataloader, valid_dataloader, test_dataloader], dtype=dtype)
         return data_op
 
@@ -211,7 +207,7 @@ class EmbeddingTrainer(object):
         return emb
 
     def get_single_embed_layer(self, nemb, name):
-        return Embedding(
+        return ht.layers.Embedding(
             nemb,
             self.embedding_dim,
             self.initializer,
@@ -538,15 +534,15 @@ class EmbeddingTrainer(object):
 
     def get_ctx(self, idx):
         if idx < 0:
-            ctx = cpu(0)
+            ctx = ht.cpu(0)
         else:
             assert idx < 8
-            ctx = gpu(idx)
+            ctx = ht.gpu(idx)
         return ctx
 
     def init_executor(self, eval_nodes):
         run_name = osp.split(self.result_file)[1][:-4]
-        executor = Executor(
+        executor = ht.Executor(
             eval_nodes,
             ctx=self.ctx,
             seed=self.seed,
@@ -600,7 +596,7 @@ class EmbeddingTrainer(object):
         if self.use_multi:
             result = [emb_layer(x) for emb_layer, x in zip(
                 self.embed_layer, embed_input)]
-            result = concatenate_op(result, axis=-1)
+            result = ht.concatenate_op(result, axis=-1)
         else:
             result = self.embed_layer(embed_input)
         return result

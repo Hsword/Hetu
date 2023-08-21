@@ -2,7 +2,7 @@ import os
 
 from ..layers import SparseEmbedding
 from .base import EmbeddingTrainer
-from ..gpu_ops import Executor
+from hetu.gpu_ops import Executor
 
 
 class SwitchInferenceTrainer(EmbeddingTrainer):

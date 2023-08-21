@@ -1,35 +1,26 @@
 from .switchinference import SwitchInferenceTrainer
-from ..layers import MGQEmbedding
-from ..gpu_ops import add_op, sum_op, concatenate_op
+from ..layers import DPQEmbedding
+from hetu.gpu_ops import add_op, sum_op, concatenate_op
 
 
-class MGQETrainer(SwitchInferenceTrainer):
-    def get_data(self):
-        top_percent = self.embedding_args['top_percent']
-        embed_input, dense_input, y_ = super().get_data()
-        if self.use_multi:
-            freq_data = self.dataset.get_separate_frequency_split(
-                [op.dataloaders[self.train_name].raw_data for op in embed_input], top_percent)
-        else:
-            freq_data = self.dataset.get_whole_frequency_split(
-                embed_input.dataloaders[self.train_name].raw_data, top_percent)
-        self.freq_data = freq_data
-        return embed_input, dense_input, y_
-
+class DPQTrainer(SwitchInferenceTrainer):
     def _get_codebook_memory(self):
-        codebooks = self.embedding_args['high_num_choices'] * \
-            self.embedding_dim
+        npart = self.embedding_args['num_parts']
+        codebooks = self.embedding_args['num_choices'] * \
+            (self.embedding_dim // npart)
+        if not self.embedding_args['share_weights']:
+            codebooks *= npart
         return codebooks
 
-    def get_single_embed_layer(self, nemb, frequency, batch_size, name):
-        return MGQEmbedding(
+    def get_single_embed_layer(self, nemb, batch_size, name):
+        return DPQEmbedding(
             nemb,
             self.embedding_dim,
-            self.embedding_args['high_num_choices'],
-            self.embedding_args['low_num_choices'],
+            self.embedding_args['num_choices'],
             self.embedding_args['num_parts'],
-            frequency,
             batch_size,
+            share_weights=self.embedding_args['share_weights'],
+            mode=self.embedding_args['mode'],
             initializer=self.initializer,
             name=name,
             ctx=self.ectx,
@@ -42,24 +33,23 @@ class MGQETrainer(SwitchInferenceTrainer):
             threshold = self.embedding_args['threshold']
             for i, nemb in enumerate(self.num_embed_separate):
                 orimem = nemb * self.embedding_dim
-                newmem = nemb * \
-                    (self.embedding_args['num_parts'] + 1) + codebook
+                newmem = nemb * self.embedding_args['num_parts'] + codebook
                 if nemb > threshold and orimem > newmem:
                     emb.append(self.get_single_embed_layer(
-                        nemb, self.freq_data[i], self.batch_size, f'MGQEmb_{i}'))
+                        nemb, self.batch_size, f'DPQEmb_{i}'))
                 else:
                     emb.append(super().get_single_embed_layer(
                         nemb, f'Embedding_{i}'))
         else:
             emb = self.get_single_embed_layer(
-                self.num_embed, self.freq_data, self.batch_size * self.num_slot, 'MGQEmb')
+                self.num_embed, self.batch_size * self.num_slot, 'DPQEmb')
         return emb
 
     def _get_inference_embeddings(self, embed_input):
         if self.use_multi:
             embeddings = []
             for emb, x in zip(self.embed_layer, embed_input):
-                if isinstance(emb, MGQEmbedding):
+                if isinstance(emb, DPQEmbedding):
                     embeddings.append(emb.make_inference(x))
                 else:
                     embeddings.append(emb(x))
@@ -73,19 +63,19 @@ class MGQETrainer(SwitchInferenceTrainer):
         embeddings = self.get_embeddings(embed_input)
         loss, prediction = self.model(
             embeddings, dense_input, y_)
-        if self.use_multi:
-            regs = [emblayer.reg for emblayer in self.embed_layer if isinstance(
-                emblayer, MGQEmbedding)]
-            reg = sum_op(regs)
-        else:
-            reg = self.embed_layer.reg
-        loss = add_op(loss, reg)
-        #loss2 = add_op(loss2,reg)
+        if self.embedding_args['mode'] == 'vq':
+            if self.use_multi:
+                regs = [emblayer.reg for emblayer in self.embed_layer if isinstance(
+                    emblayer, DPQEmbedding)]
+                reg = sum_op(regs)
+            else:
+                reg = self.embed_layer.reg
+            loss = add_op(loss, reg)
         train_op = self.opt.minimize(loss)
         train_nodes = [loss, prediction, y_, train_op]
         if self.use_multi:
             for emblayer in self.embed_layer:
-                if isinstance(emblayer, MGQEmbedding):
+                if isinstance(emblayer, DPQEmbedding):
                     train_nodes.append(emblayer.codebook_update)
         else:
             train_nodes.append(self.embed_layer.codebook_update)

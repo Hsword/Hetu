@@ -3,8 +3,3 @@ from .dcn_criteo import dcn_criteo
 from .dc_criteo import dc_criteo
 from .wdl_criteo import wdl_criteo
 from .deepfm_criteo import dfm_criteo
-from .base import CTRModel_Head
-from .dcn import DCN_Head
-from .deepfm import DeepFM_Head
-from .dlrm import DLRM_Head
-from .wdl import WDL_Head

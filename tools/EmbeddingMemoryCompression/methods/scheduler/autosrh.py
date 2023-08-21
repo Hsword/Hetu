@@ -2,7 +2,7 @@ from .base import EmbeddingTrainer
 from .multistage import MultiStageTrainer
 from .switchinference import SwitchInferenceTrainer
 from ..layers import AutoSrhEmbedding, AutoSrhRetrainEmbedding
-from ..optimizer import SGDOptimizer
+from hetu.optimizer import SGDOptimizer
 import numpy as np
 import os.path as osp
 
@@ -139,8 +139,8 @@ class AutoSrhTrainer(SwitchInferenceTrainer):
         self.executor.return_tensor_values()
 
     def get_eval_nodes(self):
-        from ..gpu_ops import add_op, reduce_sum_op, mul_byconst_op, abs_op, param_clip_op
-        from ..gpu_ops import div_op, broadcastto_op, reduce_mean_op, addbyconst_op
+        from hetu.gpu_ops import add_op, reduce_sum_op, mul_byconst_op, abs_op, param_clip_op
+        from hetu.gpu_ops import div_op, broadcastto_op, reduce_mean_op, addbyconst_op
         embed_input, dense_input, y_ = self.data_ops
         embeddings = self.embed_layer(embed_input)
         loss, prediction = self.model(

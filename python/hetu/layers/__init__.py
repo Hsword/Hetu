@@ -4,13 +4,6 @@ from .concatenate import Concatenate, ConcatenateLayers
 from .conv import Conv2d
 from .dropout import DropOut
 from .embedding import Embedding
-from .compressed_embedding import HashEmbedding, \
-    CompositionalEmbedding, TensorTrainEmbedding, \
-    DeepHashEmbedding, RobeEmbedding, \
-    DPQEmbedding, MGQEmbedding, AdaptiveEmbedding, \
-    MDEmbedding, AutoDimEmbedding, AutoDimRetrainEmbedding, OptEmbedding, OptEmbeddingAfterRowPruning, \
-    SparseEmbedding, DeepLightEmbedding, PEPEmbedding, PEPRetrainEmbedding, AutoSrhEmbedding, AutoSrhRetrainEmbedding, \
-    QuantizedEmbedding, ALPTEmbedding
 from .identity import Identity
 from .linear import Linear
 from .normalization import BatchNorm, LayerNorm
