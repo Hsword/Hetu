@@ -1,6 +1,28 @@
-# Experimental Analysis of High-dimensional Learnable Vector Storage Compression
+# (VLDB'24) Experimental Analysis of Learnable Vector Storage Compression for High-dimensional Sparse Data (under revision)
 
-After compiling HETU, you can train or infer with `run_compressed.py`.
+This directory is used for VLDB'24 Artifact Evaluation of paper #282, titled "Experimental Analysis of Learnable Vector Storage Compression for High-dimensional Sparse Data".
+
+## Setup
+
+Our codes are based on Hetu. We provide a cmake file `config.cmake` in this directory; please copy it to `../../cmake` directory and compile Hetu according to the [README](https://github.com/Anonymous-222/EmbeddingCompression/blob/embedmem/README.md#installation) file in the home page of Hetu. After compiling, you can train or infer with `run_compressed.py` in this directory.
+
+## Prepare Datasets
+Currently we support Avazu and Criteo datasets.
+
+  - Avazu is provided by Avazu, a mobile advertising platform, at the 2015 ctr prediction competition on Kaggle. It contains 10 days of real data, 40M records in total. There are 22 feature fields for a total of 9.4 million unique features.Avazu can be downloaded manually from https://www.kaggle.com/c/avazu-ctr-prediction/data.
+
+  - Criteo is part of the 7-day real data provided by the Criteo Lab on Kaggle in 2014. with a total of 46M records. It contains 13 continuous features and 26 feature field with a total of 34M unique features. Criteo is also adopted in MLPerf, a standard benchmark for machine learning performance. Criteo can be downloaded manually from 
+  https://s3-eu-west-1.amazonaws.com/kaggle-display-advertising-challenge-dataset/dac.tar.gz.
+
+  - Statistics of the datasets
+
+  | Datasets | Fields | Features | Samples | 
+  | :---: | :---: | :---: | :---: |
+  | Avazu | 22 | 9,449,445 | 40,428,967 |
+  | Criteo | 26 | 33,762,577 | 45,840,617 |
+
+
+- You can place the downloaded datasets into a new folder `datasets` under current directory, and check the script `models/load_data.py` for preprocessing.
 
 ## Training
 ```
@@ -65,100 +87,6 @@ python run_compressed.py --model dlrm --method compo --compress_rate 0.5 --ctx 0
 ```
 
 
-## Compilation
-Compilation of HETU is required for training or inference.
-
-Requirements:
-  ```
-  "*" means you should prepare by yourself, while others support auto-download
-  
-  Hetu: OpenMP(*), CMake(*)
-  Hetu (version gpu): CUDA 10.1(*), CUDNN 7.5(*)
-
-  ```
-
-Here is an example of the cmake configuration file:
-```
-######################
-### Set targets ######
-######################
-
-# hetu main version, choose from (mkl, gpu, all)
-# if using mkl (for CPU) or all, OpenMP(*), mkl required
-# if using gpu or all, OpenMP(*), CUDA(*), CUDNN(*) required
-set(HETU_VERSION "gpu")
-
-# whether to compile allreduce module
-# nccl(*), openmpi required
-set(HETU_ALLREDUCE OFF)
-
-# whether to compile ps module
-# protobuf(*), zeromq required
-set(HETU_PS OFF)
-
-# whether to compile geometric module (for GNNs)
-# pybind11(*), metis(*) required
-set(HETU_GEOMETRIC OFF)
-
-# whether to compile cache module (for PS)
-# to enable this, you must turn HETU_PS on
-# pybind11(*) required
-set(HETU_CACHE OFF)
-
-# whether to compile Hetu ML Module
-set(HETU_ML OFF)
-set(HETU_PARALLEL_ML OFF)
-
-######################
-### Set paths ########
-######################
-
-# CUDA version >= 10.1
-set(CUDAToolkit_ROOT /usr/local/cuda)
-
-# NCCL version >= 2.8
-set(NCCL_ROOT $ENV{CONDA_PREFIX})
-
-set(CUDNN_ROOT)
-
-# MPI version >= 3.1 (OpenMPI version >= 4.0.3)
-# if valid version not found, we'll download and compile it in time (openmpi-4.0.3)
-set(MPI_HOME $ENV{CONDA_PREFIX})
-
-# MKL 1.6.1, MKL_ROOT: root directory of mkl, MKL_BUILD: build directory of mkl
-# if not found, we'll download and compile it in time
-set(MKL_ROOT $ENV{CONDA_PREFIX})
-set(MKL_BUILD $ENV{CONDA_PREFIX})
-
-# ZMQ 4.3.2, ZMQ_ROOT: root directory of zeromq, ZMQ_BUILD: build directory of zeromq
-# if not found, we'll download and compile it in time
-set(ZMQ_ROOT $ENV{CONDA_PREFIX})
-set(ZMQ_BUILD $ENV{CONDA_PREFIX})
-
-# CUB & THRUST
-set(CUB_ROOT $ENV{CONDA_PREFIX})
-set(THRUST_ROOT $ENV{CONDA_PREFIX})
-
-```
-
-
-## Prepare Datasets
-Currently we support Avazu and Criteo datasets.
-
-  - Avazu is provided by Avazu, a mobile advertising platform, at the 2015 ctr prediction competition on Kaggle. It contains 10 days of real data, 40M records in total. There are 22 feature fields for a total of 9.4 million unique features.Avazu can be downloaded manually from https://www.kaggle.com/c/avazu-ctr-prediction/data.
-
-  - Criteo is part of the 7-day real data provided by the Criteo Lab on Kaggle in 2014. with a total of 46M records. It contains 13 continuous features and 26 feature field with a total of 34M unique features. Criteo is also adopted in MLPerf, a standard benchmark for machine learning performance. Criteo can be downloaded manually from 
-  https://s3-eu-west-1.amazonaws.com/kaggle-display-advertising-challenge-dataset/dac.tar.gz.
-
-  - Statistics of the datasets
-
-  | Datasets        | Samples          | Features    | Fields |
-  | ------------- |:-------------:|:-----:| -------:|
-  | Avazu      | 40428967      | 9449445   | 22 |
-  | Criteo     | 45840617      | 33762577  | 26  |
-
-
-- You can place the downloaded datasets into a new folder `datasets` under current directory, and check the script `models/load_data.py` for preprocessing.
 
 ## Implementation
 
