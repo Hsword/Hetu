@@ -10,6 +10,7 @@ class MulByConstOp(Op):
         super().__init__(MulByConstOp, [node_A], ctx)
         self.const_attr = const_val
         self.const_updater = const_updater
+        self.dtype = node_A.dtype
         # only update in training
         if self.const_updater is not None:
             self.cnt = 0

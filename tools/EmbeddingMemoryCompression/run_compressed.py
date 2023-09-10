@@ -61,6 +61,15 @@ def worker(args):
             'exact_split': 0,
             'threshold': args.threshold,
         }
+    elif args.method == 'dedup':
+        embedding_args = {
+            'stage': args.stage,
+            'fix_emb': False, # try: fix_emb True or False; use_multi 0 or 1
+            'block_cap': 10000 * args.dim,
+            'lsh_threshold': 0, # increase for larger progress; adjust (2,3,4,5,...,until num_l=90; normally smaller than 10)
+            'fp': 0.01, # if AUC bad, decrease this value (*= 0.1; > 0)
+            'sim': 0.7, # if AUC bad, increase this value (+= 0.1; < 1)
+        }
     elif args.method == 'md':
         embedding_args = {
             'round_dim': True,
@@ -149,8 +158,8 @@ if __name__ == '__main__':
                         help="model to be tested")
     parser.add_argument("--method", type=str, default='full',
                         help="method to be used",
-                        choices=['full', 'hash', 'compo', 'tt',
-                                 'dhe', 'robe', 'dpq', 'mgqe', 'adapt',
+                        choices=['full', 'hash', 'compo', 'tt', 'dhe',
+                                 'robe', 'dpq', 'mgqe', 'adapt', 'dedup',
                                  'md', 'autodim', 'optembed',
                                  'deeplight', 'pep', 'autosrh',
                                  'quantize', 'alpt',])

@@ -9,6 +9,7 @@ from .robe import ROBETrainer
 from .dpq import DPQTrainer
 from .mgqe import MGQETrainer
 from .adapt import AdaptEmbTrainer
+from .deduplication import DedupOverallTrainer
 from .md import MDETrainer
 from .autodim import AutoDimOverallTrainer
 from .optembed import OptEmbedOverallTrainer
@@ -29,6 +30,7 @@ _layer2trainer_mapping = {
     'dpq': DPQTrainer,
     'mgqe': MGQETrainer,
     'adapt': AdaptEmbTrainer,
+    'dedup': DedupOverallTrainer,
     'md': MDETrainer,
     'autodim': AutoDimOverallTrainer,
     'optembed': OptEmbedOverallTrainer,

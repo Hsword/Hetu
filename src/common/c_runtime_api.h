@@ -152,6 +152,9 @@ HETUSYS_EXTERN_C {
     int DLGpuMatrixMultiplyByConst(const DLArrayHandle input, float val,
                                    DLArrayHandle output,
                                    DLStreamHandle stream_handle);
+    int DLGpuMatrixMultiplyByConstInt(const DLArrayHandle input, int val,
+                                      DLArrayHandle output,
+                                      DLStreamHandle stream_handle);
 
     /*!
      * \brief Elementwise divide two matrices and store to output.

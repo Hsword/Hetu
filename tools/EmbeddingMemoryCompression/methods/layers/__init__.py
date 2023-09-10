@@ -15,3 +15,4 @@ from .pep import PEPEmbedding, PEPRetrainEmbedding
 from .autosrh import AutoSrhEmbedding, AutoSrhRetrainEmbedding
 from .quantize import QuantizedEmbedding
 from .alpt import ALPTEmbedding
+from .deduplication import DedupEmbedding
