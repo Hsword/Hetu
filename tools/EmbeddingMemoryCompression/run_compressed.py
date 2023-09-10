@@ -130,6 +130,14 @@ def worker(args):
 
     args.embedding_args = embedding_args
 
+    embedding_details=""
+    for k,v in args.embedding_args.items():
+        embedding_details+=str(k)
+        embedding_details+=str(v)
+        embedding_details+='_'
+    embedding_details = embedding_details[0:-1]+".log"
+    args.result_file = args.result_file[0:-4]+embedding_details
+    
     # define models
     model = args.model(num_dim, num_sparse, num_dense)
 
@@ -184,7 +192,7 @@ if __name__ == '__main__':
                             'criteo', 'avazu', 'criteotb', 'criteo2core',
                             'sparsified', 'densified', 'moreskewed', 'lessskewed',
                             'avazu2core', 'avazusparsified', 'avazudensified',
-                            'avazumoreskewed', 'avazulessskewed',
+                            'avazumoreskewed', 'avazulessskewed', 'company',
                         ])
     parser.add_argument("--data_path", type=str, default=None,
                         help="path to dataset")

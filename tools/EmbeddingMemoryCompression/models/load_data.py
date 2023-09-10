@@ -9,6 +9,7 @@ default_data_path = osp.join(
     osp.split(osp.abspath(__file__))[0], '../datasets')
 default_criteo_path = osp.join(default_data_path, 'criteo')
 default_avazu_path = osp.join(default_data_path, 'avazu')
+default_company_path = osp.join(default_data_path, 'tencent')
 
 
 def get_dataset(dataset):
@@ -48,6 +49,8 @@ def get_dataset(dataset):
         return Avazu2CoreMoreSkewedDataset
     elif dataset == 'avazulessskewed':
         return Avazu2CoreLessSkewedDataset
+    elif dataset == 'company':
+        return CompanyDataset
 
 
 class CTRDataset(object):
@@ -711,6 +714,113 @@ class CriteoTBDataset(CriteoDataset):
             return_data.append((data[:-1], data[-1][ntest:], data[-1][:ntest]))
         return return_data
 
+    
+
+class CompanyDataset(CTRDataset):
+    def __init__(self, path=None):
+        if path is None:
+            path = default_company_path
+        # please download manually from https://www.kaggle.com/c/avazu-ctr-prediction/data
+        super().__init__(path)
+        self.keys = ['sparse', 'labels']
+        self.dtypes = [np.int32, np.int32]
+        self.shapes = [(-1, self.num_sparse), (-1, 1)]
+        self.phases = ['train','test']
+    @property
+    def num_dense(self):
+        return 0
+
+    @property
+    def num_sparse(self):
+        return 43
+
+    @property
+    def num_embed(self):
+        return 66102027
+    
+    @property
+    def num_embed_separate(self):
+        return [37, 18, 38, 152, 478, 1815, 1507, 425, 3674, 8167, 22630, 30288, 29404, 
+                31470, 31040, 31723, 35042, 36521, 37026, 38564, 52159, 63179, 83974, 114654, 186164, 263849, 385482, 525793, 775702, 1026970, 1440239, 1878357, 2688273, 3211288, 3921763, 4497579, 5254235, 5770186, 6370016, 6709860, 7010166, 6934495, 6597625]
+    
+    def process_all_data_by_day(self, separate_fields=False):
+        all_data_path = [
+            [self.join(f'{ph}_{k}.bin') for k in self.keys] for ph in self.phases]
+
+        data_ready = self.all_exists(sum(all_data_path, []))
+
+        if not data_ready:
+            ckeys = self.keys + ['count']
+            cdtypes = self.dtypes + [np.int32]
+            cshapes = self.shapes + [(-1,)]
+            pro_paths = [
+                self.join(f'kaggle_processed_{k}.bin') for k in ckeys]
+            pro_data_ready = self.all_exists(pro_paths)
+
+            if not pro_data_ready:
+                print("Reading raw data={}".format(self.raw_path))
+                all_data = self.read_from_raw()
+                for data, path, dtype in zip(all_data, pro_paths, cdtypes):
+                    data = np.array(data, dtype=dtype)
+                    data.tofile(path)
+            data_with_accum = [np.fromfile(path, dtype=dtype).reshape(
+                shape) for path, dtype, shape in zip(pro_paths, cdtypes, cshapes)]
+            accum = data_with_accum[-1]
+            input_data = data_with_accum[:-1]
+            counts = self.accum_to_count(accum)
+
+            indices = self.get_split_indices(input_data[0].shape[0])
+
+            # create training, validation, and test sets
+            for ind, cur_paths in zip(indices, all_data_path):
+                cur_data = [d[ind] for d in input_data]
+                for d, p in zip(cur_data, cur_paths):
+                    d.tofile(p)
+        else:
+            count = np.fromfile(
+                self.join(f'kaggle_processed_count.bin'), dtype=np.int32)
+            counts = self.accum_to_count(count)
+        print(counts)
+        assert counts == self.num_embed_separate
+
+        def get_data(phase):
+            index = {'train': 0, 'test': 1}[phase]
+            sparse_index = self.keys.index('sparse')
+            memmap_data = [np.memmap(p, mode='r', dtype=dtype).reshape(
+                shape) for p, dtype, shape in zip(all_data_path[index], self.dtypes, self.shapes)]
+            if separate_fields:
+                memmap_data[sparse_index] = self.get_separate_fields(
+                    self.join(f'kaggle_processed_{phase}_sparse_sep.bin'), memmap_data[sparse_index], counts)
+            return memmap_data
+
+        training_data = get_data('train')
+        validation_data = get_data('test')
+        testing_data = get_data('test')
+        return tuple(zip(training_data, validation_data,testing_data))
+
+    
+    def read_from_raw(self, nrows=-1):
+        sparse=np.fromfile(r'/home/public/zph/datasets/tencent/sparse.bin',dtype=np.int32)
+        labels=np.fromfile(r'/home/public/zph/datasets/tencent/labels.bin',dtype=np.int32)
+        counts=[0]
+        cur=0
+        for item in self.num_embed_separate:
+            cur+=item
+            counts.append(cur)
+        return sparse,labels,counts
+    
+    def get_split_indices(self, num_samples):
+        # get exactly number of samples of last day by 'hour' column
+        #n_last_day = 4218938
+        indices = np.arange(num_samples)
+        train_indices = indices[:-len(indices)//5]
+        test_indices = indices[-len(indices)//5:]
+        test_indices, val_indices = np.array_split(test_indices, 2)
+        # randomize
+        train_indices = np.random.permutation(train_indices)
+        print("Randomized indices across days ...")
+        indices = [train_indices, val_indices, test_indices]
+        return indices
 
 if __name__ == '__main__':
     criteo = CriteoDataset(default_criteo_path)
