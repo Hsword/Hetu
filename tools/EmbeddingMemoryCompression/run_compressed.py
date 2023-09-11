@@ -137,6 +137,13 @@ def worker(args):
         embedding_details+='_'
     embedding_details = embedding_details[0:-1]+".log"
     args.result_file = args.result_file[0:-4]+embedding_details
+
+    args.save_dir = osp.join(args.save_dir, args.result_file[:-4])
+    args.result_file = osp.join(args.log_dir, args.result_file)
+    if args.save_topk > 0:
+        if osp.isdir(args.save_dir):
+            print('Warning: the save dir already exists!')
+        os.makedirs(args.save_dir, exist_ok=True)
     
     # define models
     model = args.model(num_dim, num_sparse, num_dense)
@@ -272,12 +279,12 @@ if __name__ == '__main__':
     os.makedirs(args.log_dir, exist_ok=True)
     if args.save_dir is None:
         args.save_dir = osp.join(osp.dirname(osp.abspath(__file__)), 'ckpts')
-    args.save_dir = osp.join(args.save_dir, args.result_file[:-4])
+    '''args.save_dir = osp.join(args.save_dir, args.result_file[:-4])
     args.result_file = osp.join(args.log_dir, args.result_file)
     if args.save_topk > 0:
         if osp.isdir(args.save_dir):
             print('Warning: the save dir already exists!')
-        os.makedirs(args.save_dir, exist_ok=True)
+        os.makedirs(args.save_dir, exist_ok=True)'''
     if args.load_ckpt is not None:
         if not osp.isfile(args.load_ckpt):
             args.load_ckpt = osp.join(args.save_dir, args.load_ckpt)
