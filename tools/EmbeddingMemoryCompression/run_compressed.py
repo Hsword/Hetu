@@ -205,7 +205,7 @@ if __name__ == '__main__':
                         help="path to dataset")
     parser.add_argument("--nepoch", type=float, default=0.1,
                         help="num of epochs")
-    parser.add_argument("--num_test_every_epoch", type=int, default=100,
+    parser.add_argument("--num_test_every_epoch", type=int, default=10,
                         help="evaluate each 1/100 epoch in default")
     parser.add_argument("--seed", type=int, default=123,
                         help="random seed")
@@ -264,8 +264,8 @@ if __name__ == '__main__':
         f'{args.method}',
         f'{args.opt}',
         f'dim{args.dim}',
-        # f'bs{args.bs}',
-        # f'lr{args.lr}',
+        f'bs{args.bs}',
+        f'lr{args.lr}',
         f'cr{args.compress_rate}',
         f'multi{args.use_multi}',
     ]

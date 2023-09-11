@@ -6,7 +6,7 @@ from tqdm import tqdm
 import pickle
 
 default_data_path = osp.join(
-    osp.split(osp.abspath(__file__))[0], '../datasets')
+    osp.split(osp.abspath(__file__))[0], '/home/public/zph/datasets')
 default_criteo_path = osp.join(default_data_path, 'criteo')
 default_avazu_path = osp.join(default_data_path, 'avazu')
 default_company_path = osp.join(default_data_path, 'tencent')

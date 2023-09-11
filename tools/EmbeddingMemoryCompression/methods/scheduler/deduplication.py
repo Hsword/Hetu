@@ -248,12 +248,19 @@ class DedupTrainer(EmbeddingTrainer):
                     continue
                 b2 = embedding[b2_index]
 
+                '''print(b1_index, b2_index, pad_idx)
+                print(b1.shape, b2.shape)'''
+
                 if pad_idx in (b1_index, b2_index):
-                    b1 = b1[:-num_pad_emb * self.embedding_dim]
-                    b2 = b2[:-num_pad_emb * self.embedding_dim]
+                    b1_tmp = b1[:-num_pad_emb * self.embedding_dim]
+                    b2_tmp = b2[:-num_pad_emb * self.embedding_dim]
+                    #print('after', b1.shape, b2.shape, num_pad_emb, self.embedding_dim, num_pad_emb * self.embedding_dim)
+                else:
+                    b1_tmp = b1
+                    b2_tmp = b2
 
                 # compute the similarity between a candidate block and the query block
-                diff = np.abs(b1-b2)
+                diff = np.abs(b1_tmp-b2_tmp)
                 block_sim = np.sum(diff <= fp) / b1.shape[0]
 
                 if block_sim > max_sim and block_sim >= sim:
