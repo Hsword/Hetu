@@ -1,9 +1,11 @@
 from .base import EmbeddingTrainer
+from .compressor import Compressor
 from .multistage import MultiStageTrainer
 from .switchinference import SwitchInferenceTrainer
 from ..layers import DeepLightEmbedding
 import os.path as osp
 import math
+import numpy as np
 
 
 class DeepLightOverallTrainer(MultiStageTrainer):
@@ -109,3 +111,68 @@ class DeepLightTrainer(SwitchInferenceTrainer):
             super().test()
         else:
             EmbeddingTrainer.test(self)
+
+
+class Pruner(Compressor):
+    @staticmethod
+    def compress(embedding, compress_rate):
+        nemb, ndim = embedding.shape
+        real_dim = compress_rate * ndim
+        if real_dim >= 3:
+            form = 'csr'
+            real_target_sparse = (real_dim - 1) / 2 / ndim
+        else:
+            form = 'coo'
+            real_target_sparse = compress_rate / 3
+        nparam = nemb * ndim
+        l, r = 0., 1e2
+        cnt = 0
+        while l < r:
+            cnt += 1
+            mid = (l + r) / 2
+            nlarger = (np.abs(embedding) >= mid).sum()
+            cur_sparse = nlarger / nparam
+            if abs(cur_sparse - real_target_sparse) < min(1e-4, 1e-3 * real_target_sparse):
+                break
+            elif cur_sparse < real_target_sparse:
+                r = mid
+            else:
+                l = mid
+            if cnt > 100:
+                break
+        embedding[np.abs(embedding) < mid] = 0
+        import scipy.sparse
+        if form == 'csr':
+            mat = scipy.sparse.csr_matrix(embedding, embedding.shape)
+            memory = mat.data.shape[0] + \
+                mat.indices.shape[0] + mat.indptr.shape[0]
+        else:
+            mat = scipy.sparse.coo_matrix(embedding, embedding.shape)
+            memory = mat.data.shape[0] + mat.row.shape[0] + mat.col.shape[0]
+        print('Final compression ratio:', (memory / nparam))
+        return mat, form
+
+    @staticmethod
+    def decompress(compressed_embedding):
+        return compressed_embedding.toarray()
+
+    @staticmethod
+    def decompress_batch(compressed_embedding, batch_ids, form):
+        assert form in ('csr', 'coo')
+        embedding = np.zeros(
+            (batch_ids.shape[0], compressed_embedding.shape[1]), dtype=np.float32)
+        if form == 'csr':
+            data = compressed_embedding.data
+            indices = compressed_embedding.indices
+            indptr = compressed_embedding.indptr
+            for i, idx in enumerate(batch_ids):
+                sl = slice(indptr[idx], indptr[idx+1])
+                embedding[i][indices[sl]] = data[sl]
+        else:
+            data = compressed_embedding.data
+            row = compressed_embedding.row
+            col = compressed_embedding.col
+            for i, idx in enumerate(batch_ids):
+                indices = row == idx
+                embedding[i][col[indices]] = data[indices]
+        return embedding

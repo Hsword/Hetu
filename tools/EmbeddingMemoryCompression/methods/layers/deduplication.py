@@ -12,7 +12,7 @@ class DedupEmbedding(Embedding):
         self.ctx = ctx
         embedding_table = ht.array(emb, dtype=np.float32, ctx=ctx)
         self.embedding_table = ht.placeholder_op(self.name, value=embedding_table, dtype=np.float32, trainable=trainable)
-        # self.uncompressed_nrow = len(remap_indices)
+        # self.decompressed_nrow = len(remap_indices)
         remap_indices = ht.array(remap_indices.reshape(
             (-1, 1)), dtype=np.int32, ctx=self.ctx)
         self.remap_indices = ht.placeholder_op(

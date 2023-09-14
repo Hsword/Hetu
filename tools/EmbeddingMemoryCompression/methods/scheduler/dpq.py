@@ -1,4 +1,5 @@
 from .switchinference import SwitchInferenceTrainer
+from .compressor import Compressor
 from ..layers import DPQEmbedding
 from hetu.gpu_ops import add_op, sum_op, concatenate_op
 
@@ -98,3 +99,26 @@ class DPQTrainer(SwitchInferenceTrainer):
             self.test_name: [test_loss, test_prediction, y_],
         }
         return eval_nodes
+
+
+class ProductQuantizer(Compressor):
+    @staticmethod
+    def compress(embedding, subvector_num, subvector_bits):
+        import faiss
+        index = faiss.index_factory(
+            embedding.shape[1], f"PQ{subvector_num}x{subvector_bits}")
+        index.train(embedding)
+        index.add(embedding)
+        memory = embedding.shape[0] * index.code_size + \
+            embedding.shape[1] * (2 ** subvector_bits)
+        print('Final compression ratio:', memory /
+              embedding.shape[0] / embedding.shape[1])
+        return index
+
+    @staticmethod
+    def decompress(index):
+        return index.reconstruct_n()
+
+    @staticmethod
+    def decompress_batch(index, batch_ids):
+        return index.reconstruct_batch(batch_ids)

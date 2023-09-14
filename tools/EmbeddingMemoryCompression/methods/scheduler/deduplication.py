@@ -2,6 +2,7 @@
 import hetu as ht
 from hetu.random import get_np_rand
 from .base import EmbeddingTrainer
+from .compressor import Compressor
 from .multistage import MultiStageTrainer
 from ..layers import DedupEmbedding
 import numpy as np
@@ -104,7 +105,8 @@ class DedupTrainer(EmbeddingTrainer):
                     for i in range(self.num_slot):
                         emb = meta['state_dict'][f'Embedding_{i}']
                         ori_mem += (emb.shape[0] * emb.shape[1])
-                        new_emb, old_to_new_map = self.deduplicate(emb, fp=self.fp, sim=self.sim)
+                        new_emb, old_to_new_map = self.deduplicate(
+                            emb, fp=self.fp, sim=self.sim)
                         if new_emb.shape[0] >= emb.shape[0]:
                             # not compress if larger memory
                             new_embs.append(emb)
@@ -113,16 +115,20 @@ class DedupTrainer(EmbeddingTrainer):
                         else:
                             new_embs.append(new_emb)
                             new_maps.append(old_to_new_map)
-                            new_mem += (new_emb.shape[0] * new_emb.shape[1] + old_to_new_map.shape[0])
+                            new_mem += (new_emb.shape[0] *
+                                        new_emb.shape[1] + old_to_new_map.shape[0])
                 else:
                     emb = meta['state_dict']['Embedding']
                     ori_mem = emb.shape[0] * emb.shape[1]
-                    new_embs, new_maps = self.deduplicate(emb, fp=self.fp, sim=self.sim)
+                    new_embs, new_maps = self.deduplicate(
+                        emb, fp=self.fp, sim=self.sim)
                     assert new_embs.shape[0] < emb.shape[0]
-                    new_mem = new_embs.shape[0] * new_embs.shape[1] + new_maps.shape[0]
+                    new_mem = new_embs.shape[0] * \
+                        new_embs.shape[1] + new_maps.shape[0]
             dedup_time = self.temp_time[0]
             self.log_func(f'Deduplication time: {dedup_time}s.')
-            self.log_func(f'Real compress rate: {new_mem / ori_mem} ({new_mem} / {ori_mem})')
+            self.log_func(
+                f'Real compress rate: {new_mem / ori_mem} ({new_mem} / {ori_mem})')
         else:
             state_dict = meta['state_dict']
             if self.separate_fields:
@@ -210,7 +216,8 @@ class DedupTrainer(EmbeddingTrainer):
         block_cap = self.block_cap
         num_emb_per_block = self.nemb_per_block
         num_pad_emb = (- ori_num_emb % num_emb_per_block) % num_emb_per_block
-        embedding = np.concatenate((embedding, np.zeros((num_pad_emb, self.embedding_dim), dtype=embedding.dtype)), axis=0)
+        embedding = np.concatenate((embedding, np.zeros(
+            (num_pad_emb, self.embedding_dim), dtype=embedding.dtype)), axis=0)
         embedding = embedding.reshape(-1, block_cap)
         pad_idx = embedding.shape[0] - 1
         val_3qs = np.percentile(embedding, 75, axis=1)
@@ -218,7 +225,8 @@ class DedupTrainer(EmbeddingTrainer):
         # step 3: select k blocks
         lsh_indexer = L2LSH(prob_dim=block_cap, r=0.09, num_k=1, num_l=90)
         dup_map = {}
-        threshold = embedding.shape[0] - (ori_num_emb * self.embedding_dim * self.compress_rate - embedding.shape[0]) / block_cap
+        threshold = embedding.shape[0] - (ori_num_emb * self.embedding_dim *
+                                          self.compress_rate - embedding.shape[0]) / block_cap
         assert threshold > 0, f'Cannot reach compress rate {self.compress_rate}.'
         transformed_embedding = lsh_indexer.compute_lsh(embedding)
         # we do not evaluate or finetune during deduplication for the following reasons:
@@ -226,7 +234,7 @@ class DedupTrainer(EmbeddingTrainer):
         # 2 the embeddings are separate parameters, can be finetuned together after dedup phase
         for oi, idx in enumerate(tqdm(orders, desc='Deduplicate')):
             # Flag to indicate whether the block can be deduplicated
-            has_dedup = False  
+            has_dedup = False
             # Maximum similarity
             max_sim = 0
             # Index of the most similar block
@@ -248,20 +256,16 @@ class DedupTrainer(EmbeddingTrainer):
                     continue
                 b2 = embedding[b2_index]
 
-                '''print(b1_index, b2_index, pad_idx)
-                print(b1.shape, b2.shape)'''
-
                 if pad_idx in (b1_index, b2_index):
                     b1_tmp = b1[:-num_pad_emb * self.embedding_dim]
                     b2_tmp = b2[:-num_pad_emb * self.embedding_dim]
-                    #print('after', b1.shape, b2.shape, num_pad_emb, self.embedding_dim, num_pad_emb * self.embedding_dim)
                 else:
                     b1_tmp = b1
                     b2_tmp = b2
 
                 # compute the similarity between a candidate block and the query block
                 diff = np.abs(b1_tmp-b2_tmp)
-                block_sim = np.sum(diff <= fp) / b1.shape[0]
+                block_sim = np.sum(diff <= fp) / b1_tmp.shape[0]
 
                 if block_sim > max_sim and block_sim >= sim:
                     max_sim = block_sim
@@ -274,7 +278,8 @@ class DedupTrainer(EmbeddingTrainer):
 
             if len(dup_map) >= threshold:
                 progress = oi / len(orders)
-                self.log_func(f'Break at progress {progress}; please consider use larger threshold if too early.')
+                self.log_func(
+                    f'Break at progress {progress}; please consider use larger threshold if too early.')
                 break
 
         new_shape = (embedding.shape[0] - len(dup_map), block_cap)
@@ -290,6 +295,184 @@ class DedupTrainer(EmbeddingTrainer):
                 new_idx += 1
         assert new_idx == new_embedding.shape[0]
         return new_embedding.reshape(-1, self.embedding_dim), old_to_new_map
+
+
+class Deduplicator(Compressor):
+    @staticmethod
+    def compress(embedding, compress_rate, block_cap=(10000, 100), lsh_threshold=0, fp=0.01, sim=0.7):
+        # step 1 & 2: calculate 3rd quartile, sort in ascending order
+        nemb, ndim = embedding.shape
+        ori_size = nemb * ndim
+        dtype = embedding.dtype
+        block_size_x, block_size_y = block_cap
+        block_cap_size = block_size_x * block_size_y
+        pad_size_x = -nemb % block_size_x
+        pad_size_y = -ndim % block_size_y
+        has_pad_x = pad_size_x > 0
+        has_pad_y = pad_size_y > 0
+        padded_embedding = embedding
+        if has_pad_x:
+            padded_embedding = np.concatenate(
+                (padded_embedding, np.zeros((pad_size_x, ndim), dtype=dtype)))
+        if has_pad_y:
+            padded_embedding = np.concatenate((padded_embedding, np.zeros(
+                (padded_embedding.shape[0], pad_size_y), dtype=dtype)), axis=1)
+        block_num_x = padded_embedding.shape[0] // block_size_x
+        block_num_y = padded_embedding.shape[1] // block_size_y
+        last_row_index = block_num_y * (block_num_x - 1)
+        new_emb = []
+        for i in range(block_num_x):
+            for j in range(block_num_y):
+                start_x = i * block_size_x
+                ending_x = start_x + block_size_x
+                start_y = j * block_size_y
+                ending_y = start_y + block_size_y
+                new_emb.append(
+                    padded_embedding[start_x:ending_x, start_y:ending_y].reshape(-1))
+        padded_embedding = np.stack(new_emb)
+        val_3qs = np.percentile(padded_embedding, 75, axis=1)
+        orders = np.argsort(val_3qs)
+        # step 3: select k blocks
+        lsh_indexer = L2LSH(prob_dim=block_cap_size, r=0.09, num_k=1, num_l=90)
+        dup_map = {}
+        block_num = block_num_x * block_num_y
+        target_dup_length = (block_num * (block_cap_size + 1) -
+                             compress_rate * ori_size) / block_cap_size
+        assert target_dup_length < block_num, f'Cannot compress to {compress_rate}'
+        transformed_embedding = lsh_indexer.compute_lsh(padded_embedding)
+
+        def check_pad(idx):
+            res = 0
+            if has_pad_x and idx >= last_row_index:
+                res += 2
+            if has_pad_y and (idx + 1) % block_num_y == 0:
+                res += 1
+            return res
+
+        def remove_pad(x, is_pad):
+            if is_pad:
+                x_tmp = x.reshape(block_size_x, block_size_y)
+                if is_pad == 3:  # the last
+                    x_tmp = x_tmp[:-pad_size_x, :-pad_size_y]
+                elif is_pad == 2:  # last row
+                    x_tmp = x_tmp[:-pad_size_x, :]
+                elif is_pad == 1:  # last col
+                    x_tmp = x_tmp[:, :-pad_size_y]
+                x_tmp = x_tmp.reshape(-1)
+            else:
+                x_tmp = x
+            return x_tmp
+        # we do not evaluate or finetune during deduplication for the following reasons:
+        # 1 we stop the deduplication according to memory budget rather than acc
+        # 2 the embeddings are separate parameters, can be finetuned together after dedup phase
+        for oi, idx in enumerate(tqdm(orders, desc='Deduplicate')):
+            # Flag to indicate whether the block can be deduplicated
+            has_dedup = False
+            # Maximum similarity
+            max_sim = 0
+            # Index of the most similar block
+            max_b2_index = None
+
+            b1_index = idx
+
+            # The block needs to be deduplicated
+            b1 = padded_embedding[idx]
+            tb1 = transformed_embedding[idx]
+
+            query_result = lsh_indexer.query(tb1, lsh_threshold)
+            is_b1_pad = check_pad(idx)
+            if not is_b1_pad:
+                lsh_indexer.insert(tb1, idx)
+            if len(query_result) > 0:
+                b1_tmp = remove_pad(b1, is_b1_pad)
+
+            # for b2_index in tqdm(query_result, leave=False):
+            for b2_index in query_result:
+                if b1_index == b2_index:
+                    continue
+                # is_b2_pad = check_pad(b2_index) # assert False
+                b2 = padded_embedding[b2_index]
+                b2_tmp = remove_pad(b2, is_b1_pad)
+
+                # compute the similarity between a candidate block and the query block
+                diff = np.abs(b1_tmp - b2_tmp)
+                block_sim = np.sum(diff <= fp) / b1_tmp.shape[0]
+
+                if block_sim > max_sim and block_sim >= sim:
+                    max_sim = block_sim
+                    max_b2_index = b2_index
+                    has_dedup = True
+
+            # If there is a deduplicable block, then deduplicate it
+            if has_dedup:
+                dup_map[b1_index] = max_b2_index
+
+                if len(dup_map) >= target_dup_length:
+                    progress = oi / len(orders)
+                    print(
+                        f'Break at progress {progress}; please consider use larger threshold if too early.')
+                    break
+
+        new_embedding = []
+        new_map = np.full((block_num,), -1, dtype=np.int32)
+        new_idx = 0
+        for idx in orders:
+            tar = dup_map.get(idx, idx)
+            if new_map[tar] < 0:
+                new_embedding.append(padded_embedding[tar])
+                new_map[tar] = new_idx
+                new_idx += 1
+            if idx != tar:
+                new_map[idx] = new_map[tar]
+        new_embedding = np.stack(new_embedding)
+        assert new_idx == new_embedding.shape[0]
+        print('Final compression ratio:',
+              (new_embedding.shape[0] * new_embedding.shape[1] + len(new_map)) / ori_size)
+        return new_embedding, new_map
+
+    @staticmethod
+    def decompress(compressed_embedding, dup_map, ori_size, block_cap):
+        block_size_x, block_size_y = block_cap
+        nemb, ndim = ori_size
+        block_num_x = (nemb - 1) // block_size_x + 1
+        block_num_y = (ndim - 1) // block_size_y + 1
+        embedding = np.empty(
+            (block_num_x * block_size_x, block_num_y * block_size_y), dtype=np.float32)
+        for i in range(block_num_x):
+            idx = i * block_num_y
+            start_x = i * block_size_x
+            ending_x = start_x + block_size_x
+            cur_embedding = embedding[start_x:ending_x]
+            for j in range(block_num_y):
+                start_y = j * block_size_y
+                ending_y = start_y + block_size_y
+                cur_embedding[:, start_y:ending_y] = compressed_embedding[dup_map[idx+j]
+                                                                          ].reshape(block_cap)
+        embedding = embedding[:nemb, :ndim]
+        return embedding
+
+    @staticmethod
+    def decompress_batch(compressed_embedding, dup_map, ori_size, block_cap, batch_ids):
+        block_size_x, block_size_y = block_cap
+        ndim = ori_size[1]
+        block_num_y = (ndim - 1) // block_size_y + 1
+        block_idx_x = np.unique(batch_ids // block_size_x)
+        potential_embeddings = {x: np.empty(
+            (block_size_x, block_num_y * block_size_y), dtype=np.float32) for x in block_idx_x}
+        for k in potential_embeddings:
+            idx = k * block_num_y
+            cur_embedding = potential_embeddings[k]
+            for j in range(block_num_y):
+                start_y = j * block_size_y
+                ending_y = start_y + block_size_y
+                cur_embedding[:, start_y:ending_y] = compressed_embedding[dup_map[idx+j]
+                                                                          ].reshape(block_cap)
+        result_embeddings = np.empty(
+            (batch_ids.shape[0], ndim), dtype=np.float32)
+        for i, ridx in enumerate(batch_ids):
+            result_embeddings[i, :] = potential_embeddings[ridx //
+                                                           block_size_x][ridx % block_size_x, :ndim]
+        return result_embeddings
 
 
 class L2LSH(object):

@@ -1,6 +1,8 @@
 from .switchinference import SwitchInferenceTrainer
+from .compressor import Compressor
 from ..layers import MGQEmbedding
 from hetu.gpu_ops import add_op, sum_op, concatenate_op
+import numpy as np
 
 
 class MGQETrainer(SwitchInferenceTrainer):
@@ -80,7 +82,7 @@ class MGQETrainer(SwitchInferenceTrainer):
         else:
             reg = self.embed_layer.reg
         loss = add_op(loss, reg)
-        #loss2 = add_op(loss2,reg)
+        # loss2 = add_op(loss2,reg)
         train_op = self.opt.minimize(loss)
         train_nodes = [loss, prediction, y_, train_op]
         if self.use_multi:
@@ -108,3 +110,59 @@ class MGQETrainer(SwitchInferenceTrainer):
             self.test_name: [test_loss, test_prediction, y_],
         }
         return eval_nodes
+
+
+class MagnitudeProductQuantizer(Compressor):
+    @staticmethod
+    def compress(embedding, subvector_num, grouped_subvector_bits):
+        ngroup = len(grouped_subvector_bits)
+        split_embeddings, remap = Compressor.split_by_magnitude(
+            embedding, ngroup)
+        import faiss
+        memory = 0
+        indices = []
+        for g, subvector_bits in enumerate(grouped_subvector_bits):
+            cur_emb = split_embeddings[g]
+            index = faiss.index_factory(
+                cur_emb.shape[1], f"PQ{subvector_num}x{subvector_bits}")
+            index.train(cur_emb)
+            index.add(cur_emb)
+            memory += (cur_emb.shape[0] * index.code_size +
+                       cur_emb.shape[1] * (2 ** subvector_bits))
+            indices.append(index)
+        print('Final compression ratio:', (memory + remap.shape[0]) /
+              embedding.shape[0] / embedding.shape[1])
+        return indices, remap
+
+    @staticmethod
+    def decompress(indices, remap):
+        embedding = np.empty((remap.shape[0], indices[0].d), dtype=np.float32)
+        start_index = 0
+        reverse_remap = np.argsort(remap)
+        for index in indices:
+            cur_emb = index.reconstruct_n()
+            ending_index = start_index + cur_emb.shape[0]
+            cur_idx = reverse_remap[start_index:ending_index]
+            embedding[cur_idx] = cur_emb
+            start_index = ending_index
+        return embedding
+
+    @staticmethod
+    def decompress_batch(indices, batch_ids, remap):
+        embedding = np.empty(
+            (batch_ids.shape[0], indices[0].d), dtype=np.float32)
+        remapped = remap[batch_ids]
+        indind = np.zeros(remapped.shape, dtype=np.int32)
+        embind = np.zeros(remapped.shape, dtype=np.int32)
+        for g in range(len(indices)):
+            cur_nemb = indices[g].ntotal
+            belong = (remapped >= 0) & (remapped < cur_nemb)
+            indind[belong] = g
+            embind[belong] = remapped[belong]
+            remapped -= cur_nemb
+        bidx = np.arange(batch_ids.shape[0])
+        for g, index in enumerate(indices):
+            iscur = indind == g
+            if sum(iscur) > 0:
+                embedding[bidx[iscur]] = index.reconstruct_batch(embind[iscur])
+        return embedding
