@@ -34,7 +34,7 @@ def test_dedup():
         compressed_embedding, dup_map, ori_size, block_cap)
     batch_ids = np.random.randint(0, ori_size[0], size=(5))
     reconstruct_batch = Deduplicator.decompress_batch(
-        compressed_embedding, dup_map, ori_size, block_cap, batch_ids)
+        compressed_embedding, batch_ids, dup_map, ori_size, block_cap)
 
     # testing
     for i in range(block_num[0]):

@@ -452,7 +452,7 @@ class Deduplicator(Compressor):
         return embedding
 
     @staticmethod
-    def decompress_batch(compressed_embedding, dup_map, ori_size, block_cap, batch_ids):
+    def decompress_batch(compressed_embedding, batch_ids, dup_map, ori_size, block_cap):
         block_size_x, block_size_y = block_cap
         ndim = ori_size[1]
         block_num_y = (ndim - 1) // block_size_y + 1

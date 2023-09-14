@@ -1,5 +1,7 @@
 import numpy as np
+from time import time
 import bisect
+from hetu.random import get_np_rand
 
 
 class Compressor:
@@ -42,3 +44,24 @@ class Compressor:
         remap[cur_idx] = np.arange(start_index, len(remap))
         assert np.all(remap >= 0)
         return return_embs, remap
+
+    @staticmethod
+    def timing_wrapper(func, *args, **kwargs):
+        start = time()
+        result = func(*args, **kwargs)
+        ending = time()
+        print('Time usage:', ending - start)
+        return result
+
+    @classmethod
+    def timing_decompress_batch(cls, compressed_embedding, nemb, batch_size, *args, **kwargs):
+        nprs = get_np_rand(1)
+        for _ in range(5):
+            batch_ids = nprs.randint(0, nemb, size=(batch_size,), dtype=np.int32)
+            cls.decompress_batch(compressed_embedding, batch_ids, *args, **kwargs)
+        start = time()
+        for _ in range(95):
+            batch_ids = nprs.randint(0, nemb, size=(batch_size,), dtype=np.int32)
+            cls.decompress_batch(compressed_embedding, batch_ids, *args, **kwargs)
+        ending = time()
+        print(f'Time usage for batch ({batch_size}): {(ending - start) / 95}')
