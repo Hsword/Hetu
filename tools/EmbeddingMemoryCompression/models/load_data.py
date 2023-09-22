@@ -6,7 +6,7 @@ from tqdm import tqdm
 import pickle
 
 default_data_path = osp.join(
-    osp.split(osp.abspath(__file__))[0], '/home/public/zph/datasets')
+    osp.split(osp.abspath(__file__))[0], '../datasets')
 default_criteo_path = osp.join(default_data_path, 'criteo')
 default_avazu_path = osp.join(default_data_path, 'avazu')
 default_company_path = osp.join(default_data_path, 'tencent')
@@ -714,18 +714,17 @@ class CriteoTBDataset(CriteoDataset):
             return_data.append((data[:-1], data[-1][ntest:], data[-1][:ntest]))
         return return_data
 
-    
 
 class CompanyDataset(CTRDataset):
     def __init__(self, path=None):
         if path is None:
             path = default_company_path
-        # please download manually from https://www.kaggle.com/c/avazu-ctr-prediction/data
         super().__init__(path)
         self.keys = ['sparse', 'labels']
         self.dtypes = [np.int32, np.int32]
         self.shapes = [(-1, self.num_sparse), (-1, 1)]
-        self.phases = ['train','test']
+        self.phases = ['train', 'test']
+
     @property
     def num_dense(self):
         return 0
@@ -737,12 +736,12 @@ class CompanyDataset(CTRDataset):
     @property
     def num_embed(self):
         return 66102027
-    
+
     @property
     def num_embed_separate(self):
-        return [37, 18, 38, 152, 478, 1815, 1507, 425, 3674, 8167, 22630, 30288, 29404, 
+        return [37, 18, 38, 152, 478, 1815, 1507, 425, 3674, 8167, 22630, 30288, 29404,
                 31470, 31040, 31723, 35042, 36521, 37026, 38564, 52159, 63179, 83974, 114654, 186164, 263849, 385482, 525793, 775702, 1026970, 1440239, 1878357, 2688273, 3211288, 3921763, 4497579, 5254235, 5770186, 6370016, 6709860, 7010166, 6934495, 6597625]
-    
+
     def process_all_data_by_day(self, separate_fields=False):
         all_data_path = [
             [self.join(f'{ph}_{k}.bin') for k in self.keys] for ph in self.phases]
@@ -796,22 +795,21 @@ class CompanyDataset(CTRDataset):
         training_data = get_data('train')
         validation_data = get_data('test')
         testing_data = get_data('test')
-        return tuple(zip(training_data, validation_data,testing_data))
+        return tuple(zip(training_data, validation_data, testing_data))
 
-    
     def read_from_raw(self, nrows=-1):
-        sparse=np.fromfile(r'/home/public/zph/datasets/tencent/sparse.bin',dtype=np.int32)
-        labels=np.fromfile(r'/home/public/zph/datasets/tencent/labels.bin',dtype=np.int32)
-        counts=[0]
-        cur=0
+        sparse = np.fromfile(self.join('sparse.bin'), dtype=np.int32)
+        labels = np.fromfile(self.join('labels.bin'), dtype=np.int32)
+        counts = [0]
+        cur = 0
         for item in self.num_embed_separate:
-            cur+=item
+            cur += item
             counts.append(cur)
-        return sparse,labels,counts
-    
+        return sparse, labels, counts
+
     def get_split_indices(self, num_samples):
         # get exactly number of samples of last day by 'hour' column
-        #n_last_day = 4218938
+        # n_last_day = 4218938
         indices = np.arange(num_samples)
         train_indices = indices[:-len(indices)//5]
         test_indices = indices[-len(indices)//5:]
@@ -821,6 +819,7 @@ class CompanyDataset(CTRDataset):
         print("Randomized indices across days ...")
         indices = [train_indices, val_indices, test_indices]
         return indices
+
 
 if __name__ == '__main__':
     criteo = CriteoDataset(default_criteo_path)
