@@ -117,7 +117,7 @@ class ProductQuantizer(Compressor):
 
     @staticmethod
     def decompress(index):
-        return index.reconstruct_n()
+        return index.reconstruct_n(0, index.ntotal)
 
     @staticmethod
     def decompress_batch(index, batch_ids):

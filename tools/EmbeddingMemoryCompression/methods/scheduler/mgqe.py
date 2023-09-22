@@ -140,7 +140,7 @@ class MagnitudeProductQuantizer(Compressor):
         start_index = 0
         reverse_remap = np.argsort(remap)
         for index in indices:
-            cur_emb = index.reconstruct_n()
+            cur_emb = index.reconstruct_n(0, cur_emb.ntotal)
             ending_index = start_index + cur_emb.shape[0]
             cur_idx = reverse_remap[start_index:ending_index]
             embedding[cur_idx] = cur_emb
