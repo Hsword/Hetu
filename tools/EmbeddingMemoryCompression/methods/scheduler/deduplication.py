@@ -215,7 +215,7 @@ class DedupTrainer(EmbeddingTrainer):
         ori_num_emb = embedding.shape[0]
         block_cap = self.block_cap
         num_emb_per_block = self.nemb_per_block
-        num_pad_emb = (- ori_num_emb % num_emb_per_block) % num_emb_per_block
+        num_pad_emb = - ori_num_emb % num_emb_per_block
         embedding = np.concatenate((embedding, np.zeros(
             (num_pad_emb, self.embedding_dim), dtype=embedding.dtype)), axis=0)
         embedding = embedding.reshape(-1, block_cap)
@@ -225,8 +225,8 @@ class DedupTrainer(EmbeddingTrainer):
         # step 3: select k blocks
         lsh_indexer = L2LSH(prob_dim=block_cap, r=0.09, num_k=1, num_l=90)
         dup_map = {}
-        threshold = embedding.shape[0] - (ori_num_emb * self.embedding_dim *
-                                          self.compress_rate - embedding.shape[0]) / block_cap
+        threshold = (embedding.shape[0] * block_cap - ori_num_emb *
+                     self.embedding_dim * self.compress_rate) / (block_cap - 1)
         assert threshold > 0, f'Cannot reach compress rate {self.compress_rate}.'
         transformed_embedding = lsh_indexer.compute_lsh(embedding)
         # we do not evaluate or finetune during deduplication for the following reasons:
@@ -336,8 +336,8 @@ class Deduplicator(Compressor):
         lsh_indexer = L2LSH(prob_dim=block_cap_size, r=0.09, num_k=1, num_l=90)
         dup_map = {}
         block_num = block_num_x * block_num_y
-        target_dup_length = (block_num * (block_cap_size + 1) -
-                             compress_rate * ori_size) / block_cap_size
+        target_dup_length = (block_num * block_cap_size -
+                             compress_rate * ori_size) / (block_cap_size - 1)
         assert target_dup_length < block_num, f'Cannot compress to {compress_rate}'
         transformed_embedding = lsh_indexer.compute_lsh(padded_embedding)
 
