@@ -121,4 +121,10 @@ class ProductQuantizer(Compressor):
 
     @staticmethod
     def decompress_batch(index, batch_ids):
-        return index.reconstruct_batch(batch_ids)
+        if 'reconstruct_batch' in dir(index):        
+            return index.reconstruct_batch(batch_ids)
+        else:
+            import numpy as np
+            batch_ids = batch_ids.reshape(-1)
+            results = [index.reconstruct(i) for i in batch_ids]
+            return np.stack(results)

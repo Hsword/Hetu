@@ -164,5 +164,12 @@ class MagnitudeProductQuantizer(Compressor):
         for g, index in enumerate(indices):
             iscur = indind == g
             if sum(iscur) > 0:
-                embedding[bidx[iscur]] = index.reconstruct_batch(embind[iscur])
+                if 'reconstruct_batch' in dir(index):        
+                    results = index.reconstruct_batch(embind[iscur])
+                else:
+                    import numpy as np
+                    cur_ids = embind[iscur].reshape(-1)
+                    results = [index.reconstruct(i) for i in cur_ids]
+                    results = np.stack(results)
+                embedding[bidx[iscur]] = results
         return embedding
