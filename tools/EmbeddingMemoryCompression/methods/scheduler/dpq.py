@@ -109,7 +109,7 @@ class ProductQuantizer(Compressor):
             embedding.shape[1], f"PQ{subvector_num}x{subvector_bits}")
         index.train(embedding)
         index.add(embedding)
-        memory = embedding.shape[0] * index.code_size + \
+        memory = embedding.shape[0] * index.code_size * subvector_bits / 32 + \
             embedding.shape[1] * (2 ** subvector_bits)
         print('Final compression ratio:', memory /
               embedding.shape[0] / embedding.shape[1])
@@ -121,7 +121,7 @@ class ProductQuantizer(Compressor):
 
     @staticmethod
     def decompress_batch(index, batch_ids):
-        if 'reconstruct_batch' in dir(index):        
+        if 'reconstruct_batch' in dir(index):
             return index.reconstruct_batch(batch_ids)
         else:
             import numpy as np

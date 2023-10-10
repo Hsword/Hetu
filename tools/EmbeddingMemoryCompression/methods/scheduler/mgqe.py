@@ -127,7 +127,7 @@ class MagnitudeProductQuantizer(Compressor):
                 cur_emb.shape[1], f"PQ{subvector_num}x{subvector_bits}")
             index.train(cur_emb)
             index.add(cur_emb)
-            memory += (cur_emb.shape[0] * index.code_size +
+            memory += (cur_emb.shape[0] * index.code_size * subvector_bits / 32 +
                        cur_emb.shape[1] * (2 ** subvector_bits))
             indices.append(index)
         print('Final compression ratio:', (memory + remap.shape[0]) /
@@ -140,7 +140,7 @@ class MagnitudeProductQuantizer(Compressor):
         start_index = 0
         reverse_remap = np.argsort(remap)
         for index in indices:
-            cur_emb = index.reconstruct_n(0, cur_emb.ntotal)
+            cur_emb = index.reconstruct_n(0, index.ntotal)
             ending_index = start_index + cur_emb.shape[0]
             cur_idx = reverse_remap[start_index:ending_index]
             embedding[cur_idx] = cur_emb
@@ -164,7 +164,7 @@ class MagnitudeProductQuantizer(Compressor):
         for g, index in enumerate(indices):
             iscur = indind == g
             if sum(iscur) > 0:
-                if 'reconstruct_batch' in dir(index):        
+                if 'reconstruct_batch' in dir(index):
                     results = index.reconstruct_batch(embind[iscur])
                 else:
                     import numpy as np
