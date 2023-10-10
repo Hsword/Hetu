@@ -42,16 +42,29 @@ class MGQETrainer(SwitchInferenceTrainer):
             codebook = self._get_codebook_memory()
             emb = []
             threshold = self.embedding_args['threshold']
+            nbits_high = np.log2(
+                self.embedding_args['high_num_choices']).astype(int).item()
+            nbits_low = np.log2(
+                self.embedding_args['low_num_choices']).astype(int).item()
+            allmem = 0
             for i, nemb in enumerate(self.num_embed_separate):
                 orimem = nemb * self.embedding_dim
-                newmem = nemb * \
-                    (self.embedding_args['num_parts'] + 1) + codebook
+                newmem = nemb + codebook
+                cur_nhigh = self.freq_data[i].sum()
+                newmem += cur_nhigh * \
+                    self.embedding_args['num_parts'] * nbits_high / 32
+                newmem += (nemb - cur_nhigh) * \
+                    self.embedding_args['num_parts'] * nbits_low / 32
                 if nemb > threshold and orimem > newmem:
                     emb.append(self.get_single_embed_layer(
                         nemb, self.freq_data[i], self.batch_size, f'MGQEmb_{i}'))
+                    allmem += newmem
                 else:
                     emb.append(super().get_single_embed_layer(
                         nemb, f'Embedding_{i}'))
+                    allmem += orimem
+            self.log_func('Final compression ratio:', allmem /
+                          self.num_embed / self.embedding_dim)
         else:
             emb = self.get_single_embed_layer(
                 self.num_embed, self.freq_data, self.batch_size * self.num_slot, 'MGQEmb')
@@ -127,7 +140,7 @@ class MagnitudeProductQuantizer(Compressor):
                 cur_emb.shape[1], f"PQ{subvector_num}x{subvector_bits}")
             index.train(cur_emb)
             index.add(cur_emb)
-            memory += (cur_emb.shape[0] * index.code_size * subvector_bits / 32 +
+            memory += (cur_emb.shape[0] * index.code_size / 4 +
                        cur_emb.shape[1] * (2 ** subvector_bits))
             indices.append(index)
         print('Final compression ratio:', (memory + remap.shape[0]) /
@@ -173,3 +186,27 @@ class MagnitudeProductQuantizer(Compressor):
                     results = np.stack(results)
                 embedding[bidx[iscur]] = results
         return embedding
+
+
+def getmem(nfield, npart):
+    # avazu: 0.16013529101444582; 0.11147160296186708; 0.0871397589355777
+    # criteo: 0.16077253133698888; 0.1117073669502479; 0.08717478475687741
+    # company: 0.15973593082856596; 0.11119522240596344; 0.08692486819466216
+    nbit_high = 8
+    nbit_low = 6
+    ncentroid = 2 ** nbit_high
+    dim = 16
+    mem = 0
+    ntotal = 0
+    for i in range(nfield):
+        temp = np.fromfile(f'fields{i}_0.1.bin', dtype=np.int32)
+        nemb, nhigh = temp.size, temp.sum()
+        ntotal += nemb
+        orimem = nemb * dim
+        newmem = nemb + ncentroid * dim
+        newmem += nhigh * npart * nbit_high / 32
+        newmem += (nemb - nhigh) * npart * nbit_low / 32
+        mem += min(orimem, newmem)
+        print(nemb, nhigh, orimem, newmem)
+    print(ntotal)
+    return mem, mem / ntotal / dim

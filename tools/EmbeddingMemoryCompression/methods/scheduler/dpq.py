@@ -109,7 +109,7 @@ class ProductQuantizer(Compressor):
             embedding.shape[1], f"PQ{subvector_num}x{subvector_bits}")
         index.train(embedding)
         index.add(embedding)
-        memory = embedding.shape[0] * index.code_size * subvector_bits / 32 + \
+        memory = embedding.shape[0] * index.code_size / 4 + \
             embedding.shape[1] * (2 ** subvector_bits)
         print('Final compression ratio:', memory /
               embedding.shape[0] / embedding.shape[1])
