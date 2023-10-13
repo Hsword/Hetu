@@ -100,6 +100,7 @@ python run_compressed.py --model dlrm --method compo --compress_rate 0.5 --ctx 0
 - TT-Rec: we decompose the tensor into three small tensors, and vary the rank to adapt to different memory budgets; we only compress the fields that achieve less memory after compression.
 - DHE: we use 1000000 buckets and 1024 hash functions as in the original paper, and we use uniform distribution for the input of MLP; we only compress the fields that achieve less memory after compression.
 - ROBE: we use Z=1 so that the embedding is not split.
+- Dedup: we use the same LSH configurations as in the original paper, and we adjust the block capacity, similariy threshold, fp threshold based on actual memory budget.
 - MGQE: we provide 256 choices for high-frequency features and 64 choices for low-frequency features as in the original paper; we vary number of split parts to adapt to different memory budgets; we use top_percent=0.1, which means the top 10% features are considered high-frequency features.
 - AdaptEmb: we use 'top_percent' to denote the ratio of high-frequency features; for different memory budgets, we use different top percent.
 - INT8/16: 'digit' can be 8 or 16 for INT8 and INT16 respectively; 'middle' is set to zero to enforce symmetry; 'scale' is tested among several values as in the original paper.
