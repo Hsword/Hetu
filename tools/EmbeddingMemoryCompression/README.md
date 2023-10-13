@@ -1,6 +1,6 @@
-# (VLDB'24) Experimental Analysis of Learnable Vector Storage Compression for High-dimensional Sparse Data (under revision)
+# (VLDB'24) Experimental Analysis of Large-scale Learnable Vector Storage Compression (under revision)
 
-This directory is used for VLDB'24 Artifact Evaluation of paper #282, titled "Experimental Analysis of Learnable Vector Storage Compression for High-dimensional Sparse Data".
+This directory is used for VLDB'24 Artifact Evaluation of paper #282, titled "Experimental Analysis of Large-scale Learnable Vector Storage Compression".
 
 ## Setup
 

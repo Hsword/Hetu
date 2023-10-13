@@ -196,5 +196,5 @@ The prerequisites for different modules in Hetu is listed as follows:
   ```
 
 
-## Codes for "Experimental Analysis of High-dimensional Learnable Vector Storage Compression"
-* We provide the scripts of paper "Experimental Analysis of High-dimensional Learnable Vector Storage Compression" in [tools/EmbeddingMemoryCompression](https://github.com/Anonymous-222/EmbeddingCompression/tree/embedmem/tools/EmbeddingMemoryCompression) directory.
+## Codes for "Experimental Analysis of Large-scale Learnable Vector Storage Compression"
+* We provide the scripts of paper "Experimental Analysis of Large-scale Learnable Vector Storage Compression" in [tools/EmbeddingMemoryCompression](https://github.com/Anonymous-222/EmbeddingCompression/tree/embedmem/tools/EmbeddingMemoryCompression) directory.
