@@ -457,16 +457,24 @@ class Deduplicator(Compressor):
         ndim = ori_size[1]
         block_num_y = (ndim - 1) // block_size_y + 1
         block_idx_x = np.unique(batch_ids // block_size_x)
-        potential_embeddings = {x: np.empty(
-            (block_size_x, block_num_y * block_size_y), dtype=np.float32) for x in block_idx_x}
-        for k in potential_embeddings:
+        # potential_embeddings = {x: np.empty(
+        #     (block_size_x, block_num_y * block_size_y), dtype=np.float32) for x in block_idx_x}
+        potential_embeddings = {}
+        for k in block_idx_x:
             idx = k * block_num_y
-            cur_embedding = potential_embeddings[k]
+            # cur_embedding = potential_embeddings[k]
+            cur_embeddings = []
             for j in range(block_num_y):
-                start_y = j * block_size_y
-                ending_y = start_y + block_size_y
-                cur_embedding[:, start_y:ending_y] = compressed_embedding[dup_map[idx+j]
-                                                                          ].reshape(block_cap)
+                # start_y = j * block_size_y
+                # ending_y = start_y + block_size_y
+                cur_embeddings.append(compressed_embedding[dup_map[idx+j]].reshape(block_cap))
+                # cur_embedding[:, start_y:ending_y] = compressed_embedding[dup_map[idx+j]
+                #                                                           ].reshape(block_cap)
+            if len(cur_embeddings) > 1:
+                cur_embeddings = np.concatenate(cur_embeddings, axis=1)
+            else:
+                cur_embeddings = cur_embeddings[0]
+            potential_embeddings[k] = cur_embeddings
         result_embeddings = np.empty(
             (batch_ids.shape[0], ndim), dtype=np.float32)
         for i, ridx in enumerate(batch_ids):
