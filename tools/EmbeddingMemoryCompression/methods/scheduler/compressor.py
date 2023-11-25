@@ -56,12 +56,11 @@ class Compressor:
     @classmethod
     def timing_decompress_batch(cls, compressed_embedding, nemb, batch_size, *args, **kwargs):
         nprs = get_np_rand(1)
-        for _ in range(5):
-            batch_ids = nprs.randint(0, nemb, size=(batch_size,), dtype=np.int32)
-            cls.decompress_batch(compressed_embedding, batch_ids, *args, **kwargs)
+        batch_ids = [nprs.randint(0, nemb, size=(batch_size,), dtype=np.int32) for _ in range(100)]
+        for i in range(5):
+            cls.decompress_batch(compressed_embedding, batch_ids[i], *args, **kwargs)
         start = time()
-        for _ in range(95):
-            batch_ids = nprs.randint(0, nemb, size=(batch_size,), dtype=np.int32)
-            cls.decompress_batch(compressed_embedding, batch_ids, *args, **kwargs)
+        for i in range(5, 100):
+            cls.decompress_batch(compressed_embedding, batch_ids[i], *args, **kwargs)
         ending = time()
         print(f'Time usage for batch ({batch_size}): {(ending - start) / 95}')
