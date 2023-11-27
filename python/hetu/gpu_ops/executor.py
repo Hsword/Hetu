@@ -332,6 +332,7 @@ class HetuConfig(object):
 
         self.my_eval_nodes = eval_node_list
         self.p2p_stream = None
+        self.layer_indices = None
         if context_launch:
             # comm_mode is None <=> only 1 model parallel instance
             self.context = ndarray.gpu(device_id)
