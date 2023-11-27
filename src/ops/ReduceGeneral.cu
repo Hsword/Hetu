@@ -85,11 +85,11 @@ int DLGpuReduceMean(const DLArrayHandle in_arr, DLArrayHandle out_arr,
                               num_ax, stream_handle);
 }
 
-int DLGpuReduceSum(const DLArrayHandle in_arr, DLArrayHandle out_arr, int *axes,
-                   int num_ax, DLStreamHandle stream_handle = NULL) {
-    return DLGpuReduceGeneral(CUDNN_REDUCE_TENSOR_ADD, in_arr, out_arr, axes,
-                              num_ax, stream_handle);
-}
+// int DLGpuReduceSum(const DLArrayHandle in_arr, DLArrayHandle out_arr, int *axes,
+//                    int num_ax, DLStreamHandle stream_handle = NULL) {
+//     return DLGpuReduceGeneral(CUDNN_REDUCE_TENSOR_ADD, in_arr, out_arr, axes,
+//                               num_ax, stream_handle);
+// }
 
 int DLGpuReduceMul(const DLArrayHandle in_arr, DLArrayHandle out_arr, int *axes,
                    int num_ax, DLStreamHandle stream_handle = NULL) {

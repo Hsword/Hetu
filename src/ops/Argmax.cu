@@ -1,6 +1,6 @@
 #include "gpu_reduce.h"
 
-__global__ void argmax_kernel(const float *input, float *output, size_t befor_dim_size,\
+__global__ void argmax_kernel(const float *input, int *output, size_t befor_dim_size,\
                                         size_t reduce_dim_size, size_t after_dim_size) {
     __shared__ size_t shared_max_ptr[32];
     __shared__ float shared_max_value[32];
@@ -27,7 +27,7 @@ __global__ void argmax_kernel(const float *input, float *output, size_t befor_di
 
     BlockReduceArgmax(max_value, max_index, shared_max_value, shared_max_ptr);
     if (threadIdx.x == 0)
-        output[output_ptr] = (float)max_index;
+        output[output_ptr] = max_index;
 }
 
 int DLGpuArgmax(const DLArrayHandle input, DLArrayHandle output, int dim,
