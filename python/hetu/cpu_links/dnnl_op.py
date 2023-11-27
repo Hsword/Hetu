@@ -509,6 +509,7 @@ def reversed_truncated_normal_init(param, mean, stddev):
         mean), ctypes.c_float(stddev))
 
 
+
 def gelu(in_arr, out_arr):
     assert isinstance(in_arr, NDArray)
     assert isinstance(out_arr, NDArray)

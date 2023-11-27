@@ -129,7 +129,7 @@ extern std::map<int, std::multiset<Chunk>> free_chunk_set;
 bool is_chunk_init(size_t dev_id = 0);
 void chunk_init(size_t dev_id = 0);
 void del_chunk(void *ptr, size_t dev_id = 0);
-void *find_chunk(size_t _chunk_size, size_t dev_id = 0);
+void *find_chunk(size_t _chunk_size, size_t dev_id = 0, bool debug = true);
 
 extern std::map<size_t, bool> is_cudnn_init;
 extern std::map<size_t, cudnnHandle_t> cudnn_map;
@@ -144,6 +144,7 @@ extern std::map<size_t, cublasHandle_t> cublas_map;
 void cublas_init(size_t dev_id = 0, DLStreamHandle stream = NULL);
 
 void cuda_init();
+int GetThreadNum(int cnt);
 
 void ThreadBlock1D(dim3 &threads, dim3 &blocks, size_t size);
 void ThreadBlock2D(dim3 &threads, dim3 &blocks, size_t xsize, size_t ysize);

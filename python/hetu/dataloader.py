@@ -246,6 +246,9 @@ class Dataloader(object):
         return int(np.ceil(samples_num / self.batch_size)) \
             if not self.drop_last else samples_num // self.batch_size
 
+    def get_cur_shape(self):
+        return tuple(self.arrs[self.arr_map[self.batch_index]].shape)
+
 
 class GNNDataLoaderOp(Op):
     graph = None

@@ -2,7 +2,7 @@ from __future__ import absolute_import
 import numpy as np
 
 from .Node import Op
-from .Conv2d import conv2d_gradient_of_data_op, conv2d_gradient_of_filter_op, conv2d_forward_deduce_states, conv2d_backward_deduce_states
+from .Conv2d import conv2d_gradient_of_data_op, conv2d_gradient_of_filter_op
 from .ReduceSum import reduce_sum_op
 from ..gpu_links import CuDNN_conv2d_with_bias
 

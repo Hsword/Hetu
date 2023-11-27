@@ -71,7 +71,7 @@ if __name__ == "__main__":
     y_val=np.zeros(shape=(args.batch_size,), dtype=np.float32)
     y_val=ht.array(arr=y_val, ctx=executor_ctx)
     y_ = ht.Variable(name='y_', ctx=executor_ctx, trainable=False)
-    opt = ht.optim.SGDOptimizer(learning_rate=0.125)
+    opt = ht.optim.SGDOptimizer(learning_rate=1e-5)
 
     loss, y = moe(args, x, y_)
     train_op = opt.minimize(loss)

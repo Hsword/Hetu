@@ -2,15 +2,21 @@ from __future__ import absolute_import
 from .AbsLink import *
 from .AddConstLink import *
 from .AddElewiseLink import *
-from .Argmax import *
-from .ArraySetLink import *
 from .AutoDimLink import *
+from .AddmmLink import *
+from .ArangeLink import *
+from .ArraySetLink import *
+from .ArgmaxLink import *
+from .ArgsortLink import *
 from .AvgPoolLink import *
+from .BaddbmmLink import *
+from .BoolLink import *
 from .BroadcastLink import *
 from .BinaryCrossEntropyLink import *
-from .Bool import *
+from .ClampLink import *
 from .ConcatLink import *
 from .ConcatenateLink import *
+from .ConstPowLink import *
 from .Conv2dBroadcastLink import *
 from .Conv2dLink import *
 from .Conv2dReduceSumLink import *
@@ -20,16 +26,30 @@ from .CudnnConv2d import *
 from .CudnnDropoutLink import *
 from .CudnnMaxPoolLink import *
 from .ExpLink import *
+from .FloorLink import *
+from .GatherLink import *
+from .InterpolateLink import *
+from .MaskedFillLink import *
 from .MatrixMultLink import *
+from .MaxLink import *
 from .MaxPoolLink import *
+from .MinLink import *
+from .MinusByConstLink import *
 from .MultiplyConstLink import *
 from .MultiplyElewiseLink import *
+from .NormLink import *
 from .PadLink import *
+from .PowLink import *
 from .ReduceSumAxisZeroLink import *
 from .ReluLink import *
+from .RepeatLink import *
+from .RollLink import *
 from .LeakyReluLink import *
 from .ReshapeLink import *
 from .SignLink import *
+from .SinLink import *
+from .SliceAssignLink import *
+from .SliceByMatrixLink import *
 from .SoftmaxCrossEntropyLink import *
 from .SoftmaxCrossEntropySparseLink import *
 from .SoftmaxLink import *
@@ -100,13 +120,18 @@ from .AssignWithIndexedSlicesLink import *
 from .UniqueIndicesLink import *
 
 __all__ = [
-    'abs_func',
+    'abs_val',
+    'abs_gradient',
     'matrix_elementwise_add_by_const',
     'matrix_elementwise_add',
     'matrix_elementwise_add_simple',
     'matrix_elementwise_add_lazy',
     'argmax',
     'argmax_partial',
+    'addmm',
+    'addmm_gradient',
+    'arange',
+    'argsort',
     'array_set',
     'reduce_norm2_raw',
     'all_fro_norm',
@@ -114,11 +139,18 @@ __all__ = [
     'div_n_mul_',
     'average_pooling2d',
     'average_pooling2d_gradient',
+    'baddbmm',
+    'bool',
+    'bool_val',
+    'bool_matrix',
     'broadcast_to',
+    'clamp',
     'concat',
     'concat_gradient',
     'concatenate',
     'concatenate_gradient',
+    'const_pow',
+    'const_pow_gradient',
     'conv2d_broadcast_to',
     'conv2d',
     'conv2d_gradient_of_data',
@@ -136,21 +168,45 @@ __all__ = [
     'CuDNN_Dropout_gradient',
     'CuDNN_max_pooling2d',
     'CuDNN_max_pooling2d_gradient',
-    'exp_func',
+    'exp',
+    'floor',
+    'gather',
+    'gather_gradient',
+    'bicubic_interpolate',
+    'bicubic_interpolate_gradient',
+    'masked_fill',
     'matrix_multiply',
+    'max',
+    'max_mat',
     'max_pooling2d',
     'max_pooling2d_gradient',
     'matrix_elementwise_multiply_by_const',
     'matrix_elementwise_multiply',
+    'min',
+    'min_mat',
+    'minus_by_const',
+    'norm',
+    'norm_gradient',
     'pad',
     'pad_gradient',
+    'pow_matrix',
+    'pow_gradient',
     'reduce_sum_axis_zero',
     'relu',
     'relu_gradient',
+    'repeat',
+    'repeat_gradient',
+    'roll',
     'leaky_relu',
     'leaky_relu_gradient',
     'array_reshape',
     'sign_func',
+    'sin',
+    'cos',
+    'slice_assign',
+    'slice_assign_matrix',
+    'slice_by_matrix',
+    'slice_by_matrix_gradient',
     'softmax_cross_entropy',
     'softmax_cross_entropy_gradient',
     'softmax',

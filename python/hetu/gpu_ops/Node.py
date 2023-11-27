@@ -159,11 +159,14 @@ class Op(object):
         h2d_ops: Dict[Op, DataH2DOp],
         d2h_ops: Dict[Op, Union[DataD2HOp, DataD2HSparseOp]],
     ) -> Op:
-        from .DataTransfer import datah2d_op, datad2h_op, datad2h_sparse_op
+        from .DataTransfer import datah2d_op, datad2h_op, datah2d_sparse_op, datad2h_sparse_op
 
         def add_h2d(prev_node: Op, cur_ctx: DLContext) -> DataH2DOp:
             if prev_node not in h2d_ops:
-                h2d_ops[prev_node] = datah2d_op(prev_node, cur_ctx)
+                if prev_node.use_indexed_slices:
+                    h2d_ops[prev_node] = datah2d_sparse_op(prev_node, cur_ctx)
+                else:
+                    h2d_ops[prev_node] = datah2d_op(prev_node, cur_ctx)
             return h2d_ops[prev_node]
 
         def add_d2h(prev_node: Op) -> Union[DataD2HOp, DataD2HSparseOp]:

@@ -190,8 +190,7 @@ class DeviceGroup(object):
     def __repr__(self) -> str:
         result = 'DeviceGroup('
         for c in self._contexts:
-            result += ('(' + ', '.join([str(cc) for cc in c]) +
-                       '), ') if isinstance(c, tuple) else '%s, ' % c
+            result += '%s, ' % c
         result += ')'
         return result
 

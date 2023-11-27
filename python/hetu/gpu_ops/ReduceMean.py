@@ -61,6 +61,7 @@ class ReduceMeanOp(Op):
                 self.axes[i] += len(input_shape)
             assert 0 <= self.axes[i] < len(input_shape)
             mean_multiplier *= input_shape[self.axes[i]]
+            input_shape[self.axes[i]] = 1 if self.keepdims[i] else 0
         if self.grad_node is not None:
             self.grad_node.const_attr = 1.0 / mean_multiplier
             self.grad_node.inputs[0].target_shape = tuple(input_shapes[0])

@@ -1,6 +1,11 @@
-python train_hetu_bert.py \
+workdir=$(cd $(dirname $0); pwd)
+mainpy=${workdir}/../train_hetu_bert.py
+data_path=${workdir}/../data
+
+python ${mainpy} \
 --gpu_id 0 \
 --train_batch_size 32 \
+--data_path ${data_path} \
 --dataset wikicorpus_en \
 --vocab_size 30522 \
 --hidden_size 1024 \

@@ -48,27 +48,30 @@ int CuDNN_DLGpuConv2d(const DLArrayHandle input_x, const DLArrayHandle input_f,
                                           CUDNN_DATA_FLOAT, out_N, out_C, out_H,
                                           out_W));
     float *output_data = (float *)output->data;
-    // algorithm
-    cudnnConvolutionFwdAlgo_t algo;
-#ifdef CUDNN8
-    // workaround here
-    // TODO: using cudnnFindConvolutionForwardAlgorithm in CuDNN 8 instead
-    algo = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM;
-    // algo = CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD_NONFUSED;
-#else
-    CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm(
-        cudnn_map[dev_id], input_desc, filter_desc, conv_desc, out_desc,
-        CUDNN_CONVOLUTION_FWD_PREFER_FASTEST, 0, &algo));
-#endif
-    size_t workspace_size;
-    CUDNN_CALL(cudnnGetConvolutionForwardWorkspaceSize(
-        cudnn_map[dev_id], input_desc, filter_desc, conv_desc, out_desc, algo,
-        &workspace_size));
 
-    if (is_chunk_init(dev_id) == false) {
+    // search for the best algorithm
+    int request_cnt = 9, return_cnt = 9;
+    cudnnConvolutionFwdAlgoPerf_t algo_perf[9];
+    CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm_v7(
+        cudnn_map[dev_id], input_desc, filter_desc, conv_desc, out_desc,
+        request_cnt, &return_cnt, algo_perf));
+
+    if (is_chunk_init(dev_id) == false)
         chunk_init(dev_id);
+
+    size_t workspace_size;
+    void *work_data = nullptr;
+    cudnnConvolutionFwdAlgo_t algo;
+    for(int i = 0; i < return_cnt; ++i) {
+        CUDNN_CALL(cudnnGetConvolutionForwardWorkspaceSize(
+            cudnn_map[dev_id], input_desc, filter_desc, conv_desc, out_desc, algo_perf[i].algo,
+            &workspace_size));
+        work_data = find_chunk(workspace_size, dev_id, false);
+        if (work_data) {
+            algo = algo_perf[i].algo;
+            break;
+        }
     }
-    void *work_data = find_chunk(workspace_size, dev_id);
 
     float alpha = 1.0f;
     float beta = 0.0f;
@@ -136,31 +139,34 @@ int CuDNN_DLGpuConv2d_Gradient_of_Filter(const DLArrayHandle input_x,
     CUDNN_CALL(cudnnSetFilter4dDescriptor(
         df_desc, CUDNN_DATA_FLOAT, CUDNN_TENSOR_NCHW, df_N, df_C, df_H, df_W));
 
-    // algo
-    cudnnConvolutionBwdFilterAlgo_t algo;
-#ifdef CUDNN8
-    // TODO: using cudnnFindConvolutionBackwardFilterAlgorithm in CuDNN 8 instead
-    // algo = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT;
-    algo = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0;
-#else
-    CUDNN_CALL(cudnnGetConvolutionBackwardFilterAlgorithm(
+    // search for the best algorithm
+    int request_cnt = 9, return_cnt = 9;
+    cudnnConvolutionBwdFilterAlgoPerf_t algo_perf[9];
+    CUDNN_CALL(cudnnGetConvolutionBackwardFilterAlgorithm_v7(
         cudnn_map[dev_id], input_desc, dy_desc, conv_desc, df_desc,
-        CUDNN_CONVOLUTION_BWD_FILTER_PREFER_FASTEST, 0, &algo));
-#endif
+        request_cnt, &return_cnt, algo_perf));
+
+    cudaError_t err;
     size_t workspace_size;
-    CUDNN_CALL(cudnnGetConvolutionBackwardFilterWorkspaceSize(
-        cudnn_map[dev_id], input_desc, dy_desc, conv_desc, df_desc, algo,
-        &workspace_size));
-    if (is_chunk_init(dev_id) == false) {
-        chunk_init(dev_id);
+    void *work_data = nullptr;
+    cudnnConvolutionBwdFilterAlgo_t algo;
+    for(int i = 0; i < return_cnt; ++i) {
+        CUDNN_CALL(cudnnGetConvolutionBackwardFilterWorkspaceSize(
+            cudnn_map[dev_id], input_desc, dy_desc, conv_desc, df_desc, algo_perf[i].algo,
+            &workspace_size));
+        err = cudaMalloc(&work_data, workspace_size);
+        if (err == cudaSuccess) {
+            algo = algo_perf[i].algo;
+            break;
+        }
     }
-    void *work_data = find_chunk(workspace_size, dev_id);
+
     float alpha = 1.0f;
     float beta = 0.0f;
     CUDNN_CALL(cudnnConvolutionBackwardFilter(
         cudnn_map[dev_id], &alpha, input_desc, input_data, dy_desc, dy_data,
         conv_desc, algo, work_data, workspace_size, &beta, df_desc, df_data));
-    del_chunk(work_data, dev_id);
+    cudaFree(work_data);
     CUDNN_CALL(cudnnDestroyTensorDescriptor(dy_desc));
     CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
     CUDNN_CALL(cudnnDestroyFilterDescriptor(df_desc));
@@ -220,32 +226,34 @@ int CuDNN_DLGpuConv2d_Gradient_of_Data(const DLArrayHandle input_f,
     CUDNN_CALL(cudnnSetTensor4dDescriptor(
         dx_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, dx_N, dx_C, dx_H, dx_W));
 
-    // algo
-    cudnnConvolutionBwdDataAlgo_t algo;
-#ifdef CUDNN8
-    // TODO: using cudnnFindConvolutionBackwardDataAlgorithm in CuDNN 8 instead
-    algo = CUDNN_CONVOLUTION_BWD_DATA_ALGO_0;
-    // algo = CUDNN_CONVOLUTION_BWD_DATA_ALGO_WINOGRAD_NONFUSED;
-#else
-    CUDNN_CALL(cudnnGetConvolutionBackwardDataAlgorithm(
+    // search for the best algorithm
+    int request_cnt = 9, return_cnt = 9;
+    cudnnConvolutionBwdDataAlgoPerf_t algo_perf[9];
+    CUDNN_CALL(cudnnGetConvolutionBackwardDataAlgorithm_v7(
         cudnn_map[dev_id], filter_desc, dy_desc, conv_desc, dx_desc,
-        CUDNN_CONVOLUTION_BWD_DATA_PREFER_FASTEST, 0, &algo));
-#endif
+        request_cnt, &return_cnt, algo_perf));
+
+    cudaError_t err;
     size_t workspace_size;
-    CUDNN_CALL(cudnnGetConvolutionBackwardDataWorkspaceSize(
-        cudnn_map[dev_id], filter_desc, dy_desc, conv_desc, dx_desc, algo,
-        &workspace_size));
-    if (is_chunk_init(dev_id) == false) {
-        chunk_init(dev_id);
+    void *work_data = nullptr;
+    cudnnConvolutionBwdDataAlgo_t algo;
+    for(int i = 0; i < return_cnt; ++i) {
+        CUDNN_CALL(cudnnGetConvolutionBackwardDataWorkspaceSize(
+            cudnn_map[dev_id], filter_desc, dy_desc, conv_desc, dx_desc, algo_perf[i].algo,
+            &workspace_size));
+        err = cudaMalloc(&work_data, workspace_size);
+        if (err == cudaSuccess) {
+            algo = algo_perf[i].algo;
+            break;
+        }
     }
-    void *work_data = find_chunk(workspace_size, dev_id);
 
     float alpha = 1.0f;
     float beta = 0.0f;
     CUDNN_CALL(cudnnConvolutionBackwardData(
         cudnn_map[dev_id], &alpha, filter_desc, filter_data, dy_desc, dy_data,
         conv_desc, algo, work_data, workspace_size, &beta, dx_desc, dx_data));
-    del_chunk(work_data, dev_id);
+    cudaFree(work_data);
     CUDNN_CALL(cudnnDestroyTensorDescriptor(dy_desc));
     CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
     CUDNN_CALL(cudnnDestroyTensorDescriptor(dx_desc));

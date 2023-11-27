@@ -15,6 +15,10 @@ import numpy as np
 # since this can reduce the memory and the computation time (a little bit)
 # if the gradient ops are added, please also modify the gradients function in executor file.
 
+# TODO: it's better to implement gradient op for DivOp and DivConstOp
+# since this can reduce the memory and the computation time (a little bit)
+# if the gradient ops are added, please also modify the gradients function in executor file.
+
 
 class DivOp(Op):
     def __init__(self, node_A, node_B, ctx=None):

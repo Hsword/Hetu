@@ -63,26 +63,30 @@ int Cudnn_Conv2dAddBias(const DLArrayHandle input_x, const DLArrayHandle input_f
                                           CUDNN_DATA_FLOAT, out_N, out_C, out_H,
                                           out_W));
     float *output_data = (float *)output->data;
-    // algorithm
-    cudnnConvolutionFwdAlgo_t algo;
-#ifdef CUDNN8
-    // TODO: using cudnnFindConvolutionForwardAlgorithm in CuDNN 8 instead
-    algo = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM;
-    // algo = CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD_NONFUSED;
-#else
-    CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm(
-        cudnn_map[dev_id], input_desc, filter_desc, conv_desc, out_desc,
-        CUDNN_CONVOLUTION_FWD_PREFER_FASTEST, 0, &algo));
-#endif
-    size_t workspace_size;
-    CUDNN_CALL(cudnnGetConvolutionForwardWorkspaceSize(
-        cudnn_map[dev_id], input_desc, filter_desc, conv_desc, out_desc, algo,
-        &workspace_size));
 
-    if (is_chunk_init(dev_id) == false) {
+    // search for the best algorithm
+    int request_cnt = 9, return_cnt = 9;
+    cudnnConvolutionFwdAlgoPerf_t algo_perf[9];
+    CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm_v7(
+        cudnn_map[dev_id], input_desc, filter_desc, conv_desc, out_desc,
+        request_cnt, &return_cnt, algo_perf));
+
+    if (is_chunk_init(dev_id) == false)
         chunk_init(dev_id);
+
+    size_t workspace_size;
+    void *work_data = nullptr;
+    cudnnConvolutionFwdAlgo_t algo;
+    for(int i = 0; i < return_cnt; ++i) {
+        CUDNN_CALL(cudnnGetConvolutionForwardWorkspaceSize(
+            cudnn_map[dev_id], input_desc, filter_desc, conv_desc, out_desc, algo_perf[i].algo,
+            &workspace_size));
+        work_data = find_chunk(workspace_size, dev_id, false);
+        if (work_data) {
+            algo = algo_perf[i].algo;
+            break;
+        }
     }
-    void *work_data = find_chunk(workspace_size, dev_id);
 
     float alpha = 1.0f;
     float beta = 0.0f;
@@ -90,6 +94,7 @@ int Cudnn_Conv2dAddBias(const DLArrayHandle input_x, const DLArrayHandle input_f
         cudnn_map[dev_id], &alpha, input_desc, input_data, filter_desc,
         filter_data, conv_desc, algo, work_data, workspace_size, &beta,
         out_desc, output_data));
+
     del_chunk(work_data, dev_id);
     CUDNN_CALL(cudnnDestroyTensorDescriptor(out_desc));
     CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));

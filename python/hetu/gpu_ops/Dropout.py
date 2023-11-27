@@ -22,6 +22,7 @@ class DropoutOp(Op):
 
     def compute(self, input_vals, output_val, stream_handle=None, inference=False):
         if inference == False:
+            self.seed.value = int(time())
             if self.on_cpu:
                 if DNNL_LIB['cpu_Dropout']:
                     cpu_dropout(input_vals[0], self.keep_prob, output_val)

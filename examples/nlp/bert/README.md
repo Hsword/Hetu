@@ -34,6 +34,11 @@ To pretrain Hetu BERT base or BERT large model using data parallel distributedly
 sh ./scripts/train_hetu_bert_base_dp.sh
 sh ./scripts/train_hetu_bert_large_dp.sh
 ```
+To pretrain Hetu BERT base or BERT large model using PS, run:
+```bash
+sh ./scripts/train_hetu_bert_base_ps.sh
+sh ./scripts/train_hetu_bert_large_ps.sh
+```
 To pretrain Pytorch BERT base or BERT large model, run:
 ```bash
 sh ./scripts/train_pytorch_bert_base.sh

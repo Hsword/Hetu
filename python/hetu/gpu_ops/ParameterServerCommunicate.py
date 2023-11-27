@@ -3,6 +3,7 @@ from __future__ import absolute_import
 from .Node import Op
 from .. import ndarray
 from ..gpu_links import matrix_elementwise_multiply_by_const
+from ..ndarray import cpu
 from .. import stream
 import os
 import numpy as np
@@ -133,8 +134,17 @@ class ParameterServerCommunicateOp(Op):
         self.ctx = self.inputs[0].ctx
         self.on_gpu = ndarray.is_gpu_ctx(self.ctx)
         self.on_cpu = not self.on_gpu
+
+        if self.parameter.is_embed and self.on_gpu:
+            self.on_cpu = True
+            self.on_gpu = False
+            self.ctx = cpu()
+            self.inputs[0] = self.add_transfer_op(
+                self.inputs[0], self.ctx, config.h2d_ops, config.d2h_ops)
+
         if self.on_gpu and self.inputs[0].event is None:
             self.inputs[0].event = stream.create_event_handle(self.ctx)
+
         self.comm = config.ps_comm
         node_shape = self.parameter.shape
 

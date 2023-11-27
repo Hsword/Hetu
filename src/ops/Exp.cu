@@ -1,5 +1,4 @@
 #include "gpu_runtime.h"
-
 __global__ void exp_kernel(const float *input, float *output, size_t size) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (ind >= size)

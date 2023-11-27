@@ -1,0 +1,9 @@
+nodes:
+  - host: hostname1
+    servers: 1 
+    workers: 2
+    chief: true
+  - host: hostname2
+    servers: 1
+    workers: 2
+    chief: false

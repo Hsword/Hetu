@@ -4,8 +4,13 @@ from .._base import _LIB
 from .. import ndarray as _nd
 
 
-def abs_func(in_arr, out_arr, stream=None):
-    assert isinstance(in_arr, _nd.NDArray)
-    assert isinstance(out_arr, _nd.NDArray)
-    _LIB.DLGpuAbs(in_arr.handle, out_arr.handle,
-                  stream.handle if stream else None)
+def abs_val(in_mat, out_mat, stream=None):
+    assert isinstance(in_mat, _nd.NDArray)
+    assert isinstance(out_mat, _nd.NDArray)
+    _LIB.DLGpuAbs(in_mat.handle, out_mat.handle, stream.handle if stream else None)
+
+def abs_gradient(in_mat, grad_mat, out_mat, stream=None):
+    assert isinstance(in_mat, _nd.NDArray)
+    assert isinstance(grad_mat, _nd.NDArray)
+    assert isinstance(out_mat, _nd.NDArray)
+    _LIB.DLGpuAbsGradient(grad_mat.handle, in_mat.handle, out_mat.handle, stream.handle if stream else None)

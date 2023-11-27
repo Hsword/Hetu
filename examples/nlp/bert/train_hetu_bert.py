@@ -34,7 +34,7 @@ def pretrain(args):
     dataset = args.dataset
     if dataset not in ['wikicorpus_en', 'wiki_books']:
         raise(NotImplementedError)
-    file_dir = './data/hdf5_lower_case_1_seq_len_128_max_pred_20_masked_lm_prob_0.15_random_seed_12345_dupe_factor_5/%s/'%dataset
+    file_dir = f'{args.data_path}/hdf5_lower_case_1_seq_len_128_max_pred_20_masked_lm_prob_0.15_random_seed_12345_dupe_factor_5/{dataset}/'
     file_name_format = dataset + '_training_%d.hdf5'
     train_file_num = 256
     train_files = [file_dir + file_name_format%file_id for file_id in range(train_file_num)]
@@ -62,7 +62,7 @@ def pretrain(args):
     # opt = ht.optim.SGDOptimizer(learning_rate=lr)
     train_op = opt.minimize(loss)
 
-    executor = ht.Executor([masked_lm_loss_mean, next_sentence_loss_mean, loss, train_op],ctx=executor_ctx,dynamic_memory=True)
+    executor = ht.Executor([masked_lm_loss_mean, next_sentence_loss_mean, loss, train_op], ctx=executor_ctx)
 
     global_step_num = 0
     for ep in range(num_epochs):
@@ -96,6 +96,9 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--train_batch_size", type=int, default=64, help="Training batch size"
+    )
+    parser.add_argument(
+        "--data_path", type=str, default='./data', help="Root directory of all datasets."
     )
     parser.add_argument(
         "--dataset", type=str, default='wikicorpus_en', help="Dataset used to train."

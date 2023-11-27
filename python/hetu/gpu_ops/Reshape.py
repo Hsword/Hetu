@@ -94,21 +94,8 @@ class Array_ReshapeOp(Op):
                         output_shape[k] //= v
         return output_shape
 
-    def forward_deduce_states(self, input_statuses, status, deduce_order):
-        # !!! NO CHECKING !!!
-        assert len(input_statuses) == len(self.inputs)
-        # if input_statuses[0].valid(deduce_order):
-        #     input_statuses[0].check_state(1, deduce_order)
-        status.copy_from(input_statuses[0], deduce_order)
-        if status.valid_state():
-            self.splits = status.state
-
-    def backward_deduce_states(self, status, input_statuses, deduce_order):
-        # !!! NO CHECKING !!!
-        assert len(input_statuses) == len(self.inputs)
-        # if status.valid(deduce_order):
-        #     status.check_state(1, deduce_order)
-        input_statuses[0].copy_from(status, deduce_order)
+    def reset_status(self):
+        self.splits = None
 
     def reset_status(self):
         self.splits = None
@@ -142,22 +129,6 @@ class Array_Reshape_GradientOp(Op):
 
     def backward_hook(self, config):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
-
-    def forward_deduce_states(self, input_statuses, status, deduce_order):
-        # !!! NO CHECKING !!!
-        assert len(input_statuses) == len(self.inputs)
-        for nst in input_statuses:
-            # if nst.valid(deduce_order):
-            #     nst.check_state(1, deduce_order)
-            status.copy_from(nst, deduce_order)
-
-    def backward_deduce_states(self, status, input_statuses, deduce_order):
-        # !!! NO CHECKING !!!
-        assert len(input_statuses) == len(self.inputs)
-        # if status.valid(deduce_order):
-        #     status.check_state(1, deduce_order)
-        for nst in input_statuses:
-            nst.copy_from(status, deduce_order)
 
 
 def array_reshape_op(node, output_shape, ctx=None):

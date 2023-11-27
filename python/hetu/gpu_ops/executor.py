@@ -6,6 +6,7 @@ import numpy as np
 from scipy.sparse import spmatrix, coo_matrix
 from .. import ndarray
 from .._base import DNNL_LIB
+from ..gpu_links import array_set
 from ..cpu_links import array_set as cpu_array_set
 from .Variable import PlaceholderOp  # add for optimizer
 from ..dataloader import DataloaderOp, GNNDataLoaderOp
@@ -16,10 +17,10 @@ from .ReduceCommunicate import ReduceCommunicateOp
 from .BroadcastCommunicate import BroadcastCommunicateOp
 from .AllToAll import AllToAllOp
 from .ParameterServerCommunicate import ParameterServerCommunicateOp, ParameterServerSparsePullOp, parameterServerSparsePull_op
-from .Sum import sum_op
+from .Sum import sum_op, SumOp, SparseSumOp
 from .SumSparseGradient import sum_sparse_gradient_op
 from .StopGradient import StopGradientOp
-from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp
+from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp, DataH2DSparseOp
 from ..communicator.mpi_nccl_comm import ncclDataType_t, GroupStart, GroupEnd
 from .EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient
 from .Unique import UniqueIndicesOffsetsOp
@@ -30,7 +31,6 @@ from ..context import get_current_context, get_launch_config_by_traverse_nodes, 
 from ..memory_pool import HetuMemoryPool
 from .PipelineSend import PipelineSendOp
 from .PipelineReceive import PipelineReceiveOp
-from .Sum import SumOp
 from .Split import SplitOp
 from .Concatenate import ConcatenateOp
 from .Dropout import DropoutOp
@@ -172,7 +172,6 @@ class HetuConfig(object):
         'log_path',
         'logger',
         'my_eval_nodes',
-        'param_allreduce_group',
         'placeholder_to_arr_map',
         'pipeline',
         'all_forward_nodes',
@@ -333,8 +332,6 @@ class HetuConfig(object):
 
         self.my_eval_nodes = eval_node_list
         self.p2p_stream = None
-        self.param_allreduce_group = {}
-        self.layer_indices = None
         if context_launch:
             # comm_mode is None <=> only 1 model parallel instance
             self.context = ndarray.gpu(device_id)
@@ -388,7 +385,7 @@ class HetuConfig(object):
             self.cstable_policy = self.cstable_policy.upper()
             self.use_sparse_pull = False
 
-        self.h2d_ops: Dict[Op, DataH2DOp] = {}
+        self.h2d_ops: Dict[Op, Union[DataH2DOp, DataH2DSparseOp]] = {}
         self.d2h_ops: Dict[Op, Union[DataD2HOp, DataD2HSparseOp]] = {}
         self.ps_map: Dict[Op, NDArray] = {}
         self.infer_ps_map: Dict[Op, NDArray] = {}
@@ -829,6 +826,7 @@ class SubExecutor(object):
             ParameterServerSparsePullOp: self.d2h_stream,
             DataD2HOp: self.d2h_stream,
             DataD2HSparseOp: self.d2h_stream,
+            DataH2DSparseOp: self.h2d_stream,
             DataH2DOp: self.h2d_stream,
             AllGatherCommunicateOp: self.p2p_stream,
             ReduceScatterCommunicateOp: self.p2p_stream,
@@ -911,9 +909,6 @@ class SubExecutor(object):
                 fetch_sparse_parameter_value(self.topo_order, self.config)
             else:
                 self.topo_order = find_topo_sort(self.eval_node_list)
-
-        self.topo_order = reorder_for_group(
-            self.topo_order, self.config.layer_indices)
 
         # main structures, nodes' shapes and arrays
         self.node_to_shape_map = {}
@@ -1038,10 +1033,6 @@ class SubExecutor(object):
                 self.node_to_shape_map[node] = tuple(feed_shapes[node])
             else:
                 if isinstance(node, (PipelineSendOp, PipelineReceiveOp)):
-                    if len(grouping_nodes) > 0 and self.config.layer_indices[node] != cur_ind:
-                        make_group()
-                    if len(grouping_nodes) == 0:
-                        cur_ind = self.config.layer_indices[node]
                     grouping_nodes.append(node)
                     continue
                 elif len(grouping_nodes) > 0:
@@ -1226,10 +1217,6 @@ class SubExecutor(object):
                 for n in node.inputs:
                     if n.event:
                         n.event.sync()
-                if len(grouping_nodes) > 0 and self.config.layer_indices[node] != cur_ind:
-                    make_group()
-                if len(grouping_nodes) == 0:
-                    cur_ind = self.config.layer_indices[node]
                 grouping_nodes.append(node)
                 continue
             else:

@@ -4,7 +4,7 @@ __global__ void sigmoid_kernel(float *input, float *output, size_t size) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (ind >= size)
         return;
-    output[ind] = 1.0 / (1.0 + 1.0 / exp(input[ind]));
+    output[ind] = 1.0f / (1.0f + exp(-input[ind]));
 }
 
 int DLGpuSigmoid(const DLArrayHandle input, DLArrayHandle output,
