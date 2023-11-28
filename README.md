@@ -62,7 +62,7 @@ make hetu_cache -j 8
 
 ## Basic Usage
 
-ResNet training on singel gpu:
+ResNet training on single gpu:
 
 ```bash
 bash examples/cnn/scripts/hetu_1gpu.sh resnet18 CIFAR10
@@ -143,7 +143,8 @@ The entire codebase is under [license](LICENSE)
   7. Sicong Dong, Xupeng Miao, Pengkai Liu, Xin Wang, Bin Cui, Jianxin Li. [HET-KG: Communication-Efficient Knowledge Graph Embedding Training via Hotness-Aware Cache](https://ieeexplore.ieee.org/document/9835364). ICDE 2022.
   8. Xupeng Miao, Yujie Wang, Jia Shen, Yingxia Shao, Bin Cui. Graph Neural Network Training Acceleration over Multi-GPUs. Journal of Software (Chinese).
   9. Xiaonan Nie, Shijie Cao, Xupeng Miao, Lingxiao Ma, Jilong Xue, Youshan Miao, Zichao Yang, Zhi Yang, Bin Cui. [EvoMoE: An Evolutional Mixture-of-Experts Training Framework via Dense-To-Sparse Gate](https://arxiv.org/abs/2112.14397). arXiv 2021.
-  10. coming soon
+  10. Hailin Zhang, Penghao Zhao, Xupeng Miao, Yingxia Shao, Zirui Liu, Tong Yang, Bin Cui. [Experimental Analysis of Large-scale Learnable Vector Storage Compression](https://arxiv.org/abs/2311.15578). VLDB 2024.
+  11. coming soon
 
 ## Cite
 
@@ -220,7 +221,3 @@ The prerequisites for different modules in Hetu is listed as follows:
   2. build zeromq by 'mkdir /path/to/build && cd /path/to/build && cmake /path/to/root && make -j8`
   3. modify ZMQ_ROOT to /path/to/build in cmake/config.cmake
   ```
-
-
-## Codes for "Experimental Analysis of Large-scale Learnable Vector Storage Compression"
-* We provide the scripts of paper "Experimental Analysis of Large-scale Learnable Vector Storage Compression" in [tools/EmbeddingMemoryCompression](https://github.com/Anonymous-222/EmbeddingCompression/tree/embedmem/tools/EmbeddingMemoryCompression) directory.

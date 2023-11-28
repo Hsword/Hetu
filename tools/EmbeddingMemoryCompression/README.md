@@ -1,10 +1,10 @@
-# (VLDB'24) Experimental Analysis of Large-scale Learnable Vector Storage Compression (under revision)
+# (VLDB'24) Experimental Analysis of Large-scale Learnable Vector Storage Compression
 
 This directory is used for VLDB'24 Artifact Evaluation of paper #282, titled "Experimental Analysis of Large-scale Learnable Vector Storage Compression".
 
 ## Setup
 
-Our codes are based on Hetu. We provide a cmake file `config.cmake` in this directory; please copy it to `../../cmake` directory and compile Hetu according to the [README](https://github.com/Anonymous-222/EmbeddingCompression/blob/embedmem/README.md#installation) file in the home page of Hetu. After compiling, you can train or infer with `run_compressed.py` in this directory.
+Our codes are based on Hetu. We provide a cmake file `config.cmake` in this directory; please copy it to `../../cmake` directory and compile Hetu according to the [README](../../README.md#installation) file in the home page of Hetu. After compiling, you can train or infer with `run_compressed.py` in this directory.
 
 ## Prepare Datasets
 Currently we support Avazu and Criteo datasets.
@@ -90,9 +90,9 @@ python run_compressed.py --model dlrm --method compo --compress_rate 0.5 --ctx 0
 
 ## Implementation
 
-* Layers of different embedding compression methods are implemented in [./methods/layers](https://github.com/Anonymous-222/EmbeddingCompression/tree/embedmem/tools/EmbeddingMemoryCompression/methods/layers). It is possible to implement custom compression methods inheriting `Embedding` class.
-* Trainers are located in [./methods/scheduler](https://github.com/Anonymous-222/EmbeddingCompression/tree/embedmem/tools/EmbeddingMemoryCompression/methods/scheduler). New trainers must be implemented for custom compression methods.
-* Related gpu operators are implemented into the Hetu system in [EmbeddingCompression/python/hetu/gpu_ops](https://github.com/Anonymous-222/EmbeddingCompression/tree/embedmem/python/hetu/gpu_ops).
+* Layers of different embedding compression methods are implemented in [./methods/layers](./methods/layers/). It is possible to implement custom compression methods inheriting `Embedding` class.
+* Trainers are located in [./methods/scheduler](./methods/scheduler/). New trainers must be implemented for custom compression methods.
+* Related gpu operators are implemented into the Hetu system in [Hetu/python/hetu/gpu_ops](../../python/hetu/gpu_ops/).
 
 
 ## Configurations of Embedding Compression Methods
@@ -110,4 +110,6 @@ python run_compressed.py --model dlrm --method compo --compress_rate 0.5 --ctx 0
 - DeepLight: we set stop_deviation=1e-3 to ensure the deviation between final pruning ratio and target ratio is smaller than 1e-3.
 - AutoSrh: we set nsplit=6, alpha_l1=0.00001 and alpha_lr=0.001.
 
+## Citation
+If you find this work useful, please cite [our paper](https://arxiv.org/abs/2311.15578).
 
