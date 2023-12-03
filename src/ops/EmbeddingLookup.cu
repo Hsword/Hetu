@@ -1,19 +1,21 @@
 #include "gpu_runtime.h"
+#include "dispatch.h"
 
-__global__ void embedding_lookup_kernel(const float *input, const float *ids,
-                                        float *output, size_t size,
-                                        size_t length, size_t input_row) {
+template <typename spec_t>
+__global__ void embedding_lookup_kernel(const spec_t *input, const int *ids,
+                                        spec_t *output, size_t nrow,
+                                        size_t length, size_t size) {
     size_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= size)
         return;
     int id = ids[index];
-    float *output_ptr = output + length * index;
-    if (id < 0 || id >= input_row) {
-        for (int i = 0; i < length; i++)
+    spec_t *output_ptr = output + length * index;
+    if (id < 0 || id >= nrow) {
+        for (int i = 0; i < length; ++i)
             output_ptr[i] = 0;
     } else {
-        const float *input_ptr = input + length * id;
-        for (int i = 0; i < length; i++)
+        const spec_t *input_ptr = input + length * id;
+        for (int i = 0; i < length; ++i)
             output_ptr[i] = input_ptr[i];
     }
 }
@@ -22,117 +24,27 @@ int DLGpuEmbeddingLookUp(const DLArrayHandle input, const DLArrayHandle ids,
                          DLArrayHandle output,
                          DLStreamHandle stream_handle = NULL) {
     assert(input->ndim == 2);
-    size_t size = 1;
+    size_t size = ArrSize(ids);
     for (int i = 0; i < output->ndim; i++) {
         if (i < output->ndim - 1) {
             assert(ids->shape[i] == output->shape[i]);
-        } else if (i == output->ndim - 1) {
+        } else {
             assert(input->shape[1] == output->shape[i]);
         }
     }
-    for (int i = 0; i < ids->ndim; i++) {
-        size = size * ids->shape[i];
-    }
-    size_t input_row = input->shape[0];
-    size_t length = input->shape[1];
+    size_t nrow = input->shape[0], length = input->shape[1];
     dim3 blocks;
     dim3 threads;
-    float *output_data = (float *)output->data;
-    const float *input_data = (const float *)input->data;
-    const float *id_list = (const float *)ids->data;
-    if (size <= 1024) {
-        threads.x = size;
-        blocks.x = 1;
-    } else {
-        threads.x = 1024;
-        blocks.x = (size + 1023) / 1024;
-    }
-    if (stream_handle)
-        embedding_lookup_kernel<<<blocks, threads, 0,
-                                  *(cudaStream_t *)stream_handle->handle>>>(
-            input_data, id_list, output_data, size, length, input_row);
-    else
-        embedding_lookup_kernel<<<blocks, threads>>>(input_data, id_list,
-                                                     output_data, size, length, input_row);
-    return 0;
-}
-
-__global__ void array_set_zero_kernel(float *output, size_t size) {
-    size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= size)
-        return;
-    output[ind] = 0;
-}
-
-__global__ void embedding_lookup_gradient_kernel(const float *output_grad_data,
-                                                 const float *ids,
-                                                 float *input_grad_data,
-                                                 size_t size, size_t length) {
-    size_t index = blockIdx.x * blockDim.x + threadIdx.x;
-    if (index >= size)
-        return;
-    int id = ids[index];
-    const float *output_grad_ptr = output_grad_data + length * index;
-    float *input_grad_ptr = input_grad_data + length * id;
-    for (int i = 0; i < length; i++)
-        atomicAdd(input_grad_ptr + i, *(output_grad_ptr + i));
-}
-
-int DLGpuEmbeddingLookUp_Gradient(const DLArrayHandle output_grad,
-                                  const DLArrayHandle ids,
-                                  DLArrayHandle input_grad,
-                                  DLStreamHandle stream_handle = NULL) {
-    assert(input_grad->ndim == 2);
-    size_t size = 1;
-    for (int i = 0; i < output_grad->ndim; i++) {
-        if (i < output_grad->ndim - 1) {
-            assert(ids->shape[i] == output_grad->shape[i]);
-        } else if (i == output_grad->ndim - 1) {
-            assert(input_grad->shape[1] == output_grad->shape[i]);
-        }
-    }
-    for (int i = 0; i < ids->ndim; i++) {
-        size = size * ids->shape[i];
-    }
-    size_t length = input_grad->shape[1];
-    dim3 blocks;
-    dim3 threads;
-    const float *output_grad_data = (const float *)output_grad->data;
-    float *input_grad_data = (float *)input_grad->data;
-    const float *id_list = (const float *)ids->data;
-
-    size_t input_grad_size = 1;
-    for (int i = 0; i < input_grad->ndim; i++) {
-        input_grad_size *= input_grad->shape[i];
-    }
-    if (input_grad_size <= 1024) {
-        threads.x = input_grad_size;
-        blocks.x = 1;
-    } else {
-        threads.x = 1024;
-        blocks.x = (input_grad_size + 1023) / 1024;
-    }
-    if (stream_handle)
-        array_set_zero_kernel<<<blocks, threads, 0,
-                                *(cudaStream_t *)stream_handle->handle>>>(
-            input_grad_data, input_grad_size);
-    else
-        array_set_zero_kernel<<<blocks, threads>>>(input_grad_data,
-                                                   input_grad_size);
-
-    if (size <= 1024) {
-        threads.x = size;
-        blocks.x = 1;
-    } else {
-        threads.x = 1024;
-        blocks.x = (size + 1023) / 1024;
-    }
-    if (stream_handle)
-        embedding_lookup_gradient_kernel<<<
-            blocks, threads, 0, *(cudaStream_t *)stream_handle->handle>>>(
-            output_grad_data, id_list, input_grad_data, size, length);
-    else
-        embedding_lookup_gradient_kernel<<<blocks, threads>>>(
-            output_grad_data, id_list, input_grad_data, size, length);
+    ThreadBlock1D(threads, blocks, size);
+    void *output_data = output->data;
+    void *input_data = input->data;
+    const int *id_list = (const int *)ids->data;
+    assert(stream_handle != NULL);
+    cudaStream_t stream = *(cudaStream_t *)stream_handle->handle;
+    HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(input->dtype, spec_t, [&]() {
+        embedding_lookup_kernel<spec_t><<<blocks, threads, 0, stream>>>(
+            (const spec_t *)input_data, id_list, (spec_t *)output_data, nrow,
+            length, size);
+    });
     return 0;
 }

@@ -1,4 +1,5 @@
 import numpy as np
+import math
 import hetu as ht
 from hetu import gpu_links as gpu_op
 
@@ -264,7 +265,8 @@ def test_softmax_cross_entropy():
         expb = np.exp(b)
         softmax = expb / np.sum(expb, axis=1, keepdims=True)
         return softmax
-    def convert_to_one_hot(vals, max_val=0, ignored_index = -1):
+
+    def convert_to_one_hot(vals, max_val=0, ignored_index=-1):
         """Helper method to convert label array to one-hot array."""
         if max_val == 0:
             max_val = vals.max() + 1
@@ -280,7 +282,7 @@ def test_softmax_cross_entropy():
     y = np.random.uniform(-5, 5, shape).astype(np.float32)
     # print('y value:')
     # print(y)
-    y_sparse = np.random.randint(-1,shape[1],(shape[0],))
+    y_sparse = np.random.randint(-1, shape[1], (shape[0],))
     y_ = convert_to_one_hot(y_sparse, shape[1])
     # print("y_ value:")
     # print(y_)
@@ -321,7 +323,8 @@ def test_softmax_cross_entropy():
     ignored_index = -1
     arr_y_sparse = ht.array(y_sparse, ctx=ctx)
     gpu_op.CuDNN_softmax(arr_y, arr_softmax)
-    gpu_op.cross_entropy_sparse(arr_softmax, arr_y_sparse, ignored_index, arr_out)
+    gpu_op.cross_entropy_sparse(
+        arr_softmax, arr_y_sparse, ignored_index, arr_out)
     out = arr_out.asnumpy()
     # print("softmax_op + crossentropy_sparse_op split version result:")
     # print(out)
@@ -335,7 +338,8 @@ def test_softmax_cross_entropy_gradient():
         expb = np.exp(b)
         softmax = expb / np.sum(expb, axis=1, keepdims=True)
         return softmax
-    def convert_to_one_hot(vals, max_val=0, ignored_index = -1):
+
+    def convert_to_one_hot(vals, max_val=0, ignored_index=-1):
         """Helper method to convert label array to one-hot array."""
         if max_val == 0:
             max_val = vals.max() + 1
@@ -350,7 +354,7 @@ def test_softmax_cross_entropy_gradient():
     shape = (400, 1000)
     #shape = (4,5)
     y = np.random.uniform(-5, 5, shape).astype(np.float32)
-    y_sparse = np.random.randint(0,shape[1],(shape[0],))
+    y_sparse = np.random.randint(0, shape[1], (shape[0],))
     y_ = convert_to_one_hot(y_sparse, shape[1])
     grad = np.random.uniform(-5, 5, (shape[0],)).astype(np.float32)
     arr_y = ht.array(y, ctx=ctx)
@@ -360,8 +364,8 @@ def test_softmax_cross_entropy_gradient():
 
     # numpy calculation
     np_grad = (softmax_func(y) + -1 * y_) * np.expand_dims(grad, -1)
-    
-    # test manual kernel 
+
+    # test manual kernel
     gpu_op.softmax_cross_entropy_gradient(arr_y, arr_y_, arr_grad, arr_out)
     out = arr_out.asnumpy()
     np.testing.assert_allclose(np_grad, out, rtol=1e-4, atol=1e-8)
@@ -382,7 +386,8 @@ def test_softmax_cross_entropy_gradient():
     # print("Hetu crossentropy output:")
     # print(arr_crossentropy_out.asnumpy())
 
-    gpu_op.cross_entropy_gradient(arr_grad, arr_softmax, arr_y_, arr_softmax_grad)
+    gpu_op.cross_entropy_gradient(
+        arr_grad, arr_softmax, arr_y_, arr_softmax_grad)
     gpu_op.CuDNN_softmax_gradient(arr_softmax, arr_softmax_grad, arr_out)
     out = arr_out.asnumpy()
 
@@ -394,17 +399,19 @@ def test_softmax_cross_entropy_gradient():
     np.testing.assert_allclose(np_grad, out, rtol=1e-4, atol=1e-8)
 
     # test softmax_op + crossentropy_sparse_op
-    y_sparse = np.random.randint(-1,shape[1],(shape[0],))
+    y_sparse = np.random.randint(-1, shape[1], (shape[0],))
     y_ = convert_to_one_hot(y_sparse, shape[1])
     np_grad = (softmax_func(y) + -1 * y_) * np.expand_dims(grad, -1)
     for i in range(y_sparse.size):
         if y_sparse[i] == -1:
-            np_grad[i] = np.zeros(shape = (1,shape[1]))
+            np_grad[i] = np.zeros(shape=(1, shape[1]))
     ignored_index = -1
     arr_y_sparse = ht.array(y_sparse, ctx=ctx)
     gpu_op.CuDNN_softmax(arr_y, arr_softmax)
-    gpu_op.cross_entropy_sparse(arr_softmax, arr_y_sparse, ignored_index, arr_crossentropy_out)
-    gpu_op.cross_entropy_sparse_gradient(arr_grad, arr_softmax, arr_y_sparse, ignored_index, arr_softmax_grad)
+    gpu_op.cross_entropy_sparse(
+        arr_softmax, arr_y_sparse, ignored_index, arr_crossentropy_out)
+    gpu_op.cross_entropy_sparse_gradient(
+        arr_grad, arr_softmax, arr_y_sparse, ignored_index, arr_softmax_grad)
     gpu_op.CuDNN_softmax_gradient(arr_softmax, arr_softmax_grad, arr_out)
     out = arr_out.asnumpy()
     np.testing.assert_allclose(np_grad, out, rtol=1e-4, atol=1e-8)
@@ -416,16 +423,16 @@ def test_softmax_cross_entropy_gradient():
     import torch.nn.functional as F
     from torch.autograd import Variable
     tc_y = Tensor(y)
-    tc_y = Variable(tc_y, requires_grad = True)
+    tc_y = Variable(tc_y, requires_grad=True)
     tc_y_ = Tensor(y_)
     tc_grad = Tensor(grad)
 
     def torch_cross_entropy(pred, label):
         temp = - torch.log(pred) * label
-        return torch.sum(temp, dim = -1)
+        return torch.sum(temp, dim=-1)
 
-    tc_softmax = F.softmax(tc_y, dim = -1)
-    tc_softmax_1 = Variable(tc_softmax.data, requires_grad = True)
+    tc_softmax = F.softmax(tc_y, dim=-1)
+    tc_softmax_1 = Variable(tc_softmax.data, requires_grad=True)
     tc_crossentropy = torch_cross_entropy(tc_softmax_1, tc_y_)
     # print("Torch crossentropy output:")
     # print(tc_crossentropy)
@@ -1330,7 +1337,7 @@ def test_dropout_recompute():
 
 def test_dropout():
     ctx = ht.gpu(0)
-    shapeX = (200,500)
+    shapeX = (200, 500)
     #shapeX = (10,)
     x = np.random.uniform(-1, 1, size=shapeX).astype(np.float32)
     arr_x = ht.array(x, ctx=ctx)
@@ -1354,23 +1361,6 @@ def test_dropout():
     print(y2_out)
 
     np.testing.assert_allclose(y_out, y2_out, rtol=1e-6)
-
-def test_dropout2d():
-    ctx = ht.gpu(0)
-    shapeX = (2, 2, 2, 4)
-    x = np.random.uniform(0, 10, size=shapeX).astype(np.float32)
-    arr_x = ht.array(x, ctx=ctx)
-    arr_y = ht.empty(shapeX, ctx=ctx)
-    dropout_rate = 0.6
-    import ctypes
-    seed = ctypes.c_ulonglong(0)
-    print(x)
-    gpu_op.dropout2d(arr_x, dropout_rate, arr_y, seed)
-    print(arr_y.asnumpy())
-    print(seed)
-    gpu_op.dropout2d_gradient(arr_x, dropout_rate, arr_y, seed)
-    print(arr_y.asnumpy())
-    print(seed)
 
 
 def test_instance_norm2d():
@@ -1451,6 +1441,130 @@ def test_onehot():
     print(arr_y.asnumpy())
 
 
+def test_reduce_indexedslice():
+    ctx = ht.gpu(0)
+    ind_shape = (20, 30)
+    width = 7
+    nums = 100
+    ind_size = ind_shape[0] * ind_shape[1]
+    val_shape = ind_shape + (width,)
+    np_ind = np.random.randint(0, nums, size=ind_shape, dtype=np.int32)
+    np_val = np.random.normal(size=val_shape).astype(np.float32)
+    # hetu
+    ws_size = gpu_op.reduce_indexedslice_get_workspace_size(ind_size)
+    ht_ind = ht.array(np_ind, ctx=ctx, dtype=np.int32)
+    ht_val = ht.array(np_val, ctx=ctx)
+    ht_out_ind = ht.empty(ind_shape, ctx=ctx, dtype=np.int32)
+    ht_out_val = ht.empty(val_shape, ctx=ctx)
+    gpu_op.array_set(ht_out_val, 0)
+    workspace = ht.empty((2 * width + 2 + (ws_size + 3) // 4,), ctx=ctx)
+    end_bit = math.ceil(np.log2(nums))
+    gpu_op.reduce_indexedslice(
+        ht_ind, ht_val, ht_out_ind, ht_out_val, workspace, ws_size, end_bit)
+    ht_out_ind = ht_out_ind.asnumpy()
+    ht_out_val = ht_out_val.asnumpy()
+    # numpy
+    unique_indices, inverse = np.unique(np_ind, return_inverse=True)
+    new_values = np.zeros(val_shape).astype(np.float32).reshape((-1, width))
+    flatten = np_val.reshape((-1, width))
+    for i, ind in enumerate(inverse):
+        new_values[ind] += flatten[i]
+    np_out_ind = np.concatenate(
+        [unique_indices, np.full((ind_size - len(unique_indices),), -1)], 0)
+    np_out_val = new_values
+    np_out_ind = np_out_ind.reshape(ht_out_ind.shape)
+    np_out_val = np_out_val.reshape(ht_out_val.shape)
+    np.testing.assert_allclose(np_out_ind, ht_out_ind)
+    np.testing.assert_allclose(np_out_val, ht_out_val)
+    # C++, modify from PS
+    from hetu import cpu_links as cpu_op
+    cctx = ht.cpu()
+    ht_ind = ht.array(np_ind, ctx=cctx, dtype=np.int32)
+    ht_val = ht.array(np_val, ctx=cctx)
+    ht_out_ind = ht.empty(ind_shape, ctx=cctx, dtype=np.int32)
+    ht_out_val = ht.empty(val_shape, ctx=cctx)
+    cpu_op.array_set(ht_out_val, 0)
+    cpu_op.reduce_indexedslice(
+        ht_ind, ht_val, ht_out_ind, ht_out_val)
+    ht_out_ind = ht_out_ind.asnumpy()
+    ht_out_val = ht_out_val.asnumpy()
+    np.testing.assert_allclose(np_out_ind, ht_out_ind)
+    np.testing.assert_allclose(np_out_val, ht_out_val)
+
+
+def test_num_less_than_tensor():
+    ctx = ht.gpu(0)
+    row_size = 1000
+    dim = 16
+    emb_shape = (row_size, dim)
+    npembedding = np.random.random(size=emb_shape).astype(np.float32)
+    embedding = ht.array(npembedding, ctx=ctx)
+    middle = ht.empty(emb_shape, ctx=ctx)
+    output = ht.empty((1,), ctx=ctx)
+    stream = ht.stream.create_stream_handle(ctx)
+    # fea-dim
+    np_feadim_threshold = np.random.random(size=emb_shape).astype(np.float32)
+    feadim_threshold = ht.array(np_feadim_threshold, ctx=ctx)
+    gpu_op.num_less_than_tensor_threshold(
+        embedding, middle, output, feadim_threshold, stream)
+    stream.sync()
+    htoutput = output.asnumpy()
+    npmiddle = (np.abs(npembedding) < np_feadim_threshold)
+    npoutput = np.sum(npmiddle)
+    np.testing.assert_allclose(npmiddle, middle.asnumpy())
+    print('feadim, ht:', htoutput, ', np:', npoutput)
+    assert htoutput.item() == npoutput.item()
+    # fea
+    np_fea_threshold = np.random.random(size=(row_size, 1)).astype(np.float32)
+    fea_threshold = ht.array(np_fea_threshold, ctx=ctx)
+    gpu_op.num_less_than_tensor_threshold(
+        embedding, middle, output, fea_threshold, stream)
+    stream.sync()
+    htoutput = output.asnumpy()
+    npmiddle = (np.abs(npembedding) < np_fea_threshold)
+    npoutput = np.sum(npmiddle)
+    np.testing.assert_allclose(npmiddle, middle.asnumpy())
+    print('fea, ht:', htoutput, ', np:', npoutput)
+    assert htoutput.item() == npoutput.item()
+    # dim
+    np_dim_threshold = np.random.random(size=(dim,)).astype(np.float32)
+    dim_threshold = ht.array(np_dim_threshold, ctx=ctx)
+    gpu_op.num_less_than_tensor_threshold(
+        embedding, middle, output, dim_threshold, stream)
+    stream.sync()
+    htoutput = output.asnumpy()
+    npmiddle = (np.abs(npembedding) < np_dim_threshold)
+    npoutput = np.sum(npmiddle)
+    np.testing.assert_allclose(npmiddle, middle.asnumpy())
+    print('dim, ht:', htoutput, ', np:', npoutput)
+    assert htoutput.item() == npoutput.item()
+    # global
+    np_threshold = np.random.random(size=(1,)).astype(np.float32)
+    threshold = ht.array(np_threshold, ctx=ctx)
+    gpu_op.num_less_than_tensor_threshold(
+        embedding, middle, output, threshold, stream)
+    stream.sync()
+    htoutput = output.asnumpy()
+    npmiddle = (np.abs(npembedding) < np_threshold)
+    npoutput = np.sum(npmiddle)
+    np.testing.assert_allclose(npmiddle, middle.asnumpy())
+    print('global, ht:', htoutput, ', np:', npoutput)
+    assert htoutput.item() == npoutput.item()
+
+
+def test_clipping():
+    ctx = ht.gpu(0)
+    shape = (3, 4, 5, 6)
+    min_value = 0.
+    max_value = 0.5
+    nparr = np.random.random(size=shape).astype(np.float32)
+    htarr = ht.array(nparr, ctx=ctx)
+    stream = ht.stream.create_stream_handle(ctx)
+    gpu_op.param_clip_func(htarr, min_value, max_value, stream)
+    stream.sync()
+    htres = htarr.asnumpy()
+    npres = np.clip(nparr, min_value, max_value)
+    assert np.all(htres == npres)
 def test_gelu():
     shape = (2000, 2500)
     ctx = ht.gpu(0)
@@ -1570,10 +1684,12 @@ test_reduce_sum()
 test_reduce_mean()
 test_dropout()
 test_dropout_recompute()
-test_dropout2d()
 test_instance_norm2d()
 test_instance_norm2d_gradient()
 test_onehot()
+test_reduce_indexedslice()
+test_num_less_than_tensor()
+test_clipping()
 test_gelu()
 test_sigmoid()
 test_argmax()

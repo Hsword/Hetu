@@ -9,6 +9,8 @@ from .gpu_ops.Dropout import DropoutOp
 from .gpu_ops.Sum import SparseSumOp
 from .gpu_ops.PipelineReceive import PipelineReceiveOp
 from .gpu_ops.PipelineSend import PipelineSendOp
+from .gpu_ops.StopGradient import StopGradientOp
+from .gpu_ops.Unique import UniqueIndicesOffsetsOp
 from .dataloader import DataloaderOp, GNNDataLoaderOp
 from .optimizer import OptimizerOp
 from . import ndarray
@@ -21,10 +23,11 @@ import numpy as np
 class HetuMemoryPool(object):
     def __init__(self):
         # here the indexed_nodes only used for flexflow
-        self.indexed_nodes = (EmbeddingLookUp_Gradient,
-                              DataD2HSparseOp, DataH2DSparseOp, SparseSumOp)
+        self.indexed_nodes = (EmbeddingLookUp_Gradient, DataD2HSparseOp, DataH2DSparseOp, SparseSumOp)
         self.ln_bn_grad_nodes = (Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp,
-                                 Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp)
+                                 Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp,
+                                 UniqueIndicesOffsetsOp)
+        self.no_compute_nodes = (StopGradientOp, DataloaderOp, GNNDataLoaderOp)
 
     def compute_memory_reuse_plan(self, computing_nodes, node_to_shape, eval_node_list):
         persistent_nodes = self.form_persistent_nodes(
@@ -46,17 +49,19 @@ class HetuMemoryPool(object):
             if outdeg[node] > 0 or node in persistent_nodes or isinstance(node, self.indexed_nodes):
                 return
             assert outdeg[node] == 0
-            if node.inplace or isinstance(node, EmbeddingLookUp_Gradient):
+            if node.inplace:
                 for n in node.inputs:
                     release_node(n)
             else:
-                memory_pool[(node_to_shape[node], node.ctx)].append(node)
+                assert not node.use_indexed_slices, node.name
+                memory_pool[(node_to_shape[node], node.ctx,
+                             node.dtype)].append(node)
 
         for node in computing_nodes:
-            if node.inplace or isinstance(node, EmbeddingLookUp_Gradient):
+            if node.inplace:
                 continue
             shape = node_to_shape[node]
-            key = (shape, node.ctx)
+            key = (shape, node.ctx, node.dtype)
             if shape is None or node in persistent_nodes or isinstance(node, self.indexed_nodes):
                 pass
             elif len(memory_pool[key]) > 0:
@@ -92,16 +97,14 @@ class HetuMemoryPool(object):
                     node_to_arr_map[node] = placeholder_to_arr_map[node]
                 elif node not in node_to_arr_map:
                     node_to_arr_map[node] = None
-            elif not isinstance(node, (DataloaderOp, GNNDataLoaderOp)):
+            elif not isinstance(node, self.no_compute_nodes):
                 # add for OptimizerOp and ParameterServerOp
                 if shape is None:
                     node_to_arr_map[node] = None
-                elif isinstance(node, EmbeddingLookUp_Gradient):
-                    node_to_arr_map[node] = ndarray.IndexedSlices(
-                        dense_shape=shape)
                 elif node in indexed_slices_shape:
                     ind_shape, val_shape = indexed_slices_shape[node]
-                    indices = ndarray.empty(ind_shape, node.ctx)
+                    indices = ndarray.empty(
+                        ind_shape, node.ctx, dtype=np.int32)
                     values = ndarray.empty(val_shape, node.ctx)
                     node_to_arr_map[node] = ndarray.IndexedSlices(
                         indices=indices, values=values, dense_shape=shape)
@@ -117,15 +120,17 @@ class HetuMemoryPool(object):
                             result = reuse_map.get(node, node)
                             if result is node:
                                 node_to_arr_map[node] = ndarray.empty(
-                                    shape, ctx=node.ctx)
+                                    shape, ctx=node.ctx, dtype=node.dtype)
                             else:
                                 node_to_arr_map[node] = node_to_arr_map[result]
                     else:
                         node_to_arr_map[node] = ndarray.empty(
-                            shape, ctx=node.ctx)
+                            shape, ctx=node.ctx, dtype=node.dtype)
                     if isinstance(node, self.ln_bn_grad_nodes):
                         # for batch normailzation, pass array to the real gradient node
                         node.pass_grad_array(node_to_arr_map[node])
+            elif isinstance(node, StopGradientOp):
+                node_to_arr_map[node] = node_to_arr_map[node.inputs[0]]
 
     def start_simulate(self, devices):
         # we simply assume the environment is homogeneous

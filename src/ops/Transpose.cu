@@ -3,10 +3,12 @@
 __global__ void transpose_kernel(float *odata, const float *idata,
                                  const uint *buf, const uint ndims,
                                  size_t size) {
+    size_t o_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (o_idx >= size)
+        return;
     const uint *in_strides = buf;
     const uint *out_strides = buf + ndims;
     const uint *perm = buf + ndims * 2;
-    size_t o_idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     uint i_idx = 0;
     uint t = o_idx;

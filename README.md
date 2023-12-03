@@ -62,7 +62,7 @@ make hetu_cache -j 8
 
 ## Basic Usage
 
-ResNet training on singel gpu:
+ResNet training on single gpu:
 
 ```bash
 bash examples/cnn/scripts/hetu_1gpu.sh resnet18 CIFAR10
@@ -143,7 +143,8 @@ The entire codebase is under [license](LICENSE)
   7. Sicong Dong, Xupeng Miao, Pengkai Liu, Xin Wang, Bin Cui, Jianxin Li. [HET-KG: Communication-Efficient Knowledge Graph Embedding Training via Hotness-Aware Cache](https://ieeexplore.ieee.org/document/9835364). ICDE 2022.
   8. Xupeng Miao, Yujie Wang, Jia Shen, Yingxia Shao, Bin Cui. Graph Neural Network Training Acceleration over Multi-GPUs. Journal of Software (Chinese).
   9. Xiaonan Nie, Shijie Cao, Xupeng Miao, Lingxiao Ma, Jilong Xue, Youshan Miao, Zichao Yang, Zhi Yang, Bin Cui. [EvoMoE: An Evolutional Mixture-of-Experts Training Framework via Dense-To-Sparse Gate](https://arxiv.org/abs/2112.14397). arXiv 2021.
-  10. coming soon
+  10. Hailin Zhang, Penghao Zhao, Xupeng Miao, Yingxia Shao, Zirui Liu, Tong Yang, Bin Cui. [Experimental Analysis of Large-scale Learnable Vector Storage Compression](https://arxiv.org/abs/2311.15578). VLDB 2024.
+  11. coming soon
 
 ## Cite
 
@@ -172,7 +173,7 @@ The prerequisites for different modules in Hetu is listed as follows:
   
   Hetu: OpenMP(*), CMake(*)
   Hetu (version mkl): MKL 1.6.1
-  Hetu (version gpu): CUDA 10.1(*), CUDNN 7.5(*), CUB 1.12.1(*)
+  Hetu (version gpu): CUDA 10.1(*), CUDNN 7.5(*), CUB 1.12.1(*), Thrust 1.16.0(*)
   Hetu (version all): both
 
   Hetu-AllReduce: MPI 3.1, NCCL 2.8(*), this module needs GPU version

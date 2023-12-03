@@ -2,6 +2,27 @@ import numpy as np
 import hetu as ht
 from hetu import gpu_links as gpu_op
 
+def test_sgd():
+    ctx = ht.gpu(0)
+    shape = (500,400)
+    param = np.random.uniform(-10, 10, size=shape).astype(np.float32)
+    grad = np.random.uniform(-10, 10, size=shape).astype(np.float32)
+    lr = 1e-2
+    print("Prev param:")
+    print(param)
+    arr_param = ht.array(param, ctx)
+    arr_grad = ht.array(grad, ctx)
+
+    gpu_op.sgd_update(arr_param, arr_grad, lr, 0.0)
+    re_param = arr_param.asnumpy()
+    param = param - grad * lr
+
+    print("Cur param:")
+    print(re_param)
+    print(param)
+
+    np.testing.assert_allclose(re_param, param, atol=1e-5)
+
 
 def test_adamw():
     ctx = ht.gpu(0)
@@ -297,7 +318,8 @@ def test_lamb_sparse():
     np.testing.assert_allclose(re_m, m, atol=1e-5)
     np.testing.assert_allclose(re_v, v, atol=1e-5)
 
-test_adamw()
-test_lamb()
-test_adamw_sparse()
-test_lamb_sparse()
+#test_adamw()
+#test_lamb()
+#test_adamw_sparse()
+#test_lamb_sparse()
+#test_sgd()

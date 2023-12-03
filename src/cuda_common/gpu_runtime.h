@@ -146,4 +146,8 @@ void cublas_init(size_t dev_id = 0, DLStreamHandle stream = NULL);
 void cuda_init();
 int GetThreadNum(int cnt);
 
+void ThreadBlock1D(dim3 &threads, dim3 &blocks, size_t size);
+void ThreadBlock2D(dim3 &threads, dim3 &blocks, size_t xsize, size_t ysize);
+size_t ArrSize(const DLArrayHandle array);
+
 #endif

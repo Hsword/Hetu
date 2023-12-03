@@ -90,6 +90,36 @@ class Conv2dAddBiasOp(Op):
         out_W = (W + 2 * padding[1] - filter_W) // stride[1] + 1
         return (N, f_O, out_H, out_W)
 
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        l2res_map = {0: 0, 1: -2, -1: 1}
+        r2res_map = {-1: 0, 0: 1, 1: -2}
+        conv2d_forward_deduce_states(
+            input_statuses, status, deduce_order, l2res_map, r2res_map)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        res2l_map = {0: 0, 1: -1, -2: 1, -1: -1}
+        res2r_map = {-2: 1, 0: -1, 1: 0, -1: -1}
+        conv2d_backward_deduce_states(
+            status, input_statuses, deduce_order, res2l_map, res2r_map)
+        if deduce_order:
+            if status.valid_all():
+                input_statuses[2].set_order(
+                    status.combine_order(([0, -2], -1), (1, 0)))
+        else:
+            if status.valid_state():
+                input_statuses[2].set_state(
+                    *status.combine_state(([0, -2], -1), (1, 0)))
+
+    def deduce_generated_backward_nodes_states(self, input_statuses, status, index):
+        assert index is not None
+        if index == -1:
+            return status.remove_partial()
+        else:
+            from .Conv2d import conv2d_make_backward_status
+            return conv2d_make_backward_status(status, index)
+
 
 def conv2d_add_bias_op(node_A, node_B, bias, padding=0, stride=1, ctx=None):
     """Conv2d-with-bias node.

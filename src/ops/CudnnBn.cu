@@ -12,10 +12,23 @@ int CuDNN_DLGpuBatch_Normalization(
     cudnn_init(dev_id, stream_handle);
 
     // input
-    size_t input_N = input_X->shape[0];
-    size_t input_C = input_X->shape[1];
-    size_t input_H = input_X->shape[2];
-    size_t input_W = input_X->shape[3];
+    size_t input_N, input_C, input_H, input_W;
+    if (input_X->ndim == 4) {
+        input_N = input_X->shape[0];
+        input_C = input_X->shape[1];
+        input_H = input_X->shape[2];
+        input_W = input_X->shape[3];
+    } else if (input_X->ndim == 3) {
+        input_N = input_X->shape[0];
+        input_C = input_X->shape[1];
+        input_H = input_X->shape[2];
+        input_W = 1;
+    } else if (input_X->ndim == 2) {
+        input_N = input_X->shape[0];
+        input_C = input_X->shape[1];
+        input_H = 1;
+        input_W = 1;
+    }
     const float *input_data = (const float *)(input_X->data);
 
     // input descriptor
@@ -76,10 +89,23 @@ int CuDNN_DLGpuBatch_Normalization_gradient(
     cudnn_init(dev_id, stream_handle);
 
     // input
-    size_t input_N = input_X->shape[0];
-    size_t input_C = input_X->shape[1];
-    size_t input_H = input_X->shape[2];
-    size_t input_W = input_X->shape[3];
+    size_t input_N, input_C, input_H, input_W;
+    if (input_X->ndim == 4) {
+        input_N = input_X->shape[0];
+        input_C = input_X->shape[1];
+        input_H = input_X->shape[2];
+        input_W = input_X->shape[3];
+    } else if (input_X->ndim == 3) {
+        input_N = input_X->shape[0];
+        input_C = input_X->shape[1];
+        input_H = input_X->shape[2];
+        input_W = 1;
+    } else if (input_X->ndim == 2) {
+        input_N = input_X->shape[0];
+        input_C = input_X->shape[1];
+        input_H = 1;
+        input_W = 1;
+    }
     const float *input_data = (const float *)(input_X->data);
 
     // input descriptor
@@ -141,10 +167,23 @@ int CuDNN_DLGpuBatch_Normalization_inference(
     cudnn_init(dev_id, stream_handle);
 
     // input
-    size_t input_N = input_X->shape[0];
-    size_t input_C = input_X->shape[1];
-    size_t input_H = input_X->shape[2];
-    size_t input_W = input_X->shape[3];
+    size_t input_N, input_C, input_H, input_W;
+    if (input_X->ndim == 4) {
+        input_N = input_X->shape[0];
+        input_C = input_X->shape[1];
+        input_H = input_X->shape[2];
+        input_W = input_X->shape[3];
+    } else if (input_X->ndim == 3) {
+        input_N = input_X->shape[0];
+        input_C = input_X->shape[1];
+        input_H = input_X->shape[2];
+        input_W = 1;
+    } else if (input_X->ndim == 2) {
+        input_N = input_X->shape[0];
+        input_C = input_X->shape[1];
+        input_H = 1;
+        input_W = 1;
+    }
     const float *input_data = (const float *)(input_X->data);
 
     // input descriptor

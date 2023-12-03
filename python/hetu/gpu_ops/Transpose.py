@@ -60,7 +60,7 @@ class TransposeOp(Op):
                 in_stride *= ori_shape[i]
                 out_stride *= res_shape[i]
             self.gpu_buffer = ndarray.array(
-                buffer, self.ctx, data_type=np.uintc)
+                buffer, self.ctx, dtype=np.uintc)
         return tuple(res_shape)
 
     def naive_infer_shape(self, input_shapes):
@@ -77,6 +77,46 @@ class TransposeOp(Op):
             res_shape = [ori_shape[self.perm[i]]
                          for i in range(len(ori_shape))]
         return tuple(res_shape)
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == 1
+        assert self.perm is not None, 'Deduction requires permutation to be specified.'
+        if deduce_order:
+            if input_statuses[0].valid_all():
+                order = input_statuses[0].order
+                if order is not None:
+                    new_order = []
+                    for o in order:
+                        if o == -1:
+                            new_order.append(o)
+                        else:
+                            new_order.append(self.perm.index(o))
+                    status.set_order(tuple(new_order))
+        else:
+            if input_statuses[0].valid_state():
+                state, duplicate = input_statuses[0].get()
+                res_state = {self.perm.index(k): v for k, v in state.items()}
+                status.set_state(res_state, duplicate)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == 1
+        assert self.perm is not None, 'Deduction requires permutation to be specified.'
+        if deduce_order:
+            if status.valid_all():
+                order = status.order
+                if order is not None:
+                    new_order = []
+                    for o in order:
+                        if o == -1:
+                            new_order.append(o)
+                        else:
+                            new_order.append(self.perm[o])
+                    input_statuses[0].set_order(tuple(new_order))
+        else:
+            if status.valid_state():
+                state, duplicate = status.get()
+                res_state = {self.perm[k]: v for k, v in state.items()}
+                input_statuses[0].set_state(res_state, duplicate)
 
 
 def transpose_op(node_A, perm=None, ctx=None):

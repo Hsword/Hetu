@@ -8,6 +8,7 @@ from ..gpu_links import matrix_opposite
 class OppositeOp(Op):
     def __init__(self, node_A, ctx=None):
         super().__init__(OppositeOp, [node_A], ctx)
+        self.dtype = node_A.dtype
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:

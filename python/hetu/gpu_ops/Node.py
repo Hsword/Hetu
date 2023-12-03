@@ -3,12 +3,14 @@ from .. import ndarray
 from .. import stream
 from ..context import get_current_context, DeviceGroup
 from copy import copy, deepcopy
+import numpy as np
 from typing import TYPE_CHECKING
 G_NODE_ID = 0
 
 if TYPE_CHECKING:
     from ..ndarray import DLContext, NDArray, ND_Sparse_Array, IndexedSlices
     from ..stream import Event, PSEvent, Stream
+    from ..context import NodeStatus
     from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp
     from .executor import HetuConfig
     from typing import Type, Optional, Tuple, Union, Dict, List
@@ -29,7 +31,7 @@ class Op(object):
         ) if ctx is None else DeviceGroup(ctx)
         self.ctx: Union[None, DLContext, DeviceGroup] = ctx
         self.const_attr: Optional[int] = None
-        self.dtype: Optional[Type] = None
+        self.dtype: Optional[Type] = np.float32
         self.inplace: bool = False
         self.lazy_execution: bool = False
         self.event: Union[None, Event, PSEvent] = None
@@ -214,6 +216,60 @@ class Op(object):
 
     def backward_hook(self, config: HetuConfig) -> None:
         pass
+
+    def forward_deduce_states(
+        self,
+        input_statuses: List[NodeStatus],
+        status: NodeStatus,
+        deduce_order: bool
+    ) -> None:
+        assert len(input_statuses) == len(self.inputs)
+        for nst in input_statuses:
+            status.copy_from(nst, deduce_order)
+
+    def backward_deduce_states(
+        self,
+        status: NodeStatus,
+        input_statuses: List[NodeStatus],
+        deduce_order: bool
+    ) -> None:
+        assert len(input_statuses) == len(self.inputs)
+        for nst in input_statuses:
+            nst.copy_from(status, deduce_order)
+
+    def deduce_generated_backward_nodes_states(self, input_statuses: List[NodeStatus], status: NodeStatus, index: Optional[int]):
+        if index == -1:
+            return status.remove_partial()
+        else:
+            return input_statuses[index].remove_partial()
+
+    def enable_distributed_partial(self) -> bool:
+        if not hasattr(self, '_enable_partial'):
+            # node with bias has different output if using partial!!!!!
+            # TODO: solve the problem above
+            from .MatrixMult import MatMulOp
+            from .Linear import LinearOp
+            from .Conv2d import Conv2dOp, Conv2d_Gradient_of_DataOp, Conv2d_Gradient_of_FilterOp
+            from .Conv2dAddBias import Conv2dAddBiasOp
+            from .ReduceMean import ReduceMeanOp
+            from .ReduceSum import ReduceSumOp
+            from .EmbeddingLookUp import EmbeddingLookUp_Gradient, EmbeddingLookUp
+            from .LayerNorm import Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp
+            from .BatchNorm import Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp
+            from .OnesLike import OnesLikeOp
+            from .Division import DivOp, DivConstOp  # only for bert, the loss is divided
+            from .AddElewise import AddOp  # only for bert, the loss is added
+            from .MultiplyElewise import MulOp  # only for bert, the loss is multiplied
+            from .Sum import SumOp
+            from .SoftmaxCrossEntropySparse import SoftmaxCrossEntropySparseOp
+            self._enable_partial = isinstance(self, (
+                MatMulOp, LinearOp, Conv2dOp, Conv2d_Gradient_of_DataOp,
+                Conv2d_Gradient_of_FilterOp, Conv2dAddBiasOp,
+                ReduceMeanOp, ReduceSumOp, EmbeddingLookUp_Gradient, EmbeddingLookUp, SoftmaxCrossEntropySparseOp,
+                Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp,
+                Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp,
+                OnesLikeOp, SumOp, DivOp, DivConstOp, AddOp, MulOp))
+        return self._enable_partial
 
     def reset_status(self) -> None:
         # reset ori_status, tar_status, grad_set, etc.

@@ -88,6 +88,34 @@ class LinearOp(Op):
         assert bias_shape == (shape_B,)
         return (shape_A, shape_B)
 
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == 3
+        from .MatrixMult import matmul_forward_deduce
+        matmul_forward_deduce(input_statuses, status, deduce_order,
+                              self.matmul_attr_trans_A, self.matmul_attr_trans_B)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == 3
+        from .MatrixMult import matmul_backward_deduce
+        matmul_backward_deduce(status, input_statuses, deduce_order,
+                               self.matmul_attr_trans_A, self.matmul_attr_trans_B)
+        if deduce_order:
+            if status.valid_all():
+                input_statuses[2].set_order(
+                    status.combine_order(([0, -2], -1), (1, 0)))
+        else:
+            if status.valid_state():
+                input_statuses[2].set_state(
+                    *status.combine_state(([0, -2], -1), (1, 0)))
+
+    def deduce_generated_backward_nodes_states(self, input_statuses, status, index):
+        assert index is not None
+        if index == -1:
+            return status.remove_partial()
+        else:
+            from .MatrixMult import matmul_make_backward_status
+            return matmul_make_backward_status(status, self.matmul_attr_trans_A, self.matmul_attr_trans_B, index)
+
 
 def linear_op(node_A, node_B, bias, trans_A=False, trans_B=False, ctx=None):
     """Make a new instance of Matrix Multiplication with bias and call the instance.

@@ -10,6 +10,7 @@ class Array_ReshapeOp(Op):
         super().__init__(Array_ReshapeOp, [node_A], ctx)
         self.output_shape = output_shape
         self.splits = None
+        self.dtype = node_A.dtype
 
     def compute(self, input_vals, output_val, stream_handle=None):
 
@@ -96,11 +97,15 @@ class Array_ReshapeOp(Op):
     def reset_status(self):
         self.splits = None
 
+    def reset_status(self):
+        self.splits = None
+
 
 class Array_Reshape_GradientOp(Op):
     def __init__(self, node_in, node_out, ctx=None):
         super().__init__(Array_Reshape_GradientOp, [node_out], ctx)
         self.node_in = node_in
+        self.dtype = node_in.dtype
 
     def compute(self, input_vals, output_val, stream_handle=None):
         # the size of input_array

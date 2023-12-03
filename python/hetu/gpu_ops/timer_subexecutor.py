@@ -140,6 +140,10 @@ class TimerSubExecutor(SubExecutor):
                 for n in node.inputs:
                     if n.event:
                         n.event.sync()
+                if len(grouping_nodes) > 0 and self.config.layer_indices[node] != cur_ind:
+                    make_group()
+                if len(grouping_nodes) == 0:
+                    cur_ind = self.config.layer_indices[node]
                 grouping_nodes.append(node)
                 continue
             else:

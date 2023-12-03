@@ -1,23 +1,153 @@
 from __future__ import absolute_import
-import os
 import numpy as np
-import multiprocessing as mp
+from collections import Iterable
 
 from . import ndarray
+from .random import get_np_rand
 from .gpu_ops.Node import Op
+
+
+class BatchIndices(object):
+    def __init__(self, batch_num, need_shuffle=False):
+        self.batch_num = batch_num
+        self.all_batch_indices = np.arange(self.batch_num)
+        self.last_key = len(self.all_batch_indices) - 1
+        self.need_shuffle = need_shuffle
+
+    def shuffle(self):
+        nprs = get_np_rand(1)
+        nprs.shuffle(self.all_batch_indices)
+
+    def assert_attr(self, dataloader):
+        assert self.batch_num == dataloader.batch_num
+        assert self.need_shuffle == dataloader.shuffle
+
+    def __getitem__(self, key):
+        if key == 0 and self.last_key != key:
+            assert self.last_key == len(self.all_batch_indices) - 1
+            if self.need_shuffle:
+                self.shuffle()
+        self.last_key = key
+        return self.all_batch_indices[key]
+
+
+class RawData(object):
+    def __init__(self, raw_data, dtype, func=None) -> None:
+        self.dtype = dtype
+        self.func = func if func else lambda x: x
+        if isinstance(raw_data, (list, tuple)):
+            raw_data = [self._init_array(data) for data in raw_data]
+        else:
+            raw_data = [self._init_array(raw_data)]
+        self.raw_data = raw_data
+        self._shape = list(raw_data[0].shape)
+        self._offsets = [0, self._shape[0]]
+        for d in raw_data[1:]:
+            assert list(d.shape[1:]) == self._shape[1:]
+            self._shape[0] += d.shape[0]
+            self._offsets.append(self._shape[0])
+
+    def _init_array(self, raw_data):
+        raw_data = self.func(raw_data)
+        if not isinstance(raw_data, (np.memmap, np.ndarray)):
+            raw_data = np.array(raw_data, dtype=self.dtype)
+        elif raw_data.dtype != self.dtype:
+            raw_data = raw_data.astype(self.dtype)
+        return raw_data
+
+    def __len__(self):
+        return self._shape[0]
+
+    @property
+    def shape(self):
+        return self._shape
+
+    def _get_arr_index(self, index):
+        # binary search
+        if index < 0:
+            index = index % len(self)
+        elif index >= len(self):
+            index = len(self) - 1
+        l, r = 0, len(self.raw_data)
+        while l + 1 < r:
+            mid = (l + r) // 2
+            if self._offsets[mid] == index:
+                l = mid
+                break
+            elif self._offsets[mid] < index:
+                l = mid
+            else:
+                r = mid
+        arr_ind = l
+        arr_offset = index - self._offsets[arr_ind]
+        return arr_ind, arr_offset
+
+    def __getitem__(self, key):
+        # directly return array; not good for dp split, need further support
+        if isinstance(key, int):
+            arr_ind, arr_offset = self._get_arr_index(key)
+            return self.raw_data[arr_ind][arr_offset]
+        else:
+            assert isinstance(key, slice) and key.step is None
+            start, stop = key.start, key.stop
+            if start is None:
+                start = 0
+            if stop is None:
+                stop = len(self)
+            start_arr_ind, start_arr_offset = self._get_arr_index(start)
+            stop_arr_ind, stop_arr_offset = self._get_arr_index(stop - 1)
+            if start_arr_ind == stop_arr_ind:
+                result = np.array(
+                    self.raw_data[start_arr_ind][start_arr_offset:stop_arr_offset + 1], dtype=self.dtype)
+            else:
+                cands = [self.raw_data[start_arr_ind][start_arr_offset:]]
+                for i in range(start_arr_ind+1, stop_arr_ind):
+                    cands.append(self.raw_data[i])
+                cands.append(self.raw_data[stop_arr_ind][:stop_arr_offset + 1])
+                result = np.concatenate(cands)
+            return result
+
+    def __iter__(self):
+        for d in self.raw_data:
+            for dd in d:
+                yield dd
+
+    def reshape(self, *new_shape):
+        if len(new_shape) == 1 and isinstance(new_shape[0], (tuple, list)):
+            new_shape = tuple(new_shape[0])
+        else:
+            new_shape = tuple(new_shape)
+        assert new_shape[0] == -1
+        return RawData([d.reshape(new_shape) for d in self.raw_data], dtype=self.dtype, func=None)
 
 
 # Multi-Process not useful now, since we don't have memory to CPU bottleneck
 class Dataloader(object):
-    def __init__(self, raw_data, batch_size, name='default', func=None, drop_last=True):
+    def __init__(self, raw_data, batch_size, name='default', func=None, batch_func=None, shuffle=False, drop_last=True, offset=0, dtype=np.float32):
         self.func = func if func else lambda x: x
-        self.raw_data = np.array(self.func(raw_data), np.float32)
+        self.dtype = dtype
+        self.raw_data = RawData(raw_data, self.dtype, self.func)
         self.batch_size = batch_size
         self.drop_last = drop_last
-        self.name = str(name)
+        if batch_func is None:
+            def batch_func(x): return x
+        self.batch_func = batch_func
+        self.shuffle = shuffle
+        if isinstance(name, str):
+            self.name = name
+        else:
+            assert isinstance(name, Iterable)
+            self.name = tuple(name)
         self.dp_nrank = None
         self.parts = None
         self.slices = None
+        self.batch_num = None
+        self.batch_index = offset
+
+    def set_batch_index(self, offset):
+        if offset >= self.batch_num:
+            offset = 0
+        self.batch_index = offset
 
     def init_states(self):
         if self.dp_nrank is not None:
@@ -27,76 +157,46 @@ class Dataloader(object):
             ending = start + cur_size
             self.raw_data = self.raw_data[start:ending]
         self.samples_num = len(self.raw_data)
-        self.queue_size = 3  # if use prefetch, needs 3; if only current batch, needs 2
-        self.batch_size = min(int(self.batch_size),
-                              self.samples_num // self.queue_size)
+        self.batch_size = int(self.batch_size)
         assert self.batch_size > 0, 'Batch size %d invalid.' % self.batch_size
-        self.batch_num = int(np.ceil(self.samples_num / self.batch_size)) if not self.drop_last else \
-            self.samples_num // self.batch_size
-        self.shape = tuple([self.batch_size] + list(self.raw_data.shape[1:]))
-        self.set_slices()
-        self.seq = np.arange(self.samples_num)
-
-        self.index = 0
-        self.arrs = []
-        self.arr_map = {}
-        # prefetch to fill up the queue
-        for i in range(self.queue_size):
-            next_index = self.index + self.batch_size
-            self.arrs.append(ndarray.array(
-                self.reshape_tensor(self.raw_data[self.seq[self.index:next_index]]), ctx=ndarray.cpu(0)))
-            self.index = next_index
-            self.arr_map[i] = i
-        self.max_key = self.queue_size - 1
-
+        self.batch_num = self.get_batch_num(self.samples_num)
+        if self.batch_index >= self.batch_num:
+            self.batch_index = 0
+        self.sample_shape = list(self.raw_data.shape[1:])
+        self.shape = tuple([self.batch_size] + self.sample_shape)
+        self.arr = ndarray.empty(
+            self.shape, ctx=ndarray.cpu(0), dtype=self.dtype)
         # in case the last batch's shape is different, pre-allocate an array
+        self.rest_arr = None
         if not self.drop_last:
             assert self.parts is None, 'Model parallel cannot use dataloader without drop_last.'
             res_num = self.samples_num % self.batch_size
-            if res_num > 0:
-                self.arrs.append(ndarray.empty(
-                    tuple([res_num] + list(self.shape[1:])), ctx=ndarray.cpu(0)))
-            self.rest = self.queue_size
-
-        self.batch_index = 0
+            if res_num > 0 and res_num != self.batch_size:
+                self.rest_arr = ndarray.empty(
+                    tuple([res_num] + self.sample_shape), ctx=ndarray.cpu(0), dtype=self.dtype)
+        self.set_slices()
 
     def _get_arr(self, batchind):
-        # get specific batch
-        # if the batch to be fetched is the newest one, replace the oldest with new batch
-        assert batchind in self.arr_map
-        res = self.arrs[self.arr_map[batchind]]
-        if batchind == self.max_key:
-            self.max_key = (self.max_key + 1) % self.samples_num
-            min_key = (self.max_key - self.queue_size) % self.samples_num
-            if self.index >= self.samples_num or (self.drop_last and self.index + self.batch_size > self.samples_num):
-                self.index = 0
-            next_index = self.index + self.batch_size
-            if next_index <= self.samples_num:
-                temp_ind = self.arr_map.pop(min_key)
-                if temp_ind == self.queue_size and not self.drop_last:
-                    temp_ind = self.rest
-                    self.rest = self.queue_size
-                self.arr_map[self.max_key] = temp_ind
-                self.arrs[temp_ind][:] = self.reshape_tensor(
-                    self.raw_data[self.seq[self.index:next_index]])
-            else:
-                assert not self.drop_last
-                self.arrs[-1][:] = self.reshape_tensor(
-                    self.raw_data[self.seq[self.index:next_index]])
-                self.rest = self.arr_map.pop(min_key)
-                self.arr_map[self.max_key] = self.queue_size
-            self.index = next_index
-        return res
+        batchind = self.all_batch_indices[batchind]
+        index = batchind * self.batch_size
+        res = self.raw_data[index:index+self.batch_size]
+        if res.shape[0] != self.batch_size:
+            self.rest_arr[:] = res
+            return self.rest_arr
+        else:
+            self.arr[:] = res
+            return self.arr
 
     def get_arr(self):
         # step forward in this function
         res = self._get_arr(self.batch_index)
         self.last_batch_size = res.shape[0]
-        self.batch_index = (self.batch_index + 1) % self.samples_num
+        self.batch_index = (self.batch_index + 1) % self.batch_num
         return res
 
     def get_next_arr(self):
         res = self._get_arr(self.batch_index)
+        self.last_batch_size = res.shape[0]
         return res
 
     def set_dp_rank(self, dp_rank, dp_nrank):
@@ -137,8 +237,14 @@ class Dataloader(object):
 
     def reshape_tensor(self, tensor):
         if self.slices is None:
-            return tensor
-        return tensor[self.slices]
+            return self.batch_func(tensor)
+        return self.batch_func(tensor[self.slices])
+
+    def get_batch_num(self, samples_num=None):
+        if samples_num is None:
+            samples_num = len(self.raw_data)
+        return int(np.ceil(samples_num / self.batch_size)) \
+            if not self.drop_last else samples_num // self.batch_size
 
     def get_cur_shape(self):
         return tuple(self.arrs[self.arr_map[self.batch_index]].shape)
@@ -168,9 +274,6 @@ class GNNDataLoaderOp(Op):
     def get_next_arr(self, name):
         return self.handler(self.nxt_graph)
 
-    def get_cur_shape(self, name):
-        return self.handler(self.graph).shape
-
     def gradient(self, output_grad):
         return None
 
@@ -184,19 +287,27 @@ class GNNDataLoaderOp(Op):
 
 
 class DataloaderOp(Op):
-    def __init__(self, dataloaders):
+    def __init__(self, dataloaders, dtype=np.float32):
         super().__init__(DataloaderOp, [], ndarray.cpu(0))
         self.on_gpu = False
         self.on_cpu = True
-        self.dataloaders = {
-            dl.name: dl for dl in dataloaders
-        }
+        self.dataloaders = {}
+        for dl in dataloaders:
+            if isinstance(dl.name, tuple):
+                self.dataloaders.update({name: dl for name in dl.name})
+            else:
+                self.dataloaders[dl.name] = dl
+            assert dl.dtype == dtype
         self.name = "DataloaderOp%d(%s)" % (
             self.id, '_'.join(self.dataloaders.keys()))
+        self.dtype = dtype
 
     @ property
     def desc(self):
         return self.name
+
+    def set_batch_index(self, name, offset):
+        self.dataloaders[name].set_batch_index(offset)
 
     def set_dp_rank(self, dp_rank, dp_nrank):
         for dataloader in self.dataloaders.values():
@@ -207,16 +318,16 @@ class DataloaderOp(Op):
             dataloader.set_mp_parts(cur_part, parts)
 
     def get_batch_num(self, name):
-        return self.dataloaders[name].batch_num
+        if self.dataloaders[name].batch_num is None:
+            return self.dataloaders[name].get_batch_num()
+        else:
+            return self.dataloaders[name].batch_num
 
     def get_arr(self, name):
         return self.dataloaders[name].get_arr()
 
     def get_next_arr(self, name):
         return self.dataloaders[name].get_next_arr()
-
-    def get_cur_shape(self, name):
-        return self.dataloaders[name].get_cur_shape()
 
     def gradient(self, output_grad):
         return None
@@ -233,14 +344,22 @@ class DataloaderOp(Op):
             min_dp_nrank = config.min_dp_nrank
         else:
             min_dp_nrank = None
+        if not hasattr(config, 'dataloader_states'):
+            config.dataloader_states = {}
         for d in self.dataloaders.values():
             if min_dp_nrank is not None:
                 # now we enforce stages with dataloaders to have the minimum data parallel degree
                 assert d.dp_nrank == min_dp_nrank
             d.init_states()
+            if d.name not in config.dataloader_states:
+                config.dataloader_states[d.name] = BatchIndices(
+                    d.batch_num, need_shuffle=d.shuffle)
+            else:
+                config.dataloader_states[d.name].assert_attr(d)
+            d.all_batch_indices = config.dataloader_states[d.name]
 
 
-def dataloader_op(dataloaders):
+def dataloader_op(dataloaders, dtype=np.float32):
     '''
     dataloaders: list of dataloaders
     '''
@@ -249,9 +368,9 @@ def dataloader_op(dataloaders):
         if isinstance(dl, Dataloader):
             temp_dataloaders.append(dl)
         elif isinstance(dl, list):
-            temp_dataloaders.append(Dataloader(*dl))
+            temp_dataloaders.append(Dataloader(*dl, dtype=dtype))
         elif isinstance(dl, dict):
-            temp_dataloaders.append(Dataloader(**dl))
+            temp_dataloaders.append(Dataloader(**dl, dtype=dtype))
         else:
             assert False, 'Dataloader parameter invalid.'
-    return DataloaderOp(temp_dataloaders)
+    return DataloaderOp(temp_dataloaders, dtype)

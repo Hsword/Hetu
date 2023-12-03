@@ -28,7 +28,9 @@ class SubExecutor4Pipe(SubExecutor):
 
     def get_partitions(self, reserve_opt=True):
         # naive partition
+        layer_indices = self.config.layer_indices
         opt = None
+        loss_node = self.config.graph_status.opt.optimizer.loss
         partitions = []
         cur_part = []
         prev_node = None
@@ -43,9 +45,11 @@ class SubExecutor4Pipe(SubExecutor):
             else:
                 if node is loss_node or \
                     (isinstance(prev_node, PipelineReceiveOp)
-                        and (isinstance(node, PipelineSendOp) or node in self.config.all_forward_nodes)) or \
+                        and (isinstance(node, PipelineSendOp) or node in self.config.all_forward_nodes)
+                        and layer_indices[node] != layer_indices[prev_node]) or \
                     (isinstance(prev_node, BroadcastCommunicateOp)
-                        and isinstance(node, ReduceCommunicateOp)):
+                        and isinstance(node, ReduceCommunicateOp)
+                        and layer_indices[node] != layer_indices[prev_node]):
                     partitions.append(cur_part[::-1])
                     cur_part = []
                 cur_part.append(node)

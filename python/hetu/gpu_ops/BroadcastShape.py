@@ -96,8 +96,8 @@ class BroadcastShapeOp(Op):
                 in_dims = [1 for _ in range(diff)] + input_shape
 
             self.out_strides = ndarray.array(
-                out_strides, self.ctx, data_type=np.int32)
-            self.in_dims = ndarray.array(in_dims, self.ctx, data_type=np.int32)
+                out_strides, self.ctx, dtype=np.int32)
+            self.in_dims = ndarray.array(in_dims, self.ctx, dtype=np.int32)
         return tuple(output_shape)
 
     def naive_infer_shape(self, input_shapes):
@@ -139,6 +139,52 @@ class BroadcastShapeOp(Op):
 
     def backward_hook(self, config):
         self.inplace = config.enable_lazy and self not in config.eval_node_list
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if deduce_order:
+            if self.ori_status is not None:
+                status.copy_order_from(self.ori_status)
+            else:
+                # only support data parallel
+                order = input_statuses[0].order
+                if order is not None:
+                    input_statuses[0].check_state(1, deduce_order)
+                    status.set_order(order)
+        else:
+            if self.ori_status is not None:
+                status.copy_state_from(self.ori_status)
+            else:
+                # only support data parallel
+                state, duplicate = input_statuses[0].get()
+                if state is not None:
+                    input_statuses[0].check_state(1, deduce_order)
+                status.set_state(state, duplicate)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if self.grad_node is not None and not self.grad_set:
+            self.grad_node.ori_status = input_statuses[0]
+            self.grad_node.tar_status = status
+            self.grad_set = True
+        if deduce_order:
+            if self.tar_status is not None:
+                input_statuses[0].copy_order_from(self.tar_status)
+            else:
+                # only support data parallel
+                order = status.order
+                if order is not None:
+                    status.check_state(1, deduce_order)
+                    input_statuses[0].set_order(order)
+        else:
+            if self.tar_status is not None:
+                input_statuses[0].copy_state_from(self.tar_status)
+            else:
+                # only support data parallel
+                state, duplicate = status.get()
+                if state is not None:
+                    status.check_state(1, deduce_order)
+                input_statuses[0].set_state(state, duplicate)
 
     def reset_status(self):
         self.grad_set = False

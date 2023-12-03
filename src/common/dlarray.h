@@ -14,6 +14,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "dispatch.h"
 
 HETUSYS_EXTERN_C {
     /*!
@@ -52,6 +53,10 @@ HETUSYS_EXTERN_C {
         int64_t *shape;
         /*! \brief The stride of the tensor */
         int64_t *stride;
+        /*! \brief The bytes number of each value */
+        int nbits = 32;
+        /*! \brief The datatype of the tensor */
+        DataType dtype = DataType::FLOAT32;
     } DLArray;
 
     typedef struct {

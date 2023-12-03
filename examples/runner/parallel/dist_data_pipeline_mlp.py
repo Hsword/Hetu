@@ -33,19 +33,19 @@ if __name__ == "__main__":
     valid_set_x, valid_set_y = datasets[1]
     test_set_x, test_set_y = datasets[2]
 
-    with ht.context([ht.rgpu('daim117', 0), ht.rgpu('daim117', 1)]):
+    with ht.context([ht.rgpu('node1', 0), ht.rgpu('node1', 1)]):
         x = ht.Variable(name="dataloader_x", trainable=False)
         activation = fc(x, (784, 1024), 'mlp_fc0', with_relu=True)
 
-    with ht.context([ht.rgpu('daim117', 2), ht.rgpu('daim117', 3)]):
+    with ht.context([ht.rgpu('node1', 2), ht.rgpu('node1', 3)]):
         activation = fc(activation, (1024, 1024), 'mlp_fc1', with_relu=True)
         activation = fc(activation, (1024, 1024), 'mlp_fc11', with_relu=True)
 
-    with ht.context([ht.rgpu('daim118', 0), ht.rgpu('daim118', 1)]):
+    with ht.context([ht.rgpu('node2', 0), ht.rgpu('node2', 1)]):
         activation = fc(activation, (1024, 1024), 'mlp_fc2', with_relu=True)
         activation = fc(activation, (1024, 1024), 'mlp_fc22', with_relu=True)
 
-    with ht.context([ht.rgpu('daim118', 2), ht.rgpu('daim118', 3)]):
+    with ht.context([ht.rgpu('node2', 2), ht.rgpu('node2', 3)]):
         y_pred = fc(activation, (1024, 10), 'mlp_fc3', with_relu=True)
         y_ = ht.Variable(name="dataloader_y", trainable=False)
         loss = ht.softmaxcrossentropy_op(y_pred, y_)
@@ -64,5 +64,5 @@ if __name__ == "__main__":
         end = start + args.batch_size
         loss_val, _ = executor.run(feed_dict={
                                    x: train_set_x[start:end], y_: train_set_y[start:end]}, convert_to_numpy_ret_vals=True)
-        if executor.local_rank in print_ranks and hostname == 'daim118':
+        if executor.local_rank in print_ranks and hostname == 'node2':
             print('[step {}]: loss: {}'.format(step, loss_val[0]))

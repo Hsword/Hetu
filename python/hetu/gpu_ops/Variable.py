@@ -26,9 +26,13 @@ class PlaceholderOp(Op):
             trainable = False
         elif value is not None:
             assert initializer is None, 'Value already specified, initializer should be None.'
-            assert isinstance(value, (np.ndarray, ndarray.NDArray)),\
+            assert isinstance(value, (np.ndarray, ndarray.NDArray, ndarray.ND_Sparse_Array)),\
                 'Value data type %s not valid.' % str(type(value))
             self.shape = value.shape
+            if isinstance(value, (np.ndarray, ndarray.NDArray)):
+                assert value.dtype == dtype
+            else:
+                assert dtype == np.float32
         else:
             assert initializer is not None, 'Value not specified, initializer should not be None.'
             self.shape = initializer.shape
@@ -63,17 +67,23 @@ class PlaceholderOp(Op):
                 self.event = stream.PSEvent(config.ps_comm, self.id)
         else:
             if self.initializer:
-                self.initializer(self, config.seed,
-                                 config.np_rand, config.comp_stream)
+                if self.is_embed:
+                    # save initializer and seed for possible further use
+                    self.used_initializer = self.initializer
+                    from ..random import get_seed_status
+                    self.init_seed = get_seed_status()
+                self.initializer(self, config.comp_stream)
                 self.initializer = None
             elif self.tensor_value is not None:
                 value = self.tensor_value
-                assert isinstance(value, (np.ndarray, ndarray.NDArray)), \
+                assert isinstance(value, (np.ndarray, ndarray.NDArray, ndarray.ND_Sparse_Array)), \
                     'Parameters should be initialized as numpy.ndarray or ndarray.NDArray .'
                 if isinstance(value, np.ndarray):
-                    value = ndarray.array(value, self.ctx)
+                    value = ndarray.array(value, self.ctx, dtype=self.dtype)
                 elif value.ctx != self.ctx:
-                    new_value = ndarray.empty(value.shape, self.ctx)
+                    assert not isinstance(value, ndarray.ND_Sparse_Array)
+                    new_value = ndarray.empty(
+                        value.shape, self.ctx, dtype=self.dtype)
                     value.copyto(new_value)
                     value = new_value
                 self.tensor_value = value

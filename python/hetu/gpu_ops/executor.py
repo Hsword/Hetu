@@ -1,6 +1,7 @@
 from __future__ import absolute_import, annotations
 from .BatchNorm import Batch_NormalizationOp, Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp
 from .LayerNorm import Layer_NormalizationOp, Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp
+from .MultiplyConst import MulByConstOp
 import numpy as np
 from scipy.sparse import spmatrix, coo_matrix
 from .. import ndarray
@@ -17,13 +18,16 @@ from .BroadcastCommunicate import BroadcastCommunicateOp
 from .AllToAll import AllToAllOp
 from .ParameterServerCommunicate import ParameterServerCommunicateOp, ParameterServerSparsePullOp, parameterServerSparsePull_op
 from .Sum import sum_op, SumOp, SparseSumOp
+from .SumSparseGradient import sum_sparse_gradient_op
+from .StopGradient import StopGradientOp
 from .DataTransfer import DataH2DOp, DataD2HOp, DataD2HSparseOp, DataH2DSparseOp
 from ..communicator.mpi_nccl_comm import ncclDataType_t, GroupStart, GroupEnd
 from .EmbeddingLookUp import EmbeddingLookUp, EmbeddingLookUp_Gradient
+from .Unique import UniqueIndicesOffsetsOp
 from ..optimizer import OptimizerOp
 from . import OnesLike
 from ..stream import create_stream_handle, Event
-from ..context import get_current_context, get_launch_config_by_traverse_nodes, assign_context_by_traverse_nodes, DeviceGroup
+from ..context import get_current_context, get_launch_config_by_traverse_nodes, DeviceGroup, GraphStatus
 from ..memory_pool import HetuMemoryPool
 from .PipelineSend import PipelineSendOp
 from .PipelineReceive import PipelineReceiveOp
@@ -36,6 +40,7 @@ import ctypes
 import os
 from time import time
 import pickle
+import warnings
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -138,7 +143,6 @@ class HetuConfig(object):
         'val_name',
         'context',
         'seed',
-        'np_rand',
         'comm_mode',
         'node_strategy',
         'context_launch',
@@ -157,6 +161,7 @@ class HetuConfig(object):
         'ps_map',
         'infer_ps_map',
         'dataloader_ops',
+        'dataloader_states',
         'use_sparse_pull',
         'cstable_policy',
         'inference',
@@ -165,16 +170,21 @@ class HetuConfig(object):
         'prefetch',
         'cache_bound',
         'log_path',
+        'logger',
         'my_eval_nodes',
         'placeholder_to_arr_map',
         'pipeline',
+        'all_forward_nodes',
         'pp_rank',
         'pp_nrank',
         'dp_rank',
         'dp_nrank',
         'min_dp_nrank',
+        'lcm_dp_nrank',
         'use_preduce',
+        'layer_indices',
         'dist_strategy',
+        'graph_status',
         'memory_pool',
         'overlap',
         'use_nccl_collectives',
@@ -195,6 +205,10 @@ class HetuConfig(object):
         enable_lazy: bool = False,
         cache_bound: int = 100,
         log_path: Optional[str] = None,
+        logger: Optional[str] = None,
+        project: Optional[str] = None,
+        run_name: Optional[str] = None,
+        run_id: Optional[str] = None,
         pipeline: Optional[str] = None,
         dist_strategy: Optional[Strategy] = None,
         use_preduce: bool = False,
@@ -221,19 +235,32 @@ class HetuConfig(object):
 
         # check context
         self.dist_strategy = dist_strategy
+        self.graph_status = GraphStatus(eval_node_list)
+        if self.pipeline is not None:
+            self.graph_status.extend_oplayers()
+            self.all_forward_nodes = set(find_topo_sort(
+                self.graph_status.forward_node_list))
+            self.graph_status.shrink_oplayers()
         self.memory_pool = HetuMemoryPool()
 
         if self.dist_strategy is None:
             if ctx is None:
                 ctx = get_current_context()
             context_launch = isinstance(ctx, DeviceGroup)
+            if context_launch:
+                self.graph_status.parse_graph_with_dispatch()
         else:
             self.dist_strategy.use_nccl_collectives = self.use_nccl_collectives
             self.dist_strategy.set_overlap(self.overlap)
-            ctx = self.dist_strategy.set_raw_ctxs_n_states(
-                self.eval_node_list, self.memory_pool)
+            if self.dist_strategy.use_dispatch:
+                ctx = self.dist_strategy.set_raw_ctxs(self.graph_status)
+                self.graph_status.parse_graph_with_dispatch()
+            else:
+                ctx = self.dist_strategy.set_raw_ctxs_n_states(
+                    self.graph_status, self.memory_pool)
             context_launch = isinstance(ctx, DeviceGroup)
         assert ctx, 'Default context should be determined.'
+        self.graph_status.extend_oplayers()
 
         self.comm_mode = comm_mode
         self.node_strategy = {}
@@ -242,10 +269,8 @@ class HetuConfig(object):
 
         if context_launch:
             # with context usage
-            launchMPI, launchPS, self.node_strategy, devices, min_worker_num = get_launch_config_by_traverse_nodes(
-                eval_node_list, ctx)
-            gpu_devices = sorted(
-                [dev.device_id for dev in devices if ndarray.is_gpu_ctx(dev)])
+            launchMPI, launchPS, self.node_strategy, devices, min_worker_num, lcm_worker_num = get_launch_config_by_traverse_nodes(
+                eval_node_list, ctx, pipeline)
             local_gpu_devices = sorted(
                 [dev.device_id for dev in devices if dev.local and ndarray.is_gpu_ctx(dev)])
             if not launchMPI and not launchPS:
@@ -257,11 +282,12 @@ class HetuConfig(object):
             else:
                 self.comm_mode = 'Hybrid'
             # in pipeline or model parallel we have to initialize another p2p stream
-            init_p2p_stream = len(gpu_devices) != ctx.worker_num
+            init_p2p_stream = len(devices) != ctx.worker_num
 
         # variables initialization
-        self.seed = seed if seed is not None else np.int64(time())
-        self.np_rand = np.random.RandomState(self.seed)
+        seed = seed if seed is not None else np.int64(time())
+        from ..random import set_random_seed, get_seed
+        set_random_seed(seed)
 
         # get attribute of communication mode
         self.ps_comm = None
@@ -277,7 +303,7 @@ class HetuConfig(object):
             ps_nrank = int(
                 os.environ['DMLC_NUM_WORKER']) if 'DMLC_NUM_WORKER' in os.environ else 1
             topo_sort_register_ps(
-                eval_node_list, self.ps_comm, self.comm_mode, self.seed, cstable_policy)
+                eval_node_list, self.ps_comm, self.comm_mode, get_seed(), cstable_policy)
         if self.comm_mode == "Hybrid" or self.comm_mode == "AllReduce":
             self.nccl_comm = wrapped_mpi_nccl_init(devices=local_gpu_devices)
         elif context_launch:
@@ -306,17 +332,33 @@ class HetuConfig(object):
 
         self.my_eval_nodes = eval_node_list
         self.p2p_stream = None
+        self.layer_indices = None
         if context_launch:
             # comm_mode is None <=> only 1 model parallel instance
             self.context = ndarray.gpu(device_id)
             if self.pipeline is not None:
-                self.pp_rank, self.pp_nrank, self.dp_rank, self.dp_nrank = get_pipeline_stage_info(
-                    eval_node_list, self.context)
+                from ..distributed_strategies import PipeOptSearching
+                if isinstance(dist_strategy, PipeOptSearching):
+                    self.pp_rank = self.rank * dist_strategy.num_parts // self.nrank
+                    self.pp_nrank = dist_strategy.num_parts
+                    self.dp_rank = 0
+                    self.dp_nrank = 0
+                else:
+                    self.pp_rank, self.pp_nrank, self.dp_rank, self.dp_nrank = get_pipeline_stage_info(
+                        eval_node_list, self.context)
                 self.min_dp_nrank = min_worker_num
+                self.lcm_dp_nrank = lcm_worker_num
             self.p2p_stream = create_stream_handle(
                 self.context) if init_p2p_stream else None
-            assign_context_by_traverse_nodes(
-                self.eval_node_list, self.context)
+            self.my_eval_nodes, self.param_allreduce_group, self.layer_indices = self.graph_status.assign_context_by_traverse_nodes(
+                self.context, self.nccl_comm, self.use_nccl_collectives)
+            for param in self.param_allreduce_group:
+                self.node_strategy[param] = 'AllReduce'
+            if self.param_allreduce_group != {}:
+                if self.comm_mode is None:
+                    self.comm_mode = 'AllReduce'
+                if self.comm_mode == 'PS':
+                    self.comm_mode = 'Hybrid'
         else:
             self.context = ctx
 
@@ -357,9 +399,32 @@ class HetuConfig(object):
             assert os.path.isdir(
                 log_path), 'Need to specify a work directory to save logs.'
             self.ps_comm.startRecord(ctypes.c_char_p(bytes(log_path, 'utf-8')))
+        if logger is not None:
+            assert project is not None and run_name is not None
+            if logger == 'wandb':
+                from ..logger import WandbLogger
+                self.logger = WandbLogger(
+                    project, run_name, run_id, self.rank, self.nrank, self.context, self.nccl_comm, self.nccl_stream)
+            elif logger == 'hetu':
+                from ..logger import HetuLogger
+                self.logger = HetuLogger(
+                    self.rank, self.nrank, self.context, self.nccl_comm, self.nccl_stream)
+            else:
+                raise ValueError
+        else:
+            self.logger = None
 
         self.placeholder_to_arr_map = dict()
         topo_sort_with_hook(self.my_eval_nodes, self)
+
+
+def flatten(container):
+    for i in container:
+        if isinstance(i, (list, tuple)):
+            for j in flatten(i):
+                yield j
+        else:
+            yield i
 
 
 class Executor(object):
@@ -379,6 +444,8 @@ class Executor(object):
         """
         if not isinstance(eval_node_dict, dict):
             eval_node_dict = {'default': eval_node_dict}
+        eval_node_dict = {k: list(flatten(v))
+                          for k, v in eval_node_dict.items()}
         train_name, val_name = None, None
         for k, v in eval_node_dict.items():
             if any([isinstance(node, OptimizerOp) for node in v]):
@@ -399,6 +466,7 @@ class Executor(object):
 
         self.eval_node_dict: Dict[str: OP_LIST] = eval_node_dict
         self.config = config
+        self.logger = self.config.logger
 
         def get_sub_executor(k: str) -> Type[SubExecutor]:
             if timing:
@@ -419,7 +487,8 @@ class Executor(object):
         # with open('topo{}.txt'.format(self.config.rank), 'w') as fw:
         #     for node in self.topo_order:
         #         if isinstance(node, (PipelineSendOp, PipelineReceiveOp)):
-        #             print(node, node.inputs, node.const_attr, file=fw, flush=True)
+        #             print(node, node.inputs, node.const_attr,
+        #                   file=fw, flush=True)
         #         else:
         #             print(node, node.inputs, file=fw, flush=True)
         self.param_nodes = [node for node in self.topo_order if isinstance(
@@ -439,15 +508,33 @@ class Executor(object):
         self.subexecutor[name].profile(
             feed_shapes, log_file, profiler=profiler)
 
+    def set_config(self, attrs):
+        self.logger.set_config(attrs)
+
+    def log(self, name, value):
+        self.logger.wrapped_log(name, value)
+
+    def multi_log(self, results):
+        for k, v in results.items():
+            self.log(k, v)
+
+    def step_logger(self):
+        self.logger.step()
+
     def run(
         self,
         name: str = 'default',
         eval_node_list: OP_LIST = [],
         feed_dict: Dict[Op, FEEDINS] = {},
         convert_to_numpy_ret_vals: bool = False,
+        inference: Optional[bool] = None,
         **kwargs
     ) -> List[Union[None, np.ndarray, NDArray]]:
-        return self.subexecutor[name].run(eval_node_list, feed_dict, convert_to_numpy_ret_vals, **kwargs)
+        return self.subexecutor[name].run(eval_node_list, feed_dict, convert_to_numpy_ret_vals, inference=inference, **kwargs)
+
+    @property
+    def ctx(self) -> DLContext:
+        return self.config.context
 
     @property
     def batch_num(self) -> int:
@@ -458,18 +545,44 @@ class Executor(object):
     def get_batch_num(self, name: str = 'default') -> int:
         return self.subexecutor[name].batch_num
 
-    def save(self, file_path: str, file_name: str) -> None:
+    def sync_all_streams(self):
+        if self.config.comp_stream is not None:
+            self.config.comp_stream.sync()
+        if self.config.h2d_stream is not None:
+            self.config.h2d_stream.sync()
+        if self.config.d2h_stream is not None:
+            self.config.d2h_stream.sync()
+        if self.config.nccl_stream is not None:
+            self.config.nccl_stream.sync()
+
+    def state_dict(self):
+        state_dict = {}
+        for node, value in self.config.placeholder_to_arr_map.items():
+            if value is not None:
+                state_dict[node.name] = value.asnumpy()
+            else:
+                # feed node
+                assert node.shape is None
+        return state_dict
+
+    def save(self, file_path: str, file_name: str, others: Optional[dict] = None) -> None:
+        if others is None:
+            others = {}
+        else:
+            assert 'state_dict' not in others
+
+        self.sync_all_streams()
         assert os.path.isdir(
             file_path), 'Need to specify a work directory to save parameters.'
-        state_dic = {}
+        assert others is None or 'state_dict' not in others
         if self.comm_mode in (None, 'AllReduce'):
             # when using allreduce, users need to specify the worker whose rank equals 0 to save
-            for node in self.param_nodes:
-                state_dic[node.name] = self.config.placeholder_to_arr_map[node].asnumpy()
+            state_dict = self.state_dict()
         else:
+            state_dict = {}
             self.ps_comm.BarrierWorker()
             if self.config.rank == 0:
-                for node in self.param_nodes:
+                for node, value in self.config.placeholder_to_arr_map.items():
                     if node.is_embed or self.comm_mode == 'PS':
                         node.event.sync()
                         nodeid = ctypes.c_int(node.id)
@@ -477,12 +590,14 @@ class Executor(object):
                             nodeid, ctypes.c_char_p(bytes(file_path, 'utf-8')))
                         self.ps_comm.Wait(nodeid)
                     else:
-                        state_dic[node.name] = \
-                            self.config.placeholder_to_arr_map[node].asnumpy()
+                        state_dict[node.name] = value.asnumpy()
             self.ps_comm.BarrierWorker()
 
+        others['state_dict'] = state_dict
+        from ..random import get_seed_status
+        others['seed'] = get_seed_status()
         with open(os.path.join(file_path, file_name), "wb") as writer:
-            pickle.dump(state_dic, writer)
+            pickle.dump(others, writer, protocol=4)
 
     def load(self, file_path: str, file_name: str, consider_splits: bool = False) -> None:
         assert os.path.isdir(
@@ -490,7 +605,16 @@ class Executor(object):
 
         with open(os.path.join(file_path, file_name), 'rb') as reader:
             state_dict = pickle.load(reader)
-        self.load_dict(state_dict, file_path, consider_splits)
+        variables = state_dict['state_dict']
+        seeds = state_dict['seed']
+        self.load_seeds(seeds)
+        self.load_dict(variables, file_path, consider_splits)
+
+    def load_seeds(self, seeds):
+        from ..random import set_random_seed, reset_seed_seqnum, step_seqnum
+        set_random_seed(seeds[0])
+        reset_seed_seqnum()
+        step_seqnum(seeds[1])
 
     def load_dict(
         self,
@@ -498,8 +622,9 @@ class Executor(object):
         file_path: str = None,
         consider_splits: bool = False
     ) -> None:
+        self.sync_all_streams()
         if self.comm_mode in (None, 'AllReduce'):
-            for node in self.param_nodes:
+            for node in self.config.placeholder_to_arr_map:
                 if node.name in state_dict:
                     value = state_dict[node.name]
                     if consider_splits and node.reshaped:
@@ -509,11 +634,15 @@ class Executor(object):
                     assert pre_shape == cur_shape, 'Shape not conform! Got {} and {} for {}.'.format(
                         pre_shape, cur_shape, node.name)
                     self.config.placeholder_to_arr_map[node][:] = value
+                # else:
+                #     print(list(state_dict.keys()))
+                #     print(node.name)
+                #     assert False
         else:
             assert file_path is not None
             self.ps_comm.BarrierWorker()
             if self.config.rank == 0:
-                for node in self.param_nodes:
+                for node in self.config.placeholder_to_arr_map:
                     if node.is_embed or self.comm_mode == 'PS':
                         node.event.sync()
                         nodeid = ctypes.c_int(node.id)
@@ -540,10 +669,47 @@ class Executor(object):
                     node.event.update()
             self.ps_comm.BarrierWorker()
 
+    def set_dataloader_batch_index(self, name, index):
+        self.subexecutor[name].set_dataloader_batch_index(index)
+
     def recordLoads(self) -> None:
         for node in self.config.ps_map:
             node.event.sync()
         self.ps_comm.getLoads()
+
+    def reduceMean(self, arr: np.ndarray, root: int = 0) -> np.ndarray:
+        # only used for loss and accuracy, etc.
+        # the communicator is formed by the context of loss
+        if 'loss' in self.config.param_allreduce_group:
+            comm = self.config.param_allreduce_group['loss']
+            if comm.local_rank == -1:
+                # in case local context is not in communicator
+                return arr
+            local_array = ndarray.array(arr, ndarray.cpu())
+            comm.dlarrayNcclReduce(local_array, local_array, root)
+            comm.stream.sync()
+            return local_array.asnumpy() / comm.nrank
+        else:
+            return arr
+
+    def gatherPredict(self, arr: np.ndarray) -> np.ndarray:
+        # only used for predicted y.
+        # the communicator is formed by the context of loss
+        if 'loss' in self.config.param_allreduce_group:
+            comm = self.config.param_allreduce_group['loss']
+            if comm.local_rank == -1:
+                # in case local context is not in communicator
+                return arr
+            new_shape = list(arr.shape)
+            new_shape[0] *= comm.nrank
+            local_array = ndarray.array(arr, ndarray.cpu())
+            global_array = ndarray.empty(tuple(new_shape), ndarray.cpu())
+            comm.dlarrayAllGather(
+                local_array, global_array, ncclDataType_t.ncclFloat32)
+            comm.stream.sync()
+            return global_array.asnumpy()
+        else:
+            return arr
 
     def logOut(self, *args, name:  str = 'default', **kargs) -> None:
         self.subexecutor[name].logOut(*args, **kargs)
@@ -551,15 +717,12 @@ class Executor(object):
     def clearTimer(self, name: str = 'default') -> None:
         self.subexecutor[name].clearTimer()
 
+    def return_tensor_values(self) -> None:
+        for k, v in self.config.placeholder_to_arr_map.items():
+            k.tensor_value = v
+
     def __del__(self) -> None:
-        if self.config.comp_stream is not None:
-            self.config.comp_stream.sync()
-        if self.config.h2d_stream is not None:
-            self.config.h2d_stream.sync()
-        if self.config.d2h_stream is not None:
-            self.config.d2h_stream.sync()
-        if self.config.nccl_stream is not None:
-            self.config.nccl_stream.sync()
+        self.sync_all_streams()
         for node in self.param_nodes:
             if node.event:
                 node.event.sync()
@@ -612,6 +775,8 @@ class SubExecutor(object):
             else:
                 self.topo_order = find_topo_sort(self.eval_node_list)
 
+        self.topo_order = reorder_for_group(
+            self.topo_order, self.config.layer_indices)
         # self.logNodes(self.topo_order, 'real_graph{}.txt')
 
         # main structures, nodes' shapes and arrays
@@ -639,7 +804,9 @@ class SubExecutor(object):
         self.computing_nodes: OP_LIST = []
 
         ln_bn_grad_nodes = (Batch_Normalization_Gradient_of_DataOp, Batch_Normalization_Gradient_of_ScaleOp, Batch_Normalization_Gradient_of_BiasOp,
-                            Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp)
+                            Layer_Normalization_Gradient_of_DataOp, Layer_Normalization_Gradient_of_ScaleOp, Layer_Normalization_Gradient_of_BiasOp,
+                            UniqueIndicesOffsetsOp,)
+        no_compute_nodes = ln_bn_grad_nodes + (StopGradientOp,)
 
         for node in self.topo_order:
             if isinstance(node, (DataloaderOp, GNNDataLoaderOp)):
@@ -649,7 +816,7 @@ class SubExecutor(object):
                     self.need_feed_nodes.append(node)
                 elif node.trainable:
                     self.param_nodes.append(node)
-            elif not ((self.use_sparse_pull or self.cstable_policy) and isinstance(node, EmbeddingLookUp) and self.config.prefetch) and not isinstance(node, ln_bn_grad_nodes):
+            elif not ((self.use_sparse_pull or self.cstable_policy) and isinstance(node, EmbeddingLookUp) and self.config.prefetch) and not isinstance(node, no_compute_nodes):
                 self.computing_nodes.append(node)
         self._batch_num = None
         self.init_need_allocation = (self.need_feed_nodes == []) and (
@@ -682,6 +849,10 @@ class SubExecutor(object):
                 batch_num) == 0 else batch_num.pop()
             self._batch_num = batch_num
         return self._batch_num
+
+    def set_dataloader_batch_index(self, index):
+        for op in self.dataloader_nodes:
+            op.set_batch_index(self.name, index)
 
     def profile(
         self,
@@ -843,9 +1014,13 @@ class SubExecutor(object):
         cur_ind = -1
         for node in self.topo_order:
             if isinstance(node, EmbeddingLookUp_Gradient):
-                self.indexed_slices_shape[node] = (
-                    self.node_to_shape_map[node.inputs[1]], self.node_to_shape_map[node.inputs[0]])
-            elif isinstance(node, (SparseSumOp, DataH2DSparseOp, DataD2HSparseOp, PipelineSendOp)) and node.use_indexed_slices:
+                if len(node.inputs) == 2:
+                    self.indexed_slices_shape[node] = (
+                        self.node_to_shape_map[node.inputs[1]], self.node_to_shape_map[node.inputs[0]])
+                else:
+                    self.indexed_slices_shape[node] = (
+                        node.index.shape, self.node_to_shape_map[node.inputs[0]])
+            elif isinstance(node, (DataD2HSparseOp, PipelineSendOp)) and node.use_indexed_slices:
                 self.indexed_slices_shape[node] = self.indexed_slices_shape[node.inputs[0]]
             elif isinstance(node, AllReduceCommunicateOp) and node.use_indexed_slices:
                 ind_shape, val_shape = self.indexed_slices_shape[node.inputs[0]]
@@ -883,13 +1058,19 @@ class SubExecutor(object):
         local_shape = tuple(value.shape)
         local_realloc = local_shape != self.node_to_shape_map.get(
             node, None)
+        value_dtype = ndarray.convert_dtype(value.dtype)
+        if node.dtype != value_dtype:
+            message = 'Node dtype (original {}) will be set by value dtype {}.'.format(
+                node.dtype.__name__.upper(), value_dtype.__name__.upper())
+            warnings.warn(message)
+            node.dtype = value_dtype
         if node.on_cpu:
             assert isinstance(value, (np.ndarray, spmatrix, ndarray.NDArray)), \
                 "feed_dict value type not supported"
             if isinstance(value, np.ndarray):
                 if local_realloc:
                     arr_map[node] = ndarray.empty(
-                        local_shape, ctx=node.ctx)
+                        local_shape, ctx=node.ctx, dtype=node.dtype)
                 arr_map[node][:] = value
             else:
                 arr_map[node] = value
@@ -897,7 +1078,7 @@ class SubExecutor(object):
             if isinstance(value, np.ndarray):
                 if local_realloc:
                     arr_map[node] = ndarray.array(
-                        value, ctx=node.ctx)
+                        value, ctx=node.ctx, dtype=node.dtype)
                 else:
                     arr_map[node][:] = value
             elif isinstance(value, spmatrix):
@@ -912,8 +1093,7 @@ class SubExecutor(object):
                     if local_realloc:
                         arr_map[node] = ndarray.empty(
                             local_shape, ctx=node.ctx)
-                    else:
-                        arr_map[node][:] = value
+                    arr_map[node][:] = value
             elif isinstance(value, ndarray.ND_Sparse_Array):
                 arr_map[node] = value
             else:
@@ -924,7 +1104,9 @@ class SubExecutor(object):
         self,
         eval_node_list: OP_LIST = [],
         feed_dict: Dict[Op, FEEDINS] = {},
-        convert_to_numpy_ret_vals: bool = False
+        convert_to_numpy_ret_vals: bool = False,
+        dataloader_step=True,
+        inference=None,
     ) -> List[Union[None, np.ndarray, NDArray]]:
         """
         Parameters
@@ -957,12 +1139,16 @@ class SubExecutor(object):
 
         # get dataloader values
         for node in self.dataloader_nodes:
-            local_shape = node.get_cur_shape(self.name)
+            if dataloader_step:
+                cur_value = node.get_arr(self.name)
+            else:
+                cur_value = node.get_next_arr(self.name)
+            self.node_to_arr_map[node] = cur_value
+            local_shape = cur_value.shape
+            feed_shapes[node] = local_shape
             local_realloc = local_shape != self.node_to_shape_map.get(
                 node, None)
             need_reallocation = need_reallocation or local_realloc
-            self.node_to_arr_map[node] = node.get_arr(self.name)
-            feed_shapes[node] = local_shape
 
         # in pipedream, we should retrieve the latest model parameter.
         if self.config.pipeline == "pipedream":
@@ -975,7 +1161,7 @@ class SubExecutor(object):
             self.memory_plan()
 
         self.compute(self.computing_nodes,
-                     self.node_to_arr_map)
+                     self.node_to_arr_map, inference=inference)
 
         for n in self.eval_node_list:
             # every node in eval_node_list should have an event (except dataloader/optimizer...)
@@ -1002,7 +1188,7 @@ class SubExecutor(object):
 
         return results
 
-    def compute(self, computing_nodes: OP_LIST, arr_map: ARR_MAP) -> None:
+    def compute(self, computing_nodes: OP_LIST, arr_map: ARR_MAP, inference: Optional[bool] = None) -> None:
         # computing
         grouping_nodes = []
         cur_ind = -1
@@ -1017,6 +1203,8 @@ class SubExecutor(object):
             for node in grouping_nodes:
                 node.event.record(p2p_stream)
             grouping_nodes.clear()
+        if inference is None:
+            inference = self.inference
         for node in computing_nodes:
             if node.on_cpu and isinstance(arr_map[node], ndarray.NDArray):
                 if DNNL_LIB['cpu_ArraySet'] and not isinstance(node, DataD2HOp):
@@ -1046,9 +1234,9 @@ class SubExecutor(object):
                 cur_stream = self.node_type_to_stream_map.get(
                     node_type, self.comp_stream)
 
-                if node_type in (DropoutOp, Batch_NormalizationOp):
+                if node_type in (DropoutOp, Batch_NormalizationOp, MulByConstOp):
                     node.compute(input_vals, node_val, cur_stream,
-                                 inference=self.inference)
+                                 inference=inference)
                 else:
                     node.compute(input_vals, node_val, cur_stream)
 
@@ -1056,6 +1244,12 @@ class SubExecutor(object):
                     # for d2h op / eval nodes / nodes before [allreduce or ps nodes or pipelinesend nodes]
                     # for allreduce op
                     node.event.record(cur_stream)
+                # if cur_stream is not None:
+                #     cur_stream.sync()
+                #     if isinstance(node_val, ndarray.NDArray) and np.any(np.isnan(node_val.asnumpy())):
+                #         print('appear nan!!!', node, node.inputs)
+                #         np.save('problem.npy', input_vals[0].asnumpy())
+                #         exit()
 
         if len(grouping_nodes) > 0:
             make_group()
@@ -1091,6 +1285,7 @@ def gradients(
     from .Division import DivConstOp, DivOp
     from .AddElewise import AddOp
     from .AddConst import AddByConstOp
+    from .MinusElewise import MinusOp
     from .Sum import SumOp
     add_ops = (AddOp, AddByConstOp, SumOp)
     # TODO: add support for Csrmm, MatrixDot, Sigmoid, Sqrt, Where
@@ -1108,7 +1303,7 @@ def gradients(
     forward2backward[None] = insert_grad
     for output, grad in zip(output_node, insert_grad):
         backward2forward[grad] = (output, -1)
-    node_to_output_grads_list = {node: [grad]
+    node_to_output_grads_list = {node: [grad] if grad is not None else []
                                  for node, grad in zip(output_node, insert_grad)}
     node_to_output_grad = {}
     # Traverse forward graph in reverse topological order
@@ -1117,14 +1312,18 @@ def gradients(
         # here the ctx for embedding lookup is a workaround
         # TODO: when implement PS strategy for context semantics, modify here
         if isinstance(node, EmbeddingLookUp):
-            output_grad, is_new = sum_node_list(
-                node_to_output_grads_list[node], node_to_output_grads_list[node][0].raw_ctx, sparse=False)
-        elif isinstance(node, PlaceholderOp) and node.is_embed:
-            output_grad, is_new = sum_node_list(
-                node_to_output_grads_list[node], node.raw_ctx, sparse=True)
+            if len(node_to_output_grads_list[node]) == 0:
+                output_grad, is_new = None, False
+            else:
+                output_grad, is_new = sum_node_list(
+                    node_to_output_grads_list[node], node_to_output_grads_list[node][0].raw_ctx)
         else:
+            if isinstance(node, PlaceholderOp):
+                shape = node.shape
+            else:
+                shape = None
             output_grad, is_new = sum_node_list(
-                node_to_output_grads_list[node], node.raw_ctx, sparse=False)
+                node_to_output_grads_list[node], node.raw_ctx, shape)
         if output_grad is None:
             for n in node.inputs:
                 if n not in node_to_output_grads_list:
@@ -1139,6 +1338,8 @@ def gradients(
             if isinstance(node, add_ops):
                 # these nodes don't generate new nodes
                 forward2backward[node] = []
+            elif isinstance(node, MinusOp):
+                forward2backward[node] = [input_grads_list[1]]
             else:
                 forward2backward[node] = [
                     n for n in input_grads_list if n is not None]
@@ -1175,10 +1376,11 @@ def gradients(
             if node.inputs[i] not in node_to_output_grads_list:
                 node_to_output_grads_list[node.inputs[i]] = []
             # Calculate partial adjoint for input nodes.
-            node_to_output_grads_list[node.inputs[i]].append(
-                input_grads_list[i])
+            if input_grads_list[i] is not None:
+                node_to_output_grads_list[node.inputs[i]].append(
+                    input_grads_list[i])
             cur_key = input_grads_list[i]
-            if cur_key is not None and not isinstance(node, add_ops):
+            if cur_key is not None and not isinstance(node, add_ops) and not (isinstance(node, (MinusOp)) and i == 0):
                 assert cur_key not in backward2forward
                 backward2forward[cur_key] = (node, i)
 
@@ -1390,7 +1592,7 @@ def fetch_dense_parameter_value(node_list: OP_LIST, config: HetuConfig) -> None:
         node.event.update()
 
 
-def sum_node_list(node_list: OP_LIST, ctx: Optional[DeviceGroup], sparse: bool) -> Tuple[Optional[Op], bool, bool]:
+def sum_node_list(node_list: OP_LIST, ctx: Optional[DeviceGroup], shape: Optional[Tuple[int]] = None) -> Tuple[Optional[Op], bool, bool]:
     """Custom sum func to avoid creating redundant nodes in Python sum func."""
     node_list = [n for n in node_list if n is not None]
     if node_list == []:
@@ -1398,4 +1600,49 @@ def sum_node_list(node_list: OP_LIST, ctx: Optional[DeviceGroup], sparse: bool) 
     elif len(node_list) == 1:
         return node_list[0], False
     else:
-        return sum_op(node_list, ctx=ctx, sparse=sparse), True
+        if any([isinstance(n, tuple) for n in node_list]):
+            inputs = []
+            dtype = None
+            for n in node_list:
+                if isinstance(n, tuple):
+                    inputs.append((n[0], n[2]))
+                    assert dtype in (None, n[2].dtype)
+                    dtype = n[2].dtype
+                else:
+                    inputs.append(n)
+                    assert dtype in (None, n.dtype)
+                    dtype = n.dtype
+            return sum_sparse_gradient_op(shape, *inputs, dtype=dtype, ctx=ctx), True
+        else:
+            return sum_op(node_list, ctx=ctx), True
+
+
+def reorder_for_group(topo_order: OP_LIST, layer_indices: Optional[Dict[Op, Union[int, float]]]) -> OP_LIST:
+    if layer_indices is None:
+        return topo_order
+    # here we reorder for 2 reasons:
+    # 1. group consecutive pipeline send/recv ops
+    # 2. reorder pipeline send/recv ops according to grouping indices
+    has_pipeline_ops = set([layer_indices[x] for x in layer_indices if isinstance(
+        x, (PipelineSendOp, PipelineReceiveOp))])
+    if len(has_pipeline_ops) == 0:
+        # if no pipeline send/recv, no reorder; a workaround for PS
+        # TODO: better plan?
+        return topo_order
+    labels = {}
+    for node in topo_order:
+        if isinstance(node, (DataH2DOp, DataD2HOp, DataD2HSparseOp)):
+            layer_indices[node] = layer_indices[node.inputs[0]] + 0.5
+        cur_with_pipeline = layer_indices[node] in has_pipeline_ops
+        if cur_with_pipeline and isinstance(node, SplitOp):
+            labels[node] = 1
+        elif isinstance(node, (PipelineSendOp, PipelineReceiveOp)):
+            labels[node] = 2
+        elif cur_with_pipeline and isinstance(node, (SumOp, ConcatenateOp)):
+            labels[node] = 3
+        else:
+            labels[node] = 0
+
+    topo_order = sorted(topo_order, key=lambda x: 10 *
+                        layer_indices[x] + labels[x])
+    return topo_order
