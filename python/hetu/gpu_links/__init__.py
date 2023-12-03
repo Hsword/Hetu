@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from .AbsLink import *
 from .AddConstLink import *
 from .AddElewiseLink import *
+from .AutoDimLink import *
 from .AddmmLink import *
 from .ArangeLink import *
 from .ArraySetLink import *
@@ -45,6 +46,7 @@ from .RepeatLink import *
 from .RollLink import *
 from .LeakyReluLink import *
 from .ReshapeLink import *
+from .SignLink import *
 from .SinLink import *
 from .SliceAssignLink import *
 from .SliceByMatrixLink import *
@@ -58,21 +60,29 @@ from .MatrixSqrtLink import *
 from .MatrixRsqrtLink import *
 from .MatrixTransLink import *
 from .OppositeLink import *
+from .OptEmbedBinaryStepLink import *
+from .ParamClipLink import *
 from .SigmoidLink import *
+from .SparseSetLink import *
 from .TanhLink import *
 from .SliceLink import *
 from .EmbeddingLookUpLink import *
+from .SparseEmbeddingLookUpLink import *
+from .MinDistLink import *
 from .WhereLink import *
 from .BatchMatrixMultLink import *
 from .LayerNormLink import *
 from .InstanceNorm2dLink import *
 from .BroadcastShapeLink import *
+from .PowerLink import *
 from .ReduceSumLink import *
 from .ReduceMeanLink import *
+from .ReduceMinLink import *
+from .ReduceMulLink import *
+from .ReduceNormLink import *
 from .OptimizerLink import *
 from .IndexedSliceLink import *
 from .DropoutLink import *
-from .Dropout2dLink import *
 from .CudnnSoftmaxLink import *
 from .CudnnSoftmaxCrossEntropyLink import *
 from .CrossEntropyLink import *
@@ -95,11 +105,19 @@ from .ReverseLayoutTransform import *
 from .IndexingLink import *
 from .Scatter1DLink import *
 from .LogLink import *
+from .MaskLink import *
 from .NllLossLink import *
 from .HA2ALayoutTransform import *
 from .SamGroupSumLink import *
 from .GroupTopKIdxLink import *
 from .SamMaxLink import *
+from .CompressedEmbeddingLink import *
+from .TrilLookupLink import *
+from .PruneLink import *
+from .QuantizeLink import *
+from .QuantizeEmbeddingLink import *
+from .AssignWithIndexedSlicesLink import *
+from .UniqueIndicesLink import *
 
 __all__ = [
     'abs_val',
@@ -108,12 +126,17 @@ __all__ = [
     'matrix_elementwise_add',
     'matrix_elementwise_add_simple',
     'matrix_elementwise_add_lazy',
+    'argmax',
+    'argmax_partial',
     'addmm',
     'addmm_gradient',
     'arange',
     'argsort',
-    'argmax',
     'array_set',
+    'reduce_norm2_raw',
+    'all_fro_norm',
+    'all_add_',
+    'div_n_mul_',
     'average_pooling2d',
     'average_pooling2d_gradient',
     'baddbmm',
@@ -177,6 +200,7 @@ __all__ = [
     'leaky_relu',
     'leaky_relu_gradient',
     'array_reshape',
+    'sign_func',
     'sin',
     'cos',
     'slice_assign',
@@ -188,7 +212,11 @@ __all__ = [
     'softmax',
     'matrix_elementwise_divide_const',
     'matrix_elementwise_divide',
+    'matrix_elementwise_divide_handle_zero',
     'matrix_opposite',
+    'binary_step_forward',
+    'binary_step_backward',
+    'param_clip_func',
     'matrix_sqrt',
     'matrix_rsqrt',
     'CuSparse_Csrmv',
@@ -196,6 +224,7 @@ __all__ = [
     'matrix_transpose',
     'matrix_transpose_simple',
     'sigmoid',
+    'sparse_set',
     'tanh',
     'tanh_gradient',
     'matrix_slice',
@@ -203,7 +232,8 @@ __all__ = [
     'matrix_slice_gradient',
     'matrix_slice_gradient_simple',
     'embedding_lookup',
-    'embedding_lookup_gradient',
+    'sparse_embedding_lookup',
+    'minimum_distance_vector',
     'where',
     'where_const',
     'batch_matrix_multiply',
@@ -213,31 +243,51 @@ __all__ = [
     'instance_normalization2d',
     'broadcast_shape',
     'broadcast_shape_simple',
+    'matrix_power',
     'reduce_sum',
     'reduce_mean',
+    'reduce_min',
+    'reduce_mul',
+    'reduce_norm1',
+    'reduce_norm2',
     'dropout',
     'dropout_gradient',
-    'dropout2d',
-    'dropout2d_gradient',
     'CuDNN_softmax',
     'CuDNN_softmax_gradient',
+    'CuDNN_log_softmax',
+    'CuDNN_log_softmax_gradient',
     'CuDNN_softmax_cross_entropy',
     'CuDNN_softmax_cross_entropy_gradient',
     'one_hot',
     'matmul_with_bias',
     'CuDNN_conv2d_with_bias',
+    'tril_lookup',
+    'tril_lookup_gradient',
 
     'normal_init',
     'uniform_init',
     'truncated_normal_init',
+    'reversed_truncated_normal_init',
+    'gumbel_init',
+    'randint_init',
 
+    'sparse_add_to_dense',
     'sgd_update',
     'momentum_update',
     'adagrad_update',
     'adam_update',
     'indexedslice_oneside_add',
+    'reduce_indexedslice',
+    'reduce_indexedslice_get_workspace_size',
+    'reduce_indexedslice_with_embedding',
+    'sgd_update_indexedslices',
+    'adagrad_update_indexedslices',
+    'adam_update_indexedslices',
     'binary_cross_entropy',
+    'binary_cross_entropy_with_logits',
     'binary_cross_entropy_gradient',
+    'binary_cross_entropy_with_logits_gradient',
+    'bool_func',
     'matrix_dot',
     'gelu',
     'gelu_gradient',
@@ -266,6 +316,7 @@ __all__ = [
     'reverse_layout_transform_top2_gradient_data',
     'log_link',
     'log_grad_link',
+    'mask_func',
     'nll_loss_link',
     'nll_loss_grad_link',
     'reverse_layout_transform_no_gate',
@@ -275,5 +326,38 @@ __all__ = [
     'sam_group_sum_link',
     'group_topk_idx',
     'sammax_link',
-    'sammax_grad_link'
+    'sammax_grad_link',
+    'robe_hash',
+    'robe_sign',
+    'mod_hash',
+    'mod_hash_negative',
+    'div_hash',
+    'compo_hash',
+    'learn_hash',
+    'num_less_than',
+    'set_less_than',
+    'set_mask_less_than',
+    'get_larger_than',
+    'num_less_than_tensor_threshold',
+    'multiply_grouping_alpha',
+    'tensor_quantize',
+    'tensor_quantize_signed',
+    'tensor_dequantize',
+    'tensor_dequantize_signed',
+    'embedding_prepack',
+    'quantized_embedding_lookup',
+    'unified_quantized_embedding_lookup',
+    'quantize_embedding_with_scale',
+    'quantized_embedding_lookup_with_scale',
+    'lsq_rounding',
+    'lsq_rounding_gradient',
+    'assign_embedding_with_indexedslices',
+    'assign_quantized_embedding_unified',
+    'assign_quantized_embedding',
+    'unique_indices',
+    'get_unique_workspace_size',
+    'deduplicate_lookup',
+    'deduplicate_grad',
+    'reorder_into_lookup',
+    'assign_alpt_embedding',
 ]

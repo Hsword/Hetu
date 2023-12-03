@@ -26,6 +26,28 @@ class OnesLikeOp(Op):
         assert len(input_shapes) == 1
         return input_shapes[0]
 
+    def forward_deduce_states(
+        self,
+        input_statuses,
+        status,
+        deduce_order,
+    ):
+        assert len(input_statuses) == len(self.inputs)
+        if deduce_order:
+            if status.valid_all():
+                status.set_order(input_statuses[0].combine_order((-2, -1)))
+        else:
+            if status.valid_state():
+                status.set_state(*input_statuses[0].combine_state((-2, -1)))
+
+    def backward_deduce_states(
+        self,
+        status,
+        input_statuses,
+        deduce_order,
+    ):
+        pass
+
 
 def oneslike_op(node, ctx=None):
     """Creates a node that represents np.ones(node_A.shape).

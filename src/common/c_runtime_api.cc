@@ -76,8 +76,7 @@ inline size_t GetDataSize(DLArray *arr) {
     for (index_t i = 0; i < arr->ndim; ++i) {
         size *= arr->shape[i];
     }
-    // assume 32-bit float
-    size *= 4;
+    size *= (arr->nbits / 8);
     return size;
 }
 
@@ -91,13 +90,14 @@ inline size_t GetDataAlignment(DLArray *arr) {
 using namespace hetusys::runtime;
 
 int DLArrayAlloc(const index_t *shape, const index_t *stride, index_t ndim,
-                 DLContext ctx, DLArrayHandle *out) {
+                 DLContext ctx, DLArrayHandle *out, int nbits) {
     DLArray *arr = nullptr;
     API_BEGIN();
     // shape
     arr = DLArrayCreate_();
     // ndim
     arr->ndim = ndim;
+    arr->nbits = nbits;
     index_t *shape_copy = new index_t[ndim];
     std::copy(shape, shape + ndim, shape_copy);
     arr->shape = shape_copy;
@@ -137,6 +137,24 @@ int DLArrayCopyFromTo(DLArrayHandle from, DLArrayHandle to,
                || (to->ctx.device_type == from->ctx.device_type));
     }
     DeviceAPIManager::Get(ctx)->CopyDataFromTo(from->data, to->data, from_size,
+                                               from->ctx, to->ctx, stream);
+    API_END();
+}
+
+int DLArrayCopyFromToOffset(DLArrayHandle from, size_t foffset,
+                            DLArrayHandle to, size_t toffset, size_t copy_size,
+                            DLStreamHandle stream) {
+    API_BEGIN();
+    DLContext ctx = from->ctx;
+    if (ctx.device_type == kCPU) {
+        ctx = to->ctx;
+    } else {
+        // Can not copy across different ctx types directly
+        assert((to->ctx.device_type == kCPU)
+               || (to->ctx.device_type == from->ctx.device_type));
+    }
+    DeviceAPIManager::Get(ctx)->CopyDataFromTo(from->data + foffset,
+                                               to->data + toffset, copy_size,
                                                from->ctx, to->ctx, stream);
     API_END();
 }

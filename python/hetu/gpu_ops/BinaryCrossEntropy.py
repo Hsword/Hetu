@@ -11,9 +11,19 @@ class BinaryCrossEntropyOp(Op):
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
+            def make_valid(arr, val=-100):
+                arr[np.isnan(arr)] = val
+                arr[np.isinf(arr)] = val
+                arr = np.maximum(arr, val)
+                return arr
+            epsilon = 1e-12
             y = input_vals[0].asnumpy()
             y_ = input_vals[1].asnumpy()
-            output_val[:] = -y_ * np.log(y) - (1 - y_) * np.log(1 - y)
+            # output_val[:] = -y_ * \
+            #     make_valid(np.log(y)) - (1 - y_) * make_valid(np.log(1 - y))
+            
+            output_val[:] = -y_ * \
+                np.log(y + epsilon) - (1 - y_) * np.log(1 - y + epsilon)
         else:
             binary_cross_entropy(
                 input_vals[0], input_vals[1], output_val, stream_handle)

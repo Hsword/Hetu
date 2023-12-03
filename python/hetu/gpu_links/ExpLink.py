@@ -1,7 +1,6 @@
 
 from __future__ import absolute_import
 
-import ctypes
 from .._base import _LIB
 from .. import ndarray as _nd
 

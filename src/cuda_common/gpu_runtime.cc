@@ -117,11 +117,54 @@ int DLEventElapsedTime(DLEventHandle start, DLEventHandle ending,
     return 0;
 }
 
+void ThreadBlock1D(dim3 &threads, dim3 &blocks, size_t size) {
+    if (size <= 1024) {
+        threads.x = size;
+        blocks.x = 1;
+    } else {
+        threads.x = 1024;
+        blocks.x = (size + 1023) / 1024;
+    }
+}
+
+void ThreadBlock2D(dim3 &threads, dim3 &blocks, size_t xsize, size_t ysize) {
+    size_t all_size = xsize * ysize;
+    if (all_size <= 1024) {
+        threads.x = xsize;
+        blocks.x = 1;
+        threads.y = ysize;
+        blocks.y = 1;
+    } else if (xsize <= 1024) {
+        threads.x = xsize;
+        blocks.x = 1;
+        threads.y = 1024 / xsize;
+        blocks.y = (ysize + threads.y - 1) / threads.y;
+    } else {
+        threads.x = 1024;
+        blocks.x = (xsize + 1023) / 1024;
+        threads.y = 1;
+        blocks.y = ysize;
+    }
+}
+
+size_t ArrSize(const DLArrayHandle array) {
+    size_t size = 1;
+    for (size_t i = 0; i < array->ndim; ++i) {
+        size *= array->shape[i];
+    }
+    return size;
+}
+
 int GetThreadNum(int cnt) {
-    if (cnt >= 1048576) return 1024;
-    if (cnt >= 262144) return 512;
-    if (cnt >= 65536) return 256;
-    if (cnt >= 16384) return 128;
-    if (cnt >= 256) return 64;
+    if (cnt >= 1048576)
+        return 1024;
+    if (cnt >= 262144)
+        return 512;
+    if (cnt >= 65536)
+        return 256;
+    if (cnt >= 16384)
+        return 128;
+    if (cnt >= 256)
+        return 64;
     return 32;
 }

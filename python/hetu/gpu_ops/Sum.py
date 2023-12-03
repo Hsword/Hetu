@@ -18,6 +18,10 @@ class SumOp(Op):
         super().__init__(SumOp, list(node_list), ctx)
         self.lazy_execution = True
         self.compute_to_be_config = False
+        dtype = node_list[0].dtype
+        for n in node_list[1:]:
+            assert dtype == n.dtype
+        self.dtype = dtype
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
@@ -34,10 +38,8 @@ class SumOp(Op):
         output_val += input_val.asnumpy()
 
     def _indexed_cpu_callback(self, input_val, output_val):
-        input_val.cpu_deduplicate()
         output_val[input_val.indices.asnumpy().astype(
             np.int)] += input_val.values.asnumpy()
-        input_val.free_deduplicate()
 
     def _simple_gpu_callback(self, input_val, output_val, ind, stream_handle):
         matrix_elementwise_add_simple(
@@ -71,7 +73,7 @@ class SumOp(Op):
             strides = list(output_val.stride) + \
                 list(input_val.stride) + list(output_val.stride)
             self.gpu_buffers[ind] = ndarray.array(
-                strides, self.ctx, data_type=np.uintc)
+                strides, self.ctx, dtype=np.uintc)
             self.check_reset[ind] = False
 
     def gradient(self, output_grad):

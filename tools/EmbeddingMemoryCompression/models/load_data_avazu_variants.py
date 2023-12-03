@@ -1,0 +1,525 @@
+import os
+import os.path as osp
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+if __name__ == '__main__':
+    from load_data import CTRDataset
+else:
+    from .load_data import CTRDataset
+
+default_data_path = osp.join(
+    osp.split(osp.abspath(__file__))[0], '../datasets')
+default_avazu_path = osp.join(default_data_path, 'avazu')
+default_avazu2core_path = osp.join(default_data_path, 'avazu2core')
+
+
+class Avazu2CoreDataset(CTRDataset):
+    def __init__(self, path=None, avazu_path=None):
+        if path is None:
+            path = default_avazu2core_path
+        if avazu_path is None:
+            avazu_path = default_avazu_path
+        assert avazu_path != path
+        self.avazu_path = avazu_path
+        self.avazu2core_path = path
+        super().__init__(path)
+        self.keys = ['sparse', 'label']
+        self.dtypes = [np.int32, np.int32]
+        self.shapes = [(-1, self.num_sparse), (-1, 1)]
+
+    @property
+    def num_dense(self):
+        return 0
+
+    @property
+    def num_sparse(self):
+        return 22
+
+    @property
+    def num_embed(self):
+        return 4428500
+
+    @property
+    def num_embed_separate(self):
+        return [240, 7, 7, 4171, 5804, 26, 6919, 429, 34, 996370, 3403717,
+                7442, 5, 4, 2571, 8, 9, 433, 4, 68, 172, 60]
+
+    def get_sparsity(self):
+        # the average samples per feature
+        label = np.memmap(self.join('label.bin'), mode='r', dtype=np.int32)
+        nsamples = label.shape[0]
+        del label
+        return nsamples * self.num_sparse / self.num_embed
+
+    def get_skewness(self, nreport=10):
+        # the percent of samples of top % features
+        sparse = np.fromfile(self.join('sparse.bin'), dtype=np.int32)
+        cnts = np.bincount(sparse)
+        sorted_indices = np.argsort(-cnts)
+        nsamples = []
+        nfeature_per_interval = round(self.num_embed / nreport)
+        for i in range(nreport):
+            start = i * nfeature_per_interval
+            if i == nreport - 1:
+                ending = self.num_embed
+            else:
+                ending = start + nfeature_per_interval
+            nsamples.append(cnts[sorted_indices[start:ending]].sum())
+        nsamples = np.array(nsamples, dtype=np.float32) / sparse.shape[0]
+        return nsamples.tolist()
+
+    def avazu_join(self, path):
+        return osp.join(self.avazu_path, path)
+
+    def avazu2core_join(self, path):
+        return osp.join(self.avazu2core_path, path)
+
+    def symlink(self):
+        if not osp.exists(self.join('label.bin')):
+            os.symlink(self.avazu2core_join(
+                'label.bin'), self.join('label.bin'))
+
+    def save_counts_n_sep(self, counts, sparse):
+        print('Processed counts:', counts)
+        # assert counts == self.num_embed_separate
+        counts = np.array(counts, dtype=np.int32)
+        counts.tofile(self.join('count.bin'))
+        accum = self.count_to_accum(counts)
+        accum = np.array(accum, dtype=np.int32)
+        accum.tofile(self.join('accum.bin'))
+        for i in range(self.num_sparse):
+            sparse[:, i] -= accum[i]
+        sparse.tofile(self.join('sparse_sep.bin'))
+
+    def transform_from_avazu(self):
+        os.symlink(self.avazu_join('kaggle_processed_label.bin'),
+                   self.join('label.bin'))
+        from sklearn.preprocessing import LabelEncoder
+        df = pd.read_csv(self.avazu_join('train.csv'))
+        sparse_feats = [
+            col for col in df.columns if col not in ('click', 'id')]
+        hasnull = df[sparse_feats].isnull().any().to_numpy()
+        avazu_sparse = np.fromfile(self.avazu_join(
+            'kaggle_processed_sparse.bin'), dtype=np.int32).reshape(-1, self.num_sparse)
+        offset = 0
+        counts = []
+        for i in range(self.num_sparse):
+            cur_column = avazu_sparse[:, i]
+            cur_column = cur_column - cur_column.min()
+            cnt = np.bincount(cur_column)
+            has1 = (cnt == 1).any()
+            if has1:
+                if not hasnull[i]:
+                    cur_column = cur_column + 1
+                    cnt = np.concatenate(
+                        (np.zeros((1,), dtype=cnt.dtype), cnt))
+                cur_column[cnt[cur_column] == 1] = 0
+                label_encoder = LabelEncoder()
+                cur_column = label_encoder.fit_transform(cur_column)
+            avazu_sparse[:, i] = cur_column + offset
+            counts.append(cur_column.max() + 1)
+            offset += counts[-1]
+        avazu_sparse.tofile(self.join('sparse.bin'))
+        self.save_counts_n_sep(counts, avazu_sparse)
+
+    def get_split_indices(self):
+        # get exactly number of samples of last day by 'hour' column
+        n_last_day = 4218938
+        n_test = n_last_day // 2
+        train_slices = slice(0, -n_last_day, None)
+        test_slices = slice(-n_last_day, -n_test, None)
+        val_slices = slice(-n_test, None, None)
+        print('Slices:', train_slices, val_slices, test_slices)
+        return train_slices, val_slices, test_slices
+
+    def process_all_data_by_day(self, separate_fields=False):
+        all_data_path = [self.join(f'{k}.bin') for k in self.keys]
+        if separate_fields:
+            sparse_index = self.keys.index('sparse')
+            all_data_path[sparse_index] = self.join('sparse_sep.bin')
+
+        data_ready = self.all_exists(all_data_path)
+
+        if not data_ready:
+            self.transform_from_avazu()
+
+        memmap_data = [np.memmap(p, mode='r', dtype=dtype).reshape(
+            shape) for p, dtype, shape in zip(all_data_path, self.dtypes, self.shapes)]
+
+        slices = self.get_split_indices()
+        sparse_data, label_data = [
+            [data[sli] for sli in slices] for data in memmap_data]
+
+        return sparse_data, label_data
+
+
+class Avazu2CoreSparsifiedDataset(Avazu2CoreDataset):
+    def __init__(self, path=None, avazu2core_path=None):
+        if path is None:
+            path = osp.join(default_data_path, 'avazu2core_sparsified')
+        if avazu2core_path is None:
+            avazu2core_path = default_avazu2core_path
+        assert avazu2core_path != path
+        self.avazu2core_path = avazu2core_path
+        CTRDataset.__init__(self, path)
+        self.keys = ['sparse', 'label']
+        self.dtypes = [np.int32, np.int32]
+        self.shapes = [(-1, self.num_sparse), (-1, 1)]
+
+    @property
+    def num_embed(self):
+        return 8857000
+
+    @property
+    def num_embed_separate(self):
+        return [480, 14, 14, 8342, 11608, 52, 13838, 858, 68, 1992740, 6807434,
+                14884, 10, 8, 5142, 16, 18, 866, 8, 136, 344, 120]
+
+    def transform_from_avazu(self):
+        # actually transform from avazu2core
+        self.symlink()
+
+        ori_sparse_path = self.avazu2core_join('sparse.bin')
+        ori_sparse = np.fromfile(
+            ori_sparse_path, dtype=np.int32).reshape(-1, self.num_sparse)
+        # transpose to alleviate the burden of dict
+        x = ori_sparse.T.reshape(-1)
+        ad = np.empty(x.shape, dtype=x.dtype)
+        y = np.bincount(x)
+        d = {}
+        np.random.seed(123)
+        for i in tqdm(range(x.shape[0]), desc='Sparsifying'):
+            value = x[i]
+            if value not in d:
+                nx = y[value]
+                seq = np.zeros(nx, dtype=np.int32)
+                nones = round(nx/2+np.random.random()-0.5)
+                seq[:int(nones)] = 1
+                np.random.shuffle(seq)
+                d[value] = [seq, 0]
+            dseq, dind = d[value]
+            ad[i] = dseq[dind]
+            dind += 1
+            if dind == len(dseq):
+                _ = d.pop(value)
+            else:
+                d[value][1] = dind
+        ad.tofile(self.join('addend.bin'))
+        x = 2 * x + ad
+        ny = np.bincount(x)
+        assert len(ny) == 2 * len(y) and (ny > 0).all()  # test
+        new_sparse = x.reshape(self.num_sparse, -1).T.reshape(-1)
+        new_sparse.tofile(self.join('sparse.bin'))
+        new_sparse = new_sparse.reshape(-1, self.num_sparse)
+
+        counts = []
+        for i in range(self.num_sparse):
+            cur_column = new_sparse[:, i]
+            counts.append(cur_column.max() - cur_column.min() + 1)
+        self.save_counts_n_sep(counts, new_sparse)
+
+
+class Avazu2CoreDensifiedDataset(Avazu2CoreDataset):
+    def __init__(self, path=None, avazu2core_path=None):
+        if path is None:
+            path = osp.join(default_data_path, 'avazu2core_densified')
+        if avazu2core_path is None:
+            avazu2core_path = default_avazu2core_path
+        assert avazu2core_path != path
+        self.avazu2core_path = avazu2core_path
+        CTRDataset.__init__(self, path)
+        self.keys = ['sparse', 'label']
+        self.dtypes = [np.int32, np.int32]
+        self.shapes = [(-1, self.num_sparse), (-1, 1)]
+
+    @property
+    def num_embed(self):
+        return 2214255
+
+    @property
+    def num_embed_separate(self):
+        return [120, 4, 4, 2086, 2902, 13, 3460, 215, 17, 498185, 1701859,
+                3721, 3, 2, 1286, 4, 5, 217, 2, 34, 86, 30]
+
+    def transform_from_avazu(self):
+        # actually transform from avazu2core
+        self.symlink()
+
+        ori_sparse_path = self.avazu2core_join('sparse.bin')
+        sparse = np.fromfile(
+            ori_sparse_path, dtype=np.int32).reshape(-1, self.num_sparse)
+
+        np.random.seed(124)
+        counts = []
+        offset = 0
+        for i in range(self.num_sparse):
+            # here features with the same frequency are hashed together
+            # so as to maintain the skewness
+            ori_column = sparse[:, i]
+            ori_column = ori_column - ori_column.min()
+            ori_count = super().num_embed_separate[i]
+            cnts = np.bincount(ori_column)
+            assert ori_count == cnts.shape[0]
+            new_count = (ori_count + 1) // 2
+            counts.append(new_count)
+            sorted_indices = np.argsort(-cnts)
+            new_indices = np.empty(ori_count, dtype=np.int32)
+            new_indices[sorted_indices] = np.arange(
+                ori_count, dtype=np.int32) // 2
+            new_column = new_indices[ori_column]
+            sparse[:, i] = new_column + offset
+            offset += new_count
+        sparse.tofile(self.join('sparse.bin'))
+
+        self.save_counts_n_sep(counts, sparse)
+
+
+class Avazu2CoreMoreSkewedDataset(Avazu2CoreDataset):
+    def __init__(self, path=None, avazu2core_path=None):
+        if path is None:
+            path = osp.join(default_data_path, 'avazu2core_moreskewed')
+        if avazu2core_path is None:
+            avazu2core_path = default_avazu2core_path
+        assert avazu2core_path != path
+        self.avazu2core_path = avazu2core_path
+        CTRDataset.__init__(self, path)
+        self.keys = ['sparse', 'label']
+        self.dtypes = [np.int32, np.int32]
+        self.shapes = [(-1, self.num_sparse), (-1, 1)]
+
+    @property
+    def num_embed(self):
+        return 4428506
+
+    @property
+    def num_embed_separate(self):
+        return [240, 7, 7, 4171, 5805, 27, 6919, 429, 34, 996370, 3403717,
+                7443, 6, 4, 2571, 9, 9, 433, 4, 69, 172, 60]
+
+    def transform_from_avazu(self):
+        # actually transform from avazu2core
+        self.symlink()
+
+        ori_sparse_path = self.avazu2core_join('sparse.bin')
+        sparse = np.fromfile(
+            ori_sparse_path, dtype=np.int32).reshape(-1, self.num_sparse)
+
+        np.random.seed(125)
+        counts = []
+        offset = 0
+        if osp.exists(self.join('addend.bin')):
+            ads = np.fromfile(self.join('addend.bin'),
+                              dtype=np.int32).reshape(26, -1)
+        else:
+            ads = []
+        for i in range(self.num_sparse):
+            ori_column = sparse[:, i]
+            ori_column = ori_column - ori_column.min()
+            ori_count = super().num_embed_separate[i]
+            assert ori_count == ori_column.max() + 1
+            # first split frequency
+            cnts = np.bincount(ori_column)
+            n_tosparsify = round(ori_count / 3)
+            n_todensify = ori_count - n_tosparsify
+            sorted_indices = np.argsort(cnts)
+            sp_indices = sorted_indices[:n_tosparsify]
+            de_indices = sorted_indices[n_tosparsify:]
+            sp_mask = np.zeros((ori_count,), dtype=np.int32)
+            sp_mask[sp_indices] = 1
+            if isinstance(ads, list):
+                ad = np.full(ori_column.shape, fill_value=-1, dtype=np.int32)
+                d = {}
+                for j in tqdm(range(ori_column.shape[0]), desc=f'Sparsifying {i}'):
+                    value = ori_column[j]
+                    if sp_mask[value]:
+                        if value not in d:
+                            nx = cnts[value]
+                            seq = np.zeros(nx, dtype=np.int32)
+                            nones = round(nx/2+np.random.random()-0.5)
+                            seq[:int(nones)] = 1
+                            np.random.shuffle(seq)
+                            d[value] = [seq, 0]
+                        dseq, dind = d[value]
+                        ad[j] = dseq[dind]
+                        dind += 1
+                        if dind == len(dseq):
+                            _ = d.pop(value)
+                        else:
+                            d[value][1] = dind
+                ads.append(ad)
+            else:
+                ad = ads[i]
+            ind_mapping = np.empty((ori_count,), dtype=np.int32)
+            ind_mapping[sp_indices] = np.arange(
+                n_tosparsify, dtype=np.int32) * 2
+            new_de_indices = np.arange(n_todensify, dtype=np.int32)
+            if len(new_de_indices) % 2 == 1:
+                new_de_indices += 1
+            new_sp_count = n_tosparsify * 2
+            new_de_count = (n_todensify + 1) // 2
+            new_de_indices = new_de_indices // 2 + new_sp_count
+            ind_mapping[de_indices] = new_de_indices
+            new_column = ind_mapping[ori_column]
+            new_column = new_column + np.maximum(ad, 0)
+            sparse[:, i] = new_column + offset
+            new_count = new_sp_count + new_de_count
+            counts.append(new_count)
+            offset += new_count
+
+        if isinstance(ads, list):
+            ads = np.concatenate(ads)
+            ads.tofile(self.join('addend.bin'))
+
+        sparse.tofile(self.join('sparse.bin'))
+
+        self.save_counts_n_sep(counts, sparse)
+
+
+class Avazu2CoreLessSkewedDataset(Avazu2CoreDataset):
+    def __init__(self, path=None, avazu2core_path=None):
+        if path is None:
+            path = osp.join(default_data_path, 'avazu2core_lessskewed')
+        if avazu2core_path is None:
+            avazu2core_path = default_avazu2core_path
+        assert avazu2core_path != path
+        self.avazu2core_path = avazu2core_path
+        CTRDataset.__init__(self, path)
+        self.keys = ['sparse', 'label']
+        self.dtypes = [np.int32, np.int32]
+        self.shapes = [(-1, self.num_sparse), (-1, 1)]
+
+    @property
+    def num_embed(self):
+        return 4428506
+
+    @property
+    def num_embed_separate(self):
+        return [240, 7, 7, 4171, 5805, 27, 6919, 429, 34, 996370, 3403717,
+                7443, 6, 4, 2571, 9, 9, 433, 4, 69, 172, 60]
+
+    def transform_from_avazu(self):
+        # actually transform from avazu2core
+        self.symlink()
+
+        ori_sparse_path = self.avazu2core_join('sparse.bin')
+        sparse = np.fromfile(
+            ori_sparse_path, dtype=np.int32).reshape(-1, self.num_sparse)
+
+        np.random.seed(126)
+        counts = []
+        offset = 0
+        if osp.exists(self.join('addend.bin')):
+            ads = np.fromfile(self.join('addend.bin'),
+                              dtype=np.int32).reshape(26, -1)
+        else:
+            ads = []
+        for i in range(self.num_sparse):
+            ori_column = sparse[:, i]
+            ori_column = ori_column - ori_column.min()
+            ori_count = super().num_embed_separate[i]
+            assert ori_count == ori_column.max() + 1
+            # first split frequency
+            cnts = np.bincount(ori_column)
+            n_tosparsify = round(ori_count / 3)
+            n_todensify = ori_count - n_tosparsify
+            sorted_indices = np.argsort(-cnts)
+            sp_indices = sorted_indices[:n_tosparsify]
+            de_indices = sorted_indices[n_tosparsify:]
+            sp_mask = np.zeros((ori_count,), dtype=np.int32)
+            sp_mask[sp_indices] = 1
+            if isinstance(ads, list):
+                ad = np.full(ori_column.shape, fill_value=-1, dtype=np.int32)
+                d = {}
+                for j in tqdm(range(ori_column.shape[0]), desc=f'Sparsifying {i}'):
+                    value = ori_column[j]
+                    if sp_mask[value]:
+                        if value not in d:
+                            nx = cnts[value]
+                            seq = np.zeros(nx, dtype=np.int32)
+                            nones = round(nx/2+np.random.random()-0.5)
+                            seq[:int(nones)] = 1
+                            np.random.shuffle(seq)
+                            d[value] = [seq, 0]
+                        dseq, dind = d[value]
+                        ad[j] = dseq[dind]
+                        dind += 1
+                        if dind == len(dseq):
+                            _ = d.pop(value)
+                        else:
+                            d[value][1] = dind
+                ads.append(ad)
+            else:
+                ad = ads[i]
+            ind_mapping = np.empty((ori_count,), dtype=np.int32)
+            ind_mapping[sp_indices] = np.arange(
+                n_tosparsify, dtype=np.int32) * 2
+            new_de_indices = np.arange(n_todensify, dtype=np.int32)
+            np.random.shuffle(new_de_indices)
+            new_sp_count = n_tosparsify * 2
+            new_de_count = (n_todensify + 1) // 2
+            new_de_indices = new_de_indices % new_de_count + new_sp_count
+            ind_mapping[de_indices] = new_de_indices
+            new_column = ind_mapping[ori_column]
+            new_column = new_column + np.maximum(ad, 0)
+            sparse[:, i] = new_column + offset
+            new_count = new_sp_count + new_de_count
+            counts.append(new_count)
+            offset += new_count
+
+        if isinstance(ads, list):
+            ads = np.concatenate(ads)
+            ads.tofile(self.join('addend.bin'))
+
+        sparse.tofile(self.join('sparse.bin'))
+
+        self.save_counts_n_sep(counts, sparse)
+
+
+def _gen_data_n_test(dataset):
+    # generate and check data
+    sparse, label = dataset.process_all_data()
+    print([d.shape for d in sparse])
+    print([d.shape for d in label])
+
+    # get sparsity and skewness
+    print('sparsity', dataset.get_sparsity())
+    print('skewness', dataset.get_skewness())
+    print()
+
+
+if __name__ == '__main__':
+    # 2-core
+    print('2-core dataset')
+    target_path = default_avazu2core_path
+    os.makedirs(target_path, exist_ok=True)
+    dataset = Avazu2CoreDataset(target_path)
+    _gen_data_n_test(dataset)
+
+    # sparsified
+    print('sparsified dataset')
+    target_path = osp.join(default_data_path, 'avazu2core_sparsified')
+    os.makedirs(target_path, exist_ok=True)
+    dataset = Avazu2CoreSparsifiedDataset(target_path)
+    _gen_data_n_test(dataset)
+
+    # densified
+    print('densified dataset')
+    target_path = osp.join(default_data_path, 'avazu2core_densified')
+    os.makedirs(target_path, exist_ok=True)
+    dataset = Avazu2CoreDensifiedDataset(target_path)
+    _gen_data_n_test(dataset)
+
+    # more skewed
+    print('more skewed dataset')
+    target_path = osp.join(default_data_path, 'avazu2core_moreskewed')
+    os.makedirs(target_path, exist_ok=True)
+    dataset = Avazu2CoreMoreSkewedDataset(target_path)
+    _gen_data_n_test(dataset)
+
+    # less skewed
+    print('less skewed dataset')
+    target_path = osp.join(default_data_path, 'avazu2core_lessskewed')
+    os.makedirs(target_path, exist_ok=True)
+    dataset = Avazu2CoreLessSkewedDataset(target_path)
+    _gen_data_n_test(dataset)

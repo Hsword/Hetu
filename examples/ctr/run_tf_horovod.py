@@ -17,11 +17,11 @@ def pop_env():
 pop_env()
 
 # horovodrun -np 8 -H localhost:8 python run_tf_horovod.py --model
-# horovodrun -np 8 --start-timeout 300 -H daim116:4,daim117:4 python run_tf_horovod.py --model
+# horovodrun -np 8 --start-timeout 300 -H node1:4,node2:4 python run_tf_horovod.py --model
 # if using multi nodes setting in conda, need to modify /etc/bash.bashrc
 # we can also use mpirun (default gloo):
 # ../build/_deps/openmpi-build/bin/mpirun -mca btl_tcp_if_include enp97s0f0 --bind-to none --map-by slot\
-#  -x NCCL_SOCKET_IFNAME=enp97s0f0 -H daim117:8,daim118:8 --allow-run-as-root python run_tf_horovod.py --model
+#  -x NCCL_SOCKET_IFNAME=enp97s0f0 -H node2:8,node3:8 --allow-run-as-root python run_tf_horovod.py --model
 
 
 def train_criteo(model, args):

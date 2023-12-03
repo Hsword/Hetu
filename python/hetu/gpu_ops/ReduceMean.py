@@ -70,6 +70,8 @@ class ReduceMeanOp(Op):
                 if not self.keepdims[i]:
                     add_axes.append(self.axes[i])
             self.grad_node.inputs[0].add_axes = add_axes
+        for i in range(len(self.axes)):
+            input_shape[self.axes[i]] = 1 if self.keepdims[i] else 0
         input_shape = [x for x in input_shape if x > 0]
         if input_shape == []:
             result = (1,)
@@ -79,6 +81,56 @@ class ReduceMeanOp(Op):
         to_size = np.prod(result, dtype=int)
         self.naive_copy = (from_size == to_size)
         return result
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == 1
+        if deduce_order:
+            order = input_statuses[0].order
+            if order is not None:
+                order = list(order)
+                dup_occur = 0
+                prev_dup = False
+                partial_candidate = self.axes + [-2]
+                for i, o in list(enumerate(order))[::-1]:
+                    if o in partial_candidate:
+                        if not prev_dup:
+                            dup_occur += 1
+                        prev_dup = True
+                        if o != -2:
+                            if -2 not in order:
+                                order[i] = -2
+                            else:
+                                order.pop(i)
+                    else:
+                        prev_dup = False
+                assert dup_occur <= 1, 'Duplicate dimension and reduce dimensions must be consecutive!'
+                for i in range(len(order)):
+                    order[i] -= sum([x < order[i]
+                                     for j, x in enumerate(self.axes) if not self.keepdims[j]])
+                status.set_order(tuple(order))
+        else:
+            if input_statuses[0].valid_state():
+                state, duplicate = input_statuses[0].get()
+                partial = input_statuses[0].partial if input_statuses[0].enable_partial else 1
+                if state is not None:
+                    state = dict(state)
+                    for k in self.axes:
+                        if k in state:
+                            partial *= state.pop(k)
+                    for k in sorted(state.keys()):
+                        new_k = k - \
+                            sum([x < k for j, x in enumerate(
+                                self.axes) if not self.keepdims[j]])
+                        if new_k != k:
+                            state[new_k] = state.pop(k)
+                    status.set_state(state, duplicate, partial)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == len(self.inputs)
+        if self.grad_node is not None and not self.grad_set:
+            self.grad_node.inputs[0].ori_status = input_statuses[0]
+            self.grad_node.inputs[0].tar_status = status.remove_partial()
+            self.grad_set = True
 
     def reset_status(self):
         self.grad_set = False

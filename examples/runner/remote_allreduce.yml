@@ -1,6 +1,6 @@
 nodes:
-  - host: daim118
+  - host: node1
     workers: 4
     chief: true
-  - host: daim117
+  - host: node2
     workers: 2

@@ -1,3 +1,5 @@
+from .attention import MultiHeadAttention
+from .batch_split_layer import BatchSplitOnlyLayer, ReserveSplitLayer
 from .concatenate import Concatenate, ConcatenateLayers
 from .conv import Conv2d
 from .dropout import DropOut
@@ -7,6 +9,7 @@ from .linear import Linear
 from .normalization import BatchNorm, LayerNorm
 from .pooling import MaxPool2d, AvgPool2d
 from .relu import Relu
+from .mish import Mish
 from .reshape import Reshape
 from .sequence import Sequence
 from .slice import Slice
@@ -20,3 +23,4 @@ from .KTop1Gate import KTop1Gate
 from .ktop1_layer import KTop1Layer
 from .sam_layer import SAMLayer
 from .SAMGate import SAMGate
+from .loss import MSELoss, BCEWithLogitsLoss, BCELoss, SoftmaxCrossEntropyLoss, MAELoss

@@ -1,5 +1,7 @@
 #include "gpu_runtime.h"
 
+const float EPSILON = 1e-12;
+
 // -label * log(prediction) - (1 - label) * log(1 - prediction)
 __global__ void binary_cross_entropy_kernel(int nrow, const float *prediction,
                                             const float *label, float *loss) {
@@ -7,8 +9,19 @@ __global__ void binary_cross_entropy_kernel(int nrow, const float *prediction,
     size_t id = blockIdx.x * blockDim.x + threadIdx.x;
     if (id >= nrow)
         return;
-    loss[id] = -label[id] * log(prediction[id])
-               - (1 - label[id]) * log(1 - prediction[id]);
+    float cur_pred = prediction[id];
+    float cur_label = label[id];
+    assert(cur_label >= 0 && cur_label <= 1);
+    float log_input_val = log(cur_pred + EPSILON);
+    float log_1_minus_input_val = log(1 - cur_pred + EPSILON);
+    // float log_input_val = log(cur_pred);
+    // float log_1_minus_input_val = log(1 - cur_pred);
+
+    // float neg_100 = -100;
+    // log_input_val = max(log_input_val, neg_100);
+    // log_1_minus_input_val = max(log_1_minus_input_val, neg_100);
+    loss[id] =
+        ((cur_label - 1) * log_1_minus_input_val) - (cur_label * log_input_val);
 }
 
 int DLGpuBinaryCrossEntropy(const DLArrayHandle prediction,
@@ -54,9 +67,9 @@ __global__ void binary_cross_entropy_gradient_kernel(int nrow,
     size_t id = blockIdx.x * blockDim.x + threadIdx.x;
     if (id >= nrow)
         return;
-    output[id] = output_grad[id]
-                 * (-label[id] / prediction[id]
-                    + (1 - label[id]) / (1 - prediction[id]));
+    float cur_pred = prediction[id];
+    output[id] = output_grad[id] * (cur_pred - label[id])
+                 / max((1 - cur_pred) * cur_pred, EPSILON);
 }
 
 int DLGpuBinaryCrossEntropy_Gradient(const DLArrayHandle prediction,

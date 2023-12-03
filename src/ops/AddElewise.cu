@@ -1,14 +1,18 @@
 #include "gpu_runtime.h"
+#include "dispatch.h"
 
-__global__ void ele_add_kernel(const float *matA, const float *matB,
-                               float *output, size_t size) {
+template <typename spec_t>
+__global__ void ele_add_kernel(const spec_t *matA, const spec_t *matB,
+                               spec_t *output, size_t size) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (ind >= size)
         return;
     output[ind] = matA[ind] + matB[ind];
 }
-__global__ void ele_broadcast_add_kernel(const float *matL, const float *matS,
-                                         float *output, size_t size,
+
+template <typename spec_t>
+__global__ void ele_broadcast_add_kernel(const spec_t *matL, const spec_t *matS,
+                                         spec_t *output, size_t size,
                                          uint *L_strides, uint *S_strides,
                                          uint *L_dims, uint *S_dims,
                                          size_t L_ndims, size_t S_ndims) {
@@ -28,9 +32,10 @@ __global__ void ele_broadcast_add_kernel(const float *matL, const float *matS,
     output[o_ind] = matL[o_ind] + matS[s_ind];
 }
 
-__global__ void ele_lazy_add_kernel(const float *matA, index_t *matA_stride,
-                                    const float *matB, index_t *matB_stride,
-                                    float *output, index_t *output_stride,
+template <typename spec_t>
+__global__ void ele_lazy_add_kernel(const spec_t *matA, index_t *matA_stride,
+                                    const spec_t *matB, index_t *matB_stride,
+                                    spec_t *output, index_t *output_stride,
                                     size_t size, size_t ndim) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
     if (ind >= size)
@@ -78,17 +83,12 @@ int DLGpuMatrixElementwiseAdd(const DLArrayHandle matA,
 
     dim3 blocks;
     dim3 threads;
-    float *output_data = (float *)output->data;
-    const float *matA_data = (const float *)matA->data;
-    const float *matB_data = (const float *)matB->data;
-    if (size <= 1024) {
-        threads.x = size;
-        blocks.x = 1;
-    } else {
-        threads.x = 1024;
-        blocks.x = (size + 1023) / 1024;
-    }
+    ThreadBlock1D(threads, blocks, size);
+    void *output_data = output->data;
+    void *matA_data = matA->data;
+    void *matB_data = matB->data;
 
+    assert(stream_handle != NULL);
     cudaStream_t cu_stream = static_cast<cudaStream_t>(
         stream_handle ? *(cudaStream_t *)(stream_handle->handle) : NULL);
 
@@ -107,86 +107,64 @@ int DLGpuMatrixElementwiseAdd(const DLArrayHandle matA,
         index_t *output_stride =
             (index_t *)find_chunk(ndim * sizeof(index_t), dev_id);
 
-        if (cu_stream != NULL) {
-            CUDA_CALL(cudaMemcpyAsync(matA_stride, matA->stride,
-                                      ndim * sizeof(index_t),
-                                      cudaMemcpyHostToDevice, cu_stream));
-            CUDA_CALL(cudaMemcpyAsync(matB_stride, matB->stride,
-                                      ndim * sizeof(index_t),
-                                      cudaMemcpyHostToDevice, cu_stream));
-            CUDA_CALL(cudaMemcpyAsync(output_stride, output->stride,
-                                      ndim * sizeof(index_t),
-                                      cudaMemcpyHostToDevice, cu_stream));
-            ele_lazy_add_kernel<<<blocks, threads, 0, cu_stream>>>(
-                matA_data, matA_stride, matB_data, matB_stride, output_data,
+        CUDA_CALL(cudaMemcpyAsync(matA_stride, matA->stride,
+                                  ndim * sizeof(index_t),
+                                  cudaMemcpyHostToDevice, cu_stream));
+        CUDA_CALL(cudaMemcpyAsync(matB_stride, matB->stride,
+                                  ndim * sizeof(index_t),
+                                  cudaMemcpyHostToDevice, cu_stream));
+        CUDA_CALL(cudaMemcpyAsync(output_stride, output->stride,
+                                  ndim * sizeof(index_t),
+                                  cudaMemcpyHostToDevice, cu_stream));
+
+        HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(matA->dtype, spec_t, [&]() {
+            ele_lazy_add_kernel<spec_t><<<blocks, threads, 0, cu_stream>>>(
+                (const spec_t *)matA_data, matA_stride,
+                (const spec_t *)matB_data, matB_stride, (spec_t *)output_data,
                 output_stride, size, ndim);
-        } else {
-            CUDA_CALL(cudaMemcpy(matA_stride, matA->stride,
-                                 ndim * sizeof(index_t),
-                                 cudaMemcpyHostToDevice));
-            CUDA_CALL(cudaMemcpy(matB_stride, matB->stride,
-                                 ndim * sizeof(index_t),
-                                 cudaMemcpyHostToDevice));
-            CUDA_CALL(cudaMemcpy(output_stride, output->stride,
-                                 ndim * sizeof(index_t),
-                                 cudaMemcpyHostToDevice));
-            ele_lazy_add_kernel<<<blocks, threads>>>(
-                matA_data, matA_stride, matB_data, matB_stride, output_data,
-                output_stride, size, ndim);
-        }
+        });
     } else {
         if (size_A == size_B) {
-            if (cu_stream != NULL)
-                ele_add_kernel<<<blocks, threads, 0, cu_stream>>>(
-                    matA_data, matB_data, output_data, size);
-            else
-                ele_add_kernel<<<blocks, threads>>>(matA_data, matB_data,
-                                                    output_data, size);
+            HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(matA->dtype, spec_t, [&]() {
+                ele_add_kernel<spec_t><<<blocks, threads, 0, cu_stream>>>(
+                    (const spec_t *)matA_data, (const spec_t *)matB_data,
+                    (spec_t *)output_data, size);
+            });
         } else {
             uint *gpu_stridesA = (uint *)find_chunk(allocatedA, dev_id);
             uint *gpu_dimsA = (uint *)find_chunk(allocatedA, dev_id);
             uint *gpu_stridesB = (uint *)find_chunk(allocatedB, dev_id);
             uint *gpu_dimsB = (uint *)find_chunk(allocatedB, dev_id);
-            if (cu_stream != NULL) {
-                CUDA_CALL(cudaMemcpyAsync(gpu_stridesA, A_strides, allocatedA,
-                                          cudaMemcpyHostToDevice, cu_stream));
-                CUDA_CALL(cudaMemcpyAsync(gpu_dimsA, A_dims, allocatedA,
-                                          cudaMemcpyHostToDevice, cu_stream));
-                CUDA_CALL(cudaMemcpyAsync(gpu_stridesB, B_strides, allocatedB,
-                                          cudaMemcpyHostToDevice, cu_stream));
-                CUDA_CALL(cudaMemcpyAsync(gpu_dimsB, B_dims, allocatedB,
-                                          cudaMemcpyHostToDevice, cu_stream));
-                if (size_A > size_B) {
-                    ele_broadcast_add_kernel<<<blocks, threads, 0, cu_stream>>>(
-                        matA_data, matB_data, output_data, size, gpu_stridesA,
-                        gpu_stridesB, gpu_dimsA, gpu_dimsB, (size_t)matA->ndim,
-                        (size_t)matB->ndim);
-                } else {
-                    ele_broadcast_add_kernel<<<blocks, threads, 0, cu_stream>>>(
-                        matB_data, matA_data, output_data, size, gpu_stridesB,
-                        gpu_stridesA, gpu_dimsB, gpu_dimsA, (size_t)matB->ndim,
-                        (size_t)matA->ndim);
-                }
+            CUDA_CALL(cudaMemcpyAsync(gpu_stridesA, A_strides, allocatedA,
+                                      cudaMemcpyHostToDevice, cu_stream));
+            CUDA_CALL(cudaMemcpyAsync(gpu_dimsA, A_dims, allocatedA,
+                                      cudaMemcpyHostToDevice, cu_stream));
+            CUDA_CALL(cudaMemcpyAsync(gpu_stridesB, B_strides, allocatedB,
+                                      cudaMemcpyHostToDevice, cu_stream));
+            CUDA_CALL(cudaMemcpyAsync(gpu_dimsB, B_dims, allocatedB,
+                                      cudaMemcpyHostToDevice, cu_stream));
+            if (size_A > size_B) {
+                HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+                    matA->dtype, spec_t, [&]() {
+                        ele_broadcast_add_kernel<spec_t>
+                            <<<blocks, threads, 0, cu_stream>>>(
+                                (const spec_t *)matA_data,
+                                (const spec_t *)matB_data,
+                                (spec_t *)output_data, size, gpu_stridesA,
+                                gpu_stridesB, gpu_dimsA, gpu_dimsB,
+                                (size_t)matA->ndim, (size_t)matB->ndim);
+                    });
             } else {
-                CUDA_CALL(cudaMemcpy(gpu_stridesA, A_strides, allocatedA,
-                                     cudaMemcpyHostToDevice));
-                CUDA_CALL(cudaMemcpy(gpu_dimsA, A_dims, allocatedA,
-                                     cudaMemcpyHostToDevice));
-                CUDA_CALL(cudaMemcpy(gpu_stridesB, B_strides, allocatedB,
-                                     cudaMemcpyHostToDevice));
-                CUDA_CALL(cudaMemcpy(gpu_dimsB, B_dims, allocatedB,
-                                     cudaMemcpyHostToDevice));
-                if (size_A > size_B) {
-                    ele_broadcast_add_kernel<<<blocks, threads>>>(
-                        matA_data, matB_data, output_data, size, gpu_stridesA,
-                        gpu_stridesB, gpu_dimsA, gpu_dimsB, (size_t)matA->ndim,
-                        (size_t)matB->ndim);
-                } else {
-                    ele_broadcast_add_kernel<<<blocks, threads>>>(
-                        matB_data, matA_data, output_data, size, gpu_stridesB,
-                        gpu_stridesA, gpu_dimsB, gpu_dimsA, (size_t)matB->ndim,
-                        (size_t)matA->ndim);
-                }
+                HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+                    matA->dtype, spec_t, [&]() {
+                        ele_broadcast_add_kernel<spec_t>
+                            <<<blocks, threads, 0, cu_stream>>>(
+                                (const spec_t *)matB_data,
+                                (const spec_t *)matA_data,
+                                (spec_t *)output_data, size, gpu_stridesB,
+                                gpu_stridesA, gpu_dimsB, gpu_dimsA,
+                                (size_t)matB->ndim, (size_t)matA->ndim);
+                    });
             }
         }
     }
@@ -198,9 +176,9 @@ int DLGpuMatrixElementwiseAdd(const DLArrayHandle matA,
 }
 
 /* below is the simple version of add elementwise */
-
-__global__ void ele_lazy_add_kernel_simple(const float *matA, const float *matB,
-                                           float *output,
+template <typename spec_t>
+__global__ void ele_lazy_add_kernel_simple(const spec_t *matA,
+                                           const spec_t *matB, spec_t *output,
                                            const uint *gpu_buffer, size_t size,
                                            size_t ndim) {
     size_t ind = blockIdx.x * blockDim.x + threadIdx.x;
@@ -224,32 +202,23 @@ int DLGpuMatrixElementwiseAddSimple(const DLArrayHandle matA,
                                     const DLArrayHandle matB,
                                     DLArrayHandle output,
                                     DLStreamHandle stream_handle = NULL) {
-    size_t size = 1;
-    size_t ndim = matA->ndim;
-    for (int i = 0; i < ndim; ++i)
-        size *= matA->shape[i];
+    size_t size = ArrSize(matA);
 
     dim3 blocks;
     dim3 threads;
-    float *output_data = (float *)output->data;
-    const float *matA_data = (const float *)matA->data;
-    const float *matB_data = (const float *)matB->data;
-    if (size <= 1024) {
-        threads.x = size;
-        blocks.x = 1;
-    } else {
-        threads.x = 1024;
-        blocks.x = (size + 1023) / 1024;
-    }
+    ThreadBlock1D(threads, blocks, size);
+    void *output_data = output->data;
+    void *matA_data = matA->data;
+    void *matB_data = matB->data;
+    assert(stream_handle != NULL);
 
-    if (stream_handle) {
-        cudaStream_t cu_stream = *(cudaStream_t *)(stream_handle->handle);
-        ele_add_kernel<<<blocks, threads, 0, cu_stream>>>(matA_data, matB_data,
-                                                          output_data, size);
-    } else {
-        ele_add_kernel<<<blocks, threads>>>(matA_data, matB_data, output_data,
-                                            size);
-    }
+    cudaStream_t cu_stream = *(cudaStream_t *)(stream_handle->handle);
+
+    HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(matA->dtype, spec_t, [&]() {
+        ele_add_kernel<spec_t><<<blocks, threads, 0, cu_stream>>>(
+            (const spec_t *)matA_data, (const spec_t *)matB_data,
+            (spec_t *)output_data, size);
+    });
     return 0;
 }
 
@@ -258,32 +227,23 @@ int DLGpuMatrixElementwiseAddLazy(const DLArrayHandle matA,
                                   DLArrayHandle output,
                                   const DLArrayHandle gpu_buf,
                                   DLStreamHandle stream_handle = NULL) {
-    size_t size = 1;
+    size_t size = ArrSize(matA);
     size_t ndim = matA->ndim;
-    for (int i = 0; i < ndim; ++i)
-        size *= matA->shape[i];
 
     dim3 blocks;
     dim3 threads;
-    float *output_data = (float *)output->data;
-    const float *matA_data = (const float *)matA->data;
-    const float *matB_data = (const float *)matB->data;
+    ThreadBlock1D(threads, blocks, size);
+    void *output_data = output->data;
+    void *matA_data = matA->data;
+    void *matB_data = matB->data;
     const uint *gpu_buffer = (const uint *)gpu_buf->data;
-    if (size <= 1024) {
-        threads.x = size;
-        blocks.x = 1;
-    } else {
-        threads.x = 1024;
-        blocks.x = (size + 1023) / 1024;
-    }
+    assert(stream_handle != NULL);
+    cudaStream_t cu_stream = *(cudaStream_t *)(stream_handle->handle);
+    HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(matA->dtype, spec_t, [&]() {
+        ele_lazy_add_kernel_simple<spec_t><<<blocks, threads, 0, cu_stream>>>(
+            (const spec_t *)matA_data, (const spec_t *)matB_data,
+            (spec_t *)output_data, gpu_buffer, size, ndim);
+    });
 
-    if (stream_handle) {
-        cudaStream_t cu_stream = *(cudaStream_t *)(stream_handle->handle);
-        ele_lazy_add_kernel_simple<<<blocks, threads, 0, cu_stream>>>(
-            matA_data, matB_data, output_data, gpu_buffer, size, ndim);
-    } else {
-        ele_lazy_add_kernel_simple<<<blocks, threads>>>(
-            matA_data, matB_data, output_data, gpu_buffer, size, ndim);
-    }
     return 0;
 }

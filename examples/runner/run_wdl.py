@@ -58,12 +58,12 @@ def worker(args):
         'local': 'gpu:0',
         'lps': 'cpu:0,gpu:0,gpu:1,gpu:2,gpu:7',
         'lhy': 'cpu:0,gpu:1,gpu:2,gpu:3,gpu:6',
-        'rps': 'cpu:0;daim118:gpu:0;daim118:gpu:2;daim118:gpu:4;daim118:gpu:6;daim117:gpu:1;daim117:gpu:3',
-        'rhy': 'cpu:0;daim118:gpu:0;daim118:gpu:2;daim118:gpu:4;daim118:gpu:6;daim117:gpu:1;daim117:gpu:3'
+        'rps': 'cpu:0;node1:gpu:0;node1:gpu:2;node1:gpu:4;node1:gpu:6;node2:gpu:1;node2:gpu:3',
+        'rhy': 'cpu:0;node1:gpu:0;node1:gpu:2;node1:gpu:4;node1:gpu:6;node2:gpu:1;node2:gpu:3'
     }[args.config]
     dense_param_ctx = {'local': 'gpu:0', 'lps': 'cpu:0,gpu:0,gpu:1,gpu:2,gpu:7', 'lhy': 'gpu:1,gpu:2,gpu:3,gpu:6',
-                       'rps': 'cpu:0;daim118:gpu:0;daim118:gpu:2;daim118:gpu:4;daim118:gpu:6;daim117:gpu:1;daim117:gpu:3',
-                       'rhy': 'daim118:gpu:0;daim118:gpu:2;daim118:gpu:4;daim118:gpu:6;daim117:gpu:1;daim117:gpu:3'}[args.config]
+                       'rps': 'cpu:0;node1:gpu:0;node1:gpu:2;node1:gpu:4;node1:gpu:6;node2:gpu:1;node2:gpu:3',
+                       'rhy': 'node1:gpu:0;node1:gpu:2;node1:gpu:4;node1:gpu:6;node2:gpu:1;node2:gpu:3'}[args.config]
     with ht.context(ctx):
         x_train_deep, x_train_wide, y_train, x_test_deep, x_test_wide, y_test = load_data.load_adult_data()
         dense_input = [

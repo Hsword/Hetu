@@ -57,13 +57,34 @@ class DLContext(ctypes.Structure):
         return hash(self) != hash(other)
 
 
+DataType = {
+    np.float32: 0,
+    np.int32: 1,
+    np.uint32: 2,
+    np.int8: 3,
+    np.uint8: 4,
+    np.int16: 5,
+    np.uint16: 6,
+}
+
+
+def get_dtype(dtype):
+    if isinstance(dtype, np.dtype):
+        dtype = dtype.type
+    return DataType[dtype]
+
+
 class DLArray(ctypes.Structure):
     """DLArray in C API"""
-    _fields_ = [("data", ctypes.c_void_p),
-                ("ctx", DLContext),
-                ("ndim", ctypes.c_int),
-                ("shape", ctypes.POINTER(ctypes.c_int64)),
-                ("stride", ctypes.POINTER(ctypes.c_int64))]
+    _fields_ = [
+        ("data", ctypes.c_void_p),
+        ("ctx", DLContext),
+        ("ndim", ctypes.c_int),
+        ("shape", ctypes.POINTER(ctypes.c_int64)),
+        ("stride", ctypes.POINTER(ctypes.c_int64)),
+        ("nbits", ctypes.c_int),
+        ("dtype", ctypes.c_int8),
+    ]
 
 
 DLArrayHandle = ctypes.POINTER(DLArray)
@@ -137,14 +158,46 @@ def shape_to_stride(shape):
     return tuple(stride)
 
 
+def convert_dtype(dtype):
+    # now only support 4 bytes int and float
+    if isinstance(dtype, np.dtype):
+        dtype = dtype.type
+    if dtype is int or issubclass(dtype, np.signedinteger):
+        dtype = np.int32
+    if dtype is float or issubclass(dtype, np.floating):
+        dtype = np.float32
+    if issubclass(dtype, np.unsignedinteger):
+        dtype = np.uint32
+    assert dtype in (np.int32, np.uint32, np.float32)
+    return dtype
+
+
+def get_nbits(dtype):
+    if isinstance(dtype, np.dtype):
+        dtype = dtype.type
+    if dtype in (int, float):
+        res = 32
+    else:
+        name = dtype.__name__
+        if name.endswith('32'):
+            res = 32
+        elif name.endswith('16'):
+            res = 16
+        elif name.endswith('64'):
+            res = 64
+        else:
+            res = int(name[-1])
+    return res
+
+
 class NDArray(object):
     """Lightweight NDArray class of DL runtime.
     Strictly this is only an Array Container(a buffer object)
     No arthimetic operations are defined.
     """
-    __slots__ = ["handle", "no_free"]
+    __slots__ = ["handle", "no_free", "dtype"]
 
-    def __init__(self, handle):
+    def __init__(self, handle, dtype=np.float32, force32=True):
         """Initialize the function with handle
         Parameters
         ----------
@@ -153,11 +206,18 @@ class NDArray(object):
         """
         self.handle = handle
         self.no_free = False
+        if force32:
+            self.dtype = convert_dtype(dtype)
+        else:
+            self.dtype = dtype
 
     def __del__(self):
         if self.no_free:
             return
         check_call(_LIB.DLArrayFree(self.handle))
+
+    def __repr__(self):
+        return 'array{{shape={}, dtype={}, ctx={}}}'.format(self.shape, self.dtype.__name__, self.ctx)
 
     @property
     def shape(self):
@@ -189,13 +249,14 @@ class NDArray(object):
             raise ValueError('Array only support set from numpy array')
         if isinstance(value, NDArray):
             if value.handle is not self.handle:
+                assert self.dtype == value.dtype
                 value.copyto(self)
         elif isinstance(value, (np.ndarray, np.generic)):
-            self._sync_copyfrom(value)
+            self._sync_copyfrom(value, dtype=self.dtype)
         else:
             raise TypeError('type %s not supported' % str(type(value)))
 
-    def _sync_copyfrom(self, source_array, data_type=np.float32):
+    def _sync_copyfrom(self, source_array, dtype=np.float32):
         """Peform an synchronize copy from the array.
         Parameters
         ----------
@@ -204,12 +265,12 @@ class NDArray(object):
         """
         if not isinstance(source_array, np.ndarray):
             try:
-                source_array = np.array(source_array, dtype=data_type)
+                source_array = np.array(source_array, dtype=dtype)
             except:
                 raise TypeError('array must be an array_like data,' +
                                 'type %s is not supported'
                                 % str(type(source_array)))
-        source_array = np.ascontiguousarray(source_array, dtype=data_type)
+        source_array = np.ascontiguousarray(source_array, dtype=dtype)
         if source_array.shape != self.shape:
             raise ValueError('array shape do not match the shape of NDArray')
         source_arr, shape, stride = NDArray._numpyasarray(source_array)
@@ -226,15 +287,24 @@ class NDArray(object):
         source_array : array_like
             The data source we should like to copy from.
         """
+        assert source_array.dtype == self.dtype
         check_call(_LIB.DLArrayCopyFromTo(
             source_array.handle, self.handle, stream_handle.handle))
         if not event_handle is None:
             check_call(_LIB.DLEventRecord(
                 stream_handle.handle, event_handle.handle))
 
+    def _async_copyfrom_offset(self, source_array, stream_handle, foffset, toffset, copy_size, event_handle=None):
+        assert source_array.dtype == self.dtype
+        check_call(_LIB.DLArrayCopyFromToOffset(
+            source_array.handle, ctypes.c_size_t(4 * foffset), self.handle, ctypes.c_size_t(4 * toffset), ctypes.c_size_t(4 * copy_size), stream_handle.handle))
+        if not event_handle is None:
+            check_call(_LIB.DLEventRecord(
+                stream_handle.handle, event_handle.handle))
+
     def async_h2d(self, source_array, stream_handle, event_handle=None):
         if isinstance(source_array, np.ndarray):
-            source_array = array(source_array, cpu(0))
+            source_array = array(source_array, cpu(0), dtype=self.dtype)
         assert self.handle.contents.ctx.device_type == 2
         assert source_array.handle.contents.ctx.device_type == 1
         assert stream_handle
@@ -258,8 +328,10 @@ class NDArray(object):
         arr.shape = shape
         arr.stride = stride
         arr.ndim = data.ndim
+        arr.nbits = get_nbits(data.dtype)
         # CPU device
         arr.ctx = cpu(0)
+        arr.dtype = get_dtype(data.dtype)
         return arr, shape, stride
 
     def asnumpy(self):
@@ -270,7 +342,7 @@ class NDArray(object):
             The corresponding numpy array.
         """
         self.wrapped_lazy_callback()
-        np_arr = np.empty(self.shape, dtype=np.float32)
+        np_arr = np.empty(self.shape, dtype=self.dtype)
         arr, shape, stride = NDArray._numpyasarray(np_arr)
         check_call(_LIB.DLArrayCopyFromTo(
             self.handle, ctypes.byref(arr), None))
@@ -285,6 +357,7 @@ class NDArray(object):
         target : NDArray
             The target array to be copied, must have same shape as this array.
         """
+        assert self.dtype == target.dtype
         self.wrapped_lazy_callback()
         if isinstance(target, DLContext):
             target = empty(self.shape, target)
@@ -309,6 +382,8 @@ class NDArray(object):
         arr.data = self.handle.contents.data
         arr.ctx = self.handle.contents.ctx
         arr.ndim = len(shape)
+        arr.nbits = self.handle.contents.nbits
+        arr.dtype = self.handle.contents.dtype
         arr.shape = c_array(ctypes.c_int64, shape)
         arr.stride = c_array(ctypes.c_int64, shape_to_stride(shape))
         target.handle = ctypes.pointer(arr)
@@ -328,6 +403,8 @@ class NDArray(object):
         arr.ndim = self.handle.contents.ndim
         arr.shape = self.handle.contents.shape
         arr.stride = self.handle.contents.stride
+        arr.nbits = self.handle.contents.nbits
+        arr.dtype = self.handle.contents.dtype
         target.handle = ctypes.pointer(arr)
         target.no_free = True
 
@@ -377,6 +454,8 @@ class NDArray(object):
         arr.ndim = arr_ndim
         arr.shape = c_array(ctypes.c_int64, tuple(shape))
         arr.stride = c_array(ctypes.c_int64, tuple(target_stride))
+        arr.nbits = self.handle.contents.nbits
+        arr.dtype = self.handle.contents.dtype
         target.handle = ctypes.pointer(arr)
         target.no_free = True
 
@@ -388,9 +467,10 @@ class NDArray(object):
         ndim = ctypes.c_int(len(self.shape))
         handle = DLArrayHandle()
         check_call(_LIB.DLArrayAlloc(shape, stride, ndim,
-                                     self.handle.contents.ctx, ctypes.byref(handle)))
+                                     self.handle.contents.ctx, ctypes.byref(handle), ctypes.c_int(get_nbits(self.dtype))))
         check_call(_LIB.DLGpuArrayLazyCallback(
             self.handle, handle, stream.handle if stream else None))
+        handle.contents.dtype = get_dtype(self.dtype)
         self.handle = handle
 
     def wrapped_lazy_callback(self, stream=None):
@@ -402,7 +482,7 @@ class NDArray(object):
             self.lazy_callback(stream)
 
 
-def array(arr, ctx, data_type=np.float32):
+def array(arr, ctx, dtype=np.float32, force32=True):
     """Create an array from source arr.
     Parameters
     ----------
@@ -416,13 +496,13 @@ def array(arr, ctx, data_type=np.float32):
         The created array
     """
     if not isinstance(arr, np.ndarray):
-        arr = np.array(arr, dtype=data_type)
-    ret = empty(arr.shape, ctx)
-    ret._sync_copyfrom(arr, data_type=data_type)
+        arr = np.array(arr, dtype=dtype)
+    ret = empty(arr.shape, ctx, dtype=dtype, force32=force32)
+    ret._sync_copyfrom(arr, dtype=dtype)
     return ret
 
 
-def empty(shape, ctx=cpu(0)):
+def empty(shape, ctx=cpu(0), dtype=np.float32, force32=True):
     """Create an empty array given shape and device
     Parameters
     ----------
@@ -438,10 +518,17 @@ def empty(shape, ctx=cpu(0)):
     shape = c_array(ctypes.c_int64, shape)
     stride = c_array(ctypes.c_int64, shape_to_stride(shape))
     ndim = ctypes.c_int(len(shape))
+    if force32:
+        dtype = convert_dtype(dtype)
     handle = DLArrayHandle()
     check_call(_LIB.DLArrayAlloc(
-        shape, stride, ndim, ctx, ctypes.byref(handle)))
-    return NDArray(handle)
+        shape, stride, ndim, ctx, ctypes.byref(handle), ctypes.c_int(get_nbits(dtype))))
+    handle.contents.dtype = get_dtype(dtype)
+    return NDArray(handle, dtype=dtype, force32=force32)
+
+
+def empty_like(arr):
+    return empty(arr.shape, arr.ctx, arr.dtype)
 
 
 def numpyasdlarrayhandle(data):
@@ -453,29 +540,106 @@ def numpyasdlarrayhandle(data):
     arr.shape = shape
     arr.stride = c_array(ctypes.c_int64, shape_to_stride(data.shape))
     arr.ndim = data.ndim
+    arr.nbits = get_nbits(data.dtype)
+    arr.dtype = get_dtype(data.dtype)
     arr.ctx = cpu(0)
     return arr
 
 
 class ND_Sparse_Array(object):
-    __slots__ = ["data", "row", "col", "nrow", "ncol", "lazy"]
+    __slots__ = ["form", "data", "row", "col", "nrow", "ncol", "lazy", "ctx"]
 
-    def __init__(self, data, row, col, nrow, ncol):
+    def __init__(self, nrow, ncol, data=None, row=None, col=None, form='csr', ctx=None):
+        assert form in ('csr', 'coo')
+        self.nrow = nrow
+        self.ncol = ncol
         self.data = data
         self.row = row
         self.col = col
-        self.nrow = nrow
-        self.ncol = ncol
+        self.form = form
         self.lazy = False
+        if ctx is None:
+            ctx = data.ctx
+        self.ctx = ctx
 
     @property
     def shape(self):
         """Shape of this array"""
         return tuple((self.nrow, self.ncol))
 
+    def get_copy(self, value):
+        new_value = empty(value.shape, ctx=value.ctx,
+                          dtype=value.dtype, force32=False)
+        new_value[:] = value
+        return new_value
 
-def sparse_array(values, indices, shape, ctx=cpu(0)):
-    """Create an sparse array from source arrs.
+    def get_copy_np(self, value, dtype):
+        new_value = empty(value.shape, self.ctx, dtype=dtype, force32=False)
+        new_value._sync_copyfrom(value, dtype=dtype)
+        return new_value
+
+    def __setitem__(self, in_slice, value):
+        """Set ndarray value"""
+        if (not isinstance(in_slice, slice) or
+                in_slice.start is not None
+                or in_slice.stop is not None):
+            raise ValueError(
+                'Sparse array only support set from entire sparse array')
+        if isinstance(value, ND_Sparse_Array):
+            self.nrow = value.nrow
+            self.ncol = value.ncol
+            self.ctx = value.ctx
+            self.data = self.get_copy(value.data)
+            self.row = self.get_copy(value.row)
+            self.col = self.get_copy(value.col)
+            self.form = value.form
+        elif isinstance(value, scipy.sparse.csr.csr_matrix):
+            self.data = self.get_copy_np(value.data, dtype=np.float32)
+            self.row = self.get_copy_np(value.indptr, dtype=np.int32)
+            self.col = self.get_copy_np(value.indices, dtype=np.int32)
+            self.nrow, self.ncol = value.shape
+            self.form = 'csr'
+        elif isinstance(value, scipy.sparse.coo.coo_matrix):
+            rec = np.rec.fromarrays([value.row, value.col, value.data])
+            rec.sort()
+            row, col, data = rec.f0, rec.f1, rec.f2
+            self.data = self.get_copy_np(
+                data.astype(np.float32), dtype=np.float32)
+            self.row = self.get_copy_np(row.astype(np.int32), dtype=np.int32)
+            self.col = self.get_copy_np(col.astype(np.int32), dtype=np.int32)
+            self.nrow, self.ncol = value.shape
+            self.form = 'coo'
+        else:
+            raise TypeError('type %s not supported' % str(type(value)))
+
+    def asnumpy(self):
+        if self.form == 'csr':
+            result = scipy.sparse.csr_matrix(
+                (self.data.asnumpy(), self.col.asnumpy(), self.row.asnumpy()),
+                shape=(self.nrow, self.ncol))
+        else:
+            result = scipy.sparse.coo_matrix(
+                (self.data.asnumpy(), (self.row.asnumpy(), self.col.asnumpy())),
+                shape=(self.nrow, self.ncol))
+        return result
+
+
+def csr_sparse_array(mat, shape, ctx=cpu(0)):
+    assert isinstance(mat, scipy.sparse.csr.csr_matrix) and len(shape) == 2
+    new_array = ND_Sparse_Array(shape[0], shape[1], ctx=ctx)
+    new_array[:] = mat
+    return new_array
+
+
+def coo_sparse_array(mat, shape, ctx=cpu(0)):
+    assert isinstance(mat, scipy.sparse.coo.coo_matrix) and len(shape) == 2
+    new_array = ND_Sparse_Array(shape[0], shape[1], ctx=ctx)
+    new_array[:] = mat
+    return new_array
+
+
+def sparse_array(values, indices, shape, form='csr', ctx=cpu(0)):
+    """Create an sparse array from source coo arrs.
     ----------
     values : numpy.ndarray
         The value array to be copied from
@@ -491,30 +655,37 @@ def sparse_array(values, indices, shape, ctx=cpu(0)):
     assert len(shape) == len(indices) == 2
     assert len(values) == len(indices[0]) == len(indices[1])
     assert isinstance(indices, tuple)
-    mat = scipy.sparse.csr_matrix((values, indices), shape)
-    values = mat.data
-    rows = mat.indptr
-    cols = mat.indices
-    values_ret = empty(values.shape, ctx)
-    values_ret._sync_copyfrom(values)
-    row_ret = empty(rows.shape, ctx)
-    row_ret._sync_copyfrom(rows, np.int32)
-    col_ret = empty(cols.shape, ctx)
-    col_ret._sync_copyfrom(cols, np.int32)
-    return ND_Sparse_Array(values_ret, row_ret, col_ret, shape[0], shape[1])
+    if form == 'csr':
+        mat = scipy.sparse.csr_matrix((values, indices), shape)
+        result = csr_sparse_array(mat, shape, ctx)
+    else:
+        mat = scipy.sparse.coo_matrix((values, indices), shape)
+        result = coo_sparse_array(mat, shape, ctx)
+    return result
+
+
+def dense_to_sparse(arr, form='csr'):
+    ctx = arr.ctx
+    arr = arr.asnumpy()
+    shape = arr.shape
+    if form == 'csr':
+        mat = scipy.sparse.csr_matrix(arr, shape)
+        result = csr_sparse_array(mat, shape, ctx)
+    else:
+        mat = scipy.sparse.coo_matrix(arr, shape)
+        result = coo_sparse_array(mat, shape, ctx)
+    return result
 
 
 class IndexedSlices(object):
-    __slots__ = ["indices", "values", "dense_shape",
-                 "deduplicated", "lazy", "to_dense_flag", "original_indices", "original_values"]
+    __slots__ = ["indices", "values", "dense_shape", "lazy", "dense_arr", ]
 
     def __init__(self, indices=None, values=None, dense_shape=None):
         self.indices = indices
         self.values = values
         self.dense_shape = dense_shape
-        self.deduplicated = False
         self.lazy = False
-        self.to_dense_flag = False
+        self.dense_arr = None
 
     def get_dense_shape(self):
         assert self.dense_shape is not None
@@ -524,83 +695,23 @@ class IndexedSlices(object):
         assert isinstance(self.values, NDArray)
         return self.values.shape
 
-    def update(self, indices, values, dense_shape):
-        self.indices = indices
-        self.values = values
-        if self.dense_shape is not None:
-            assert tuple(self.dense_shape) == tuple(dense_shape)
+    def to_dense(self, stream=None):
+        self.try_init_dense()
+        if is_gpu_ctx(self.indices.ctx):
+            _LIB.DLGpuArraySet(self.dense_arr.handle, ctypes.c_float(
+                0), stream.handle if stream else None)
+            _LIB.IndexedSlices2Dense(self.values.handle, self.indices.handle,
+                                     self.dense_arr.handle, stream.handle if stream else None)
         else:
-            self.dense_shape = dense_shape
+            _LIB.cpu_IndexedSlices2Dense(
+                self.indices.handle, self.values.handle, self.dense_arr.handle)
+        return self.dense_arr
 
-    def deduplicate(self, stream):
-        assert is_gpu_ctx(self.indices.ctx)
-        self.original_indices = self.indices
-        self.original_values = self.values
-        np_indices = self.indices.asnumpy()
-        unique_indices, inverse = np.unique(np_indices, return_inverse=True)
-        indices_on_ctx = array(unique_indices, ctx=self.indices.ctx)
-        self.indices = indices_on_ctx
-        inverse_on_ctx = array(inverse, ctx=self.indices.ctx)
-        new_value_shape = list(unique_indices.shape)
-        new_value_shape.append(self.values.shape[-1])
-        new_values = empty(new_value_shape, ctx=self.values.ctx)
-        _LIB.DLGpuArraySet(new_values.handle, ctypes.c_float(
-            0), stream.handle if stream else None)
-        _LIB.DeduplicateIndexedSlices(
-            self.values.handle, inverse_on_ctx.handle, new_values.handle, stream.handle if stream else None)
-        self.values = new_values
-        self.deduplicated = True
+    def try_init_dense(self):
+        shape = self.get_dense_shape()
+        if self.dense_arr is None:
+            self.dense_arr = empty(
+                shape, ctx=self.values.ctx, dtype=self.values.dtype)
 
-    def cpu_deduplicate(self):
-        assert not is_gpu_ctx(self.indices.ctx)
-        self.original_indices = self.indices
-        self.original_values = self.values
-        np_indices = self.indices.asnumpy()
-        unique_indices, inverse = np.unique(np_indices, return_inverse=True)
-        new_value_shape = list(unique_indices.shape)
-        last_dim = self.values.shape[-1]
-        new_value_shape.append(last_dim)
-        new_values = np.zeros(new_value_shape).astype(np.float32)
-        flatten_ind = np_indices.reshape(-1)
-        flatten = self.values.asnumpy().reshape((-1, last_dim))
-        for i, ind in enumerate(inverse):
-            new_values[ind] += flatten[i]
-        self.values = array(new_values, cpu(0))
-        self.indices = array(unique_indices, cpu(0))
-        self.deduplicated = True
-
-    def free_deduplicate(self):
-        if self.deduplicated:
-            del self.indices
-            del self.values
-            self.indices = self.original_indices
-            self.values = self.original_values
-            self.deduplicated = False
-
-    def to_dense(self, stream):
-        assert is_gpu_ctx(self.indices.ctx)
-        self.deduplicate(stream)
-        np_indices = self.indices.asnumpy()
-        indicies_all = np.arange(self.get_dense_shape()[0])
-        indices_all_on_ctx = array(indicies_all, ctx=self.indices.ctx)
-        new_value_shape = self.get_dense_shape()
-        new_values = empty(new_value_shape, ctx=self.values.ctx)
-        _LIB.DLGpuArraySet(new_values.handle, ctypes.c_float(
-            0), stream.handle if stream else None)
-        _LIB.IndexedSlices2Dense(self.values.handle, self.indices.handle,
-                                 new_values.handle, stream.handle if stream else None)
-        self.free_deduplicate()
-        # to_dense is used after deduplicate, so we shouldn't save original
-        self.original_indices = self.indices
-        self.original_values = self.values
-        self.values = new_values
-        self.indices = indices_all_on_ctx
-        self.to_dense_flag = True
-
-    def free_dense(self):
-        if self.to_dense_flag:
-            del self.indices
-            del self.values
-            self.indices = self.original_indices
-            self.values = self.original_values
-            self.to_dense_flag = False
+    def asnumpy(self):
+        return (self.indices.asnumpy(), self.values.asnumpy())

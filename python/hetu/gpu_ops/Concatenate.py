@@ -26,6 +26,11 @@ class ConcatenateOp(Op):
         assert len(input_shapes) == len(self.inputs)
         deduce_grads = hasattr(self, 'grad_nodes')
         out_shape = list(input_shapes[0])
+        if self.axis < 0:
+            self.axis = self.axis % len(out_shape)
+            if deduce_grads:
+                for n in self.grad_nodes:
+                    n.axis = self.axis
         out_dim = out_shape[self.axis]
         ind = 0
         if deduce_grads:

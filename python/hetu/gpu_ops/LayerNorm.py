@@ -83,6 +83,38 @@ class Layer_NormalizationOp(Op):
         assert input_shapes[0][-1] == input_shapes[1][0] == input_shapes[2][0]
         return input_shapes[0]
 
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == 3
+        status.copy_from(input_statuses[0], deduce_order)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == 3
+        input_statuses[0].copy_from(status, deduce_order)
+        if deduce_order:
+            if status.valid_all():
+                new_order = status.combine_order((0, -1), (1, 0))
+                input_statuses[1].set_order(new_order)
+                input_statuses[2].set_order(new_order)
+        else:
+            if status.valid_state():
+                new_state, new_duplicate, new_partial = status.combine_state(
+                    (0, -1), (1, 0))
+                input_statuses[1].set_state(
+                    new_state, new_duplicate, new_partial)
+                input_statuses[2].set_state(
+                    new_state, new_duplicate, new_partial)
+
+    def deduce_generated_backward_nodes_states(self, input_statuses, status, index):
+        if index <= 0:
+            return status
+        else:
+            from ..context import NodeStatus
+            new_status = NodeStatus(
+                dev_num=status.dev_num, partial_or_node=True)
+            new_status.set_state(*status.combine_state((0, -2), (1, 0)))
+            new_status.set_order(status.combine_order((0, -2), (1, 0)))
+            return new_status
+
 
 class Layer_Normalization_GradientOp(Op):
     def __init__(self, out_gradient, in_node, ln_scale, forward_node, eps, ctx=None):
@@ -149,6 +181,24 @@ class Layer_Normalization_GradientOp(Op):
     def infer_shape(self, input_shapes):
         return None
 
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        assert len(input_statuses) == 3
+        status.copy_from(input_statuses[0], deduce_order)
+        status.copy_from(input_statuses[1], deduce_order)
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        assert len(input_statuses) == 3
+        input_statuses[0].copy_from(status, deduce_order)
+        input_statuses[1].copy_from(status, deduce_order)
+        if deduce_order:
+            if status.valid_all():
+                input_statuses[2].set_order(
+                    status.combine_order((0, -1), (1, 0)))
+        else:
+            if status.valid_state():
+                input_statuses[2].set_state(
+                    *status.combine_state((0, -1), (1, 0)))
+
 
 class Layer_Normalization_Gradient_of_DataOp(Op):
     def __init__(self, ln_gradient, in_arr, ctx=None):
@@ -182,6 +232,19 @@ class Layer_Normalization_Gradient_of_ScaleOp(Op):
     def infer_shape(self, input_shapes):
         return input_shapes[1]
 
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        if deduce_order:
+            if input_statuses[0].valid_all():
+                status.set_order(
+                    input_statuses[0].combine_order((0, -2), (1, 0)))
+        else:
+            if input_statuses[0].valid_state():
+                status.set_state(
+                    *input_statuses[0].combine_state((0, -2), (1, 0)))
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        pass
+
     def pass_grad_array(self, array):
         self.inputs[0].tmp_gradient_ln_scale = array
 
@@ -199,6 +262,19 @@ class Layer_Normalization_Gradient_of_BiasOp(Op):
 
     def infer_shape(self, input_shapes):
         return input_shapes[1]
+
+    def forward_deduce_states(self, input_statuses, status, deduce_order):
+        if deduce_order:
+            if input_statuses[0].valid_all():
+                status.set_order(
+                    input_statuses[0].combine_order((0, -2), (1, 0)))
+        else:
+            if input_statuses[0].valid_state():
+                status.set_state(
+                    *input_statuses[0].combine_state((0, -2), (1, 0)))
+
+    def backward_deduce_states(self, status, input_statuses, deduce_order):
+        pass
 
     def pass_grad_array(self, array):
         self.inputs[0].tmp_gradient_ln_bias = array
