@@ -1,0 +1,10 @@
+torch==2.0.1
+torchvision==0.15.2
+transformers>=4.31.0
+flash_attn>=2.0.8
+h5py>=3.6.0
+attrs>=21.4.0
+yacs>=0.1.8
+six>=1.15.0
+sentenpiece>=0.1.95
+pybind11>=2.9.1

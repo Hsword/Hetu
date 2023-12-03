@@ -1,0 +1,14 @@
+.eggs/
+*.egg-info/
+*.pyc
+MANIFEST
+build/
+dist/
+.pypirc
+
+*/ImageNet
+*.file
+*.nvvp
+log/
+*.o
+*.so
