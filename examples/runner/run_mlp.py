@@ -66,8 +66,8 @@ if __name__ == "__main__":
         'local': ht.gpu(0),
         'lps': [ht.cpu(0), ht.gpu(0), ht.gpu(1), ht.gpu(4), ht.gpu(5)],
         'lar': [ht.gpu(1), ht.gpu(2), ht.gpu(3), ht.gpu(6)],
-        'rps': ['cpu:0', 'daim118:gpu:0', 'daim118:gpu:2', 'daim118:gpu:4', 'daim118:gpu:6', 'daim117:gpu:1', 'daim117:gpu:3'],
-        'rar': ['daim118:gpu:0', 'daim118:gpu:2', 'daim118:gpu:4', 'daim118:gpu:6', 'daim117:gpu:1', 'daim117:gpu:3']
+        'rps': ['cpu:0', 'node1:gpu:0', 'node1:gpu:2', 'node1:gpu:4', 'node1:gpu:6', 'node2:gpu:1', 'node2:gpu:3'],
+        'rar': ['node1:gpu:0', 'node1:gpu:2', 'node1:gpu:4', 'node1:gpu:6', 'node2:gpu:1', 'node2:gpu:3']
     }[args.config]
     with ht.context(ctx):
         print('Building model...')

@@ -173,7 +173,7 @@ The prerequisites for different modules in Hetu is listed as follows:
   
   Hetu: OpenMP(*), CMake(*)
   Hetu (version mkl): MKL 1.6.1
-  Hetu (version gpu): CUDA 10.1(*), CUDNN 7.5(*), CUB 1.12.1(*)
+  Hetu (version gpu): CUDA 10.1(*), CUDNN 7.5(*), CUB 1.12.1(*), Thrust 1.16.0(*)
   Hetu (version all): both
 
   Hetu-AllReduce: MPI 3.1, NCCL 2.8(*), this module needs GPU version
