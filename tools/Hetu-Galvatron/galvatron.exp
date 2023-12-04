@@ -1,0 +1,6 @@
+#!/bin/bash
+path="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+echo "Galvatron root is" $path
+export GalvatronRoot="$path"
+export PATH="$path:$PATH"
+export PYTHONPATH="$path:$PYTHONPATH"
